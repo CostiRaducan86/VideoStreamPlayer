@@ -292,6 +292,7 @@ namespace VideoStreamPlayer
             ImgA.Source = _wbA;
             ImgB.Source = _wbB;
             ImgD.Source = _wbD;
+            AttachZoomPanTransforms();
             _overlayTimerA = MakeOverlayTimer(Pane.A);
             _overlayTimerB = MakeOverlayTimer(Pane.B);
             _overlayTimerD = MakeOverlayTimer(Pane.D);
@@ -702,6 +703,11 @@ namespace VideoStreamPlayer
                     fA = _pausedA ?? _latestA;
                     fB = _pausedB ?? _latestB;
                 }
+
+                // D is rendered from A and *post-processed* B (forced dead pixel + optional dark pixel compensation).
+                // Keep overlay labels consistent with the actual rendered diff.
+                if (fA != null && fB != null)
+                    fB = ApplyBPostProcessing(fA, fB);
                 fBase = fA;
             }
             else
