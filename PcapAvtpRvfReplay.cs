@@ -9,8 +9,8 @@ namespace VideoStreamPlayer;
 
 public static class PcapAvtpRvfReplay
 {
-    private const int W = RvfProtocol.W;
-    private const int H = RvfProtocol.H;
+    private const int W = RvfReassembler.W;
+    private const int H = RvfReassembler.H;
     private const int NumLines = 4;
     private const int PayloadBytes = W * NumLines; // 1280
 
