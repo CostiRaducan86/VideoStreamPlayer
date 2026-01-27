@@ -58,7 +58,8 @@ public static class AvtpRvfParser
     // If successful, returns a RvfChunk-like tuple via out parameter.
     public static bool TryParseRvfUdp(ReadOnlySpan<byte> buf, out RvfChunk chunk)
     {
-        chunk = default;
+        // Initialize to an empty, non-null RvfChunk to satisfy non-nullable out parameter
+        chunk = new RvfChunk(0, 0, 0, 0, false, 0, 0, Array.Empty<byte>());
         // Find 'RVFU' magic within first 64 bytes
         int max = Math.Min(buf.Length - 4, 64);
         int m = -1;
