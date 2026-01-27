@@ -3904,24 +3904,26 @@ namespace VideoStreamPlayer
 
             // Use visual transforms so hover mapping matches overlay mapping exactly.
             Point pOvr = e.GetPosition(ovr);
-            GeneralTransform ovrToImg;
-            try
-            {
-                ovrToImg = ovr.TransformToVisual(img);
-            }
-            catch
-            {
-                return false;
-            }
-
+            // Map mouse position from overlay to image. If the overlay->image transform
+            // can't be resolved (overlay may be temporarily unavailable while running),
+            // fall back to the mouse position relative to the image directly.
             Point pImg;
             try
             {
+                var ovrToImg = ovr.TransformToVisual(img);
                 pImg = ovrToImg.Transform(pOvr);
             }
             catch
             {
-                return false;
+                // Fallback: use mouse position relative to image control.
+                try
+                {
+                    pImg = e.GetPosition(img);
+                }
+                catch
+                {
+                    return false;
+                }
             }
 
             double lx = pImg.X;
