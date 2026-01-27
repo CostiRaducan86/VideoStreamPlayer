@@ -15,16 +15,6 @@ using System.Threading.Tasks;
 using System.IO;
 namespace VideoStreamPlayer;
 
-public sealed record RvfChunk(
-    ushort Width,
-    ushort Height,
-    ushort LineNumber1Based,
-    byte NumLines,
-    bool EndFrame,
-    uint FrameId,
-    uint Seq,
-    byte[] Payload);
-
 public sealed class RvfUdpReceiver : IDisposable
 {
     private readonly UdpClient _udp;
