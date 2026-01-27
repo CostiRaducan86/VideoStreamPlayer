@@ -13,6 +13,7 @@ public static class AvtpRvfParser
     private const int H = 80;
     private const int NumLines = 4;
     private const int PayloadBytes = W * NumLines; // 1280
+    private const int RvfHeaderSize = 21;
 
     public static bool TryParseAvtpRvfEthernet(ReadOnlySpan<byte> frame, out int line1, out bool endFrame, out byte[] payload)
     {
@@ -73,7 +74,7 @@ public static class AvtpRvfParser
         if (m < 0) return false;
 
         int o = m + 4;
-        if (buf.Length < o + (RvfProtocol.HeaderSize - 4)) return false;
+        if (buf.Length < o + (RvfHeaderSize - 4)) return false;
 
         byte ver = buf[o++];
         ushort w = BinaryPrimitives.ReadUInt16LittleEndian(buf.Slice(o, 2)); o += 2;

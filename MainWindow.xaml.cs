@@ -2258,7 +2258,7 @@ namespace VideoStreamPlayer
                 // Until the first frame arrives, show explicit waiting message.
                 LblStatus.Text =
                     $"Waiting for signal... (0.0 fps) (Mode=AVTP Live). Ethernet/AVTP capture best-effort" +
-                    (_avtpLiveUdpEnabled ? $"; UDP/RVFU on 0.0.0.0:{RvfProtocol.DefaultPort}" : "") +
+                    (_avtpLiveUdpEnabled ? $"; UDP/RVFU on 0.0.0.0:50070" : "") +
                     $". (log: {GetUdpLogPath()})";
 
                 _wasWaitingForSignal = true;
@@ -2335,9 +2335,9 @@ namespace VideoStreamPlayer
                     if (_udpCts == null)
                     {
                         _udpCts = new CancellationTokenSource();
-                        _udp = new RvfUdpReceiver(RvfProtocol.DefaultPort);
+                        _udp = new RvfUdpReceiver(50070);
 
-                        AppendUdpLog($"UDP start on 0.0.0.0:{RvfProtocol.DefaultPort}");
+                        AppendUdpLog($"UDP start on 0.0.0.0:50070");
 
                         _udp.OnChunk += c =>
                         {
