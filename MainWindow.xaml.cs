@@ -1944,6 +1944,7 @@ namespace VideoStreamPlayer
 
             if (BtnStart != null) BtnStart.Content = "Start";
             if (LblRunInfoA != null) LblRunInfoA.Text = "Paused";
+            if (LblRunInfoB != null) LblRunInfoB.Text = "Paused";
             LblStatus.Text = "Paused.";
 
             UpdateOverlaysAll();
@@ -1966,6 +1967,13 @@ namespace VideoStreamPlayer
             {
                 double shownFps = GetShownFps(avtpInFps: _avtpInFpsEma);
                 LblRunInfoA.Text = shownFps > 0 ? $"Running @: {shownFps:F1} fps" : "Running";
+            }
+            if (LblRunInfoB != null)
+            {
+                if (_bFpsEma <= 0.0)
+                    LblRunInfoB.Text = "Running";
+                else
+                    LblRunInfoB.Text = $"Running @: {_bFpsEma:F1} fps";
             }
             LblStatus.Text = _runningStatusText ?? "Running.";
 
