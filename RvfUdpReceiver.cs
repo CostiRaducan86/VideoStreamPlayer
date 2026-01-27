@@ -51,17 +51,7 @@ public sealed class RvfUdpReceiver : IDisposable
             catch { }
         }
 
-        static int FindMagic(byte[] buf)
-        {
-            // search for "RVFU" in the first 64 bytes (tolerant to padding)
-            int max = Math.Min(buf.Length - 4, 64);
-            for (int i = 0; i <= max; i++)
-            {
-                if (buf[i] == (byte)'R' && buf[i + 1] == (byte)'V' && buf[i + 2] == (byte)'F' && buf[i + 3] == (byte)'U')
-                    return i;
-            }
-            return -1;
-        }
+        // NOTE: local FindMagic was removed; parsing is delegated to AvtpRvfParser.TryParseRvfUdp
 
         while (!ct.IsCancellationRequested)
         {
