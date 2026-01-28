@@ -102,7 +102,7 @@ namespace VideoStreamPlayer
         // Live AVTP capture settings (Ethernet via SharpPcap)
         private bool _avtpLiveEnabled = true;
         private string? _avtpLiveDeviceHint;
-        private bool _avtpLiveUdpEnabled = false;
+        private bool _avtpLiveUdpEnabled = true;
 
         private ModeOfOperation _modeOfOperation = ModeOfOperation.AvtpLiveMonitor;
 
@@ -1087,7 +1087,7 @@ namespace VideoStreamPlayer
             };
 
             ShowIdleGradient();
-            LblStatus.Text = $"Ready. Load an image (PGM/BMP/PNG; BMP/PNG are converted to Gray8 u8; will crop top-left to 320×80) and press Start to begin rendering.";
+            LblStatus.Text = $"Ready. Load an image (PGM/BMP/PNG; BMP/PNG are converted to Gray8 u8; will crop top-left to 320×80) and press Start to begin rendering. UDP listens on {IPAddress.Any}:{RvfProtocol.DefaultPort} when started.";
 
             LoadUiSettings();
 
@@ -1944,6 +1944,7 @@ namespace VideoStreamPlayer
 
             if (BtnStart != null) BtnStart.Content = "Start";
             if (LblRunInfoA != null) LblRunInfoA.Text = "Paused";
+            if (LblRunInfoB != null) LblRunInfoB.Text = "Paused";
             LblStatus.Text = "Paused.";
 
             UpdateOverlaysAll();
@@ -1966,6 +1967,13 @@ namespace VideoStreamPlayer
             {
                 double shownFps = GetShownFps(avtpInFps: _avtpInFpsEma);
                 LblRunInfoA.Text = shownFps > 0 ? $"Running @: {shownFps:F1} fps" : "Running";
+            }
+            if (LblRunInfoB != null)
+            {
+                if (_bFpsEma <= 0.0)
+                    LblRunInfoB.Text = "Running";
+                else
+                    LblRunInfoB.Text = $"Running @: {_bFpsEma:F1} fps";
             }
             LblStatus.Text = _runningStatusText ?? "Running.";
 
@@ -3324,7 +3332,9 @@ namespace VideoStreamPlayer
                 if (!_wasWaitingForSignal && LblStatus != null)
                 {
                     LblStatus.Text =
-                        $"Waiting for signal... (0.0 fps) (Mode=AVTP Live). Ethernet/AVTP capture best-effort.";
+                        $"Waiting for signal... (0.0 fps) (Mode=AVTP Live). Ethernet/AVTP capture best-effort" +
+                        (_avtpLiveUdpEnabled ? $"; UDP/RVFU on 0.0.0.0:{RvfProtocol.DefaultPort}" : "") +
+                        $". (log: {GetUdpLogPath()})";
                     _runningStatusText = LblStatus.Text;
                 }
                 _wasWaitingForSignal = true;
