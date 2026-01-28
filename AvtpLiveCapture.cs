@@ -181,8 +181,8 @@ public sealed class AvtpLiveCapture : IDisposable
                 return;
 
             var chunk = new RvfChunk(
-                Width: (ushort)RvfProtocol.W,
-                Height: (ushort)RvfProtocol.H,
+                Width: (ushort)RvfReassembler.W,
+                Height: (ushort)RvfReassembler.H,
                 LineNumber1Based: (ushort)line1,
                 NumLines: 4,
                 EndFrame: endFrame,
