@@ -42,6 +42,14 @@ namespace VilsSharpX
         private readonly byte[] _streamId = new byte[8];
         private byte _seq;
 
+        // Hard rate limiter: max 100fps (10ms between frames).
+        // Matches Avtp_new.can's proven 10ms cadence.
+        private const double MinFrameIntervalMs = 10.0;
+        private readonly Stopwatch _txPaceSw = Stopwatch.StartNew();
+        private double _lastTxMs = -MinFrameIntervalMs; // allow first send immediately
+        private long _txFramesSent;
+        private long _txFramesDropped;
+
         public AvtpRvfTransmitter(
             string npfDeviceName,
             string srcMac = "3C:CE:15:00:00:19",
@@ -87,11 +95,25 @@ namespace VilsSharpX
             try { _dev?.Close(); } catch { /* ignore */ }
         }
 
+        /// <summary>Total frames actually sent (for diagnostics).</summary>
+        public long TxFramesSent => Volatile.Read(ref _txFramesSent);
+        /// <summary>Total frames dropped by rate limiter (for diagnostics).</summary>
+        public long TxFramesDropped => Volatile.Read(ref _txFramesDropped);
+
         public Task SendFrame320x80Async(byte[] gray8_320x80, CancellationToken ct = default)
         {
             if (gray8_320x80 == null) throw new ArgumentNullException(nameof(gray8_320x80));
             if (gray8_320x80.Length != W * H)
                 throw new ArgumentException($"Expected {W * H} bytes (320x80 Gray8). Got {gray8_320x80.Length}.");
+
+            // --- Hard rate limiter: enforce max 100fps regardless of caller ---
+            double nowMs = _txPaceSw.Elapsed.TotalMilliseconds;
+            if ((nowMs - _lastTxMs) < MinFrameIntervalMs)
+            {
+                Interlocked.Increment(ref _txFramesDropped);
+                return Task.CompletedTask; // skip this frame
+            }
+            _lastTxMs = nowMs;
 
             int headerCounter = 1; // 1,5,9,...,77 then wrap (CAPL style)
 
@@ -102,17 +124,13 @@ namespace VilsSharpX
                 bool endFrame = (p == PacketsPerFrame - 1);
                 var ethFrame = BuildOnePacket(gray8_320x80, headerCounter, endFrame);
 
-                // THIS is the key: LibPcapLiveDevice supports SendPacket(byte[])
                 _dev.SendPacket(ethFrame);
 
                 headerCounter += 4;
                 if (headerCounter == 0x51) headerCounter = 1;
-
-                // All 20 packets sent in a tight loop — no inter-packet delay.
-                // Matches the CAPL Avtp_new.can pattern: one burst per frame,
-                // then the caller waits for the frame period.
             }
 
+            Interlocked.Increment(ref _txFramesSent);
             return Task.CompletedTask;
         }
 
