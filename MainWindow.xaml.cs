@@ -1552,8 +1552,12 @@ namespace VilsSharpX
                 {
                     // Real ETH LVDS: freeze the actual B from Ethernet and use
                     // the sync-matched A for the diff so D reflects real ECU differences.
+                    // Also display the matched A in pane A so all three panes are
+                    // temporally consistent (A leads B by ECU round-trip latency;
+                    // without this, the bar in A would be shifted right vs B).
                     _pausedB = _latestB;
                     _pausedMatchedA = _matchedAForDiff ?? _pausedA;
+                    _pausedA = _pausedMatchedA;
                     _pausedD = AbsDiff(_pausedMatchedA, _pausedB);
                 }
                 else if (_modeOfOperation == ModeOfOperation.AvtpLiveMonitor)
@@ -1565,9 +1569,18 @@ namespace VilsSharpX
                 }
                 else
                 {
+                    // PlayerFromFiles: prefer sync-matched A when real ETH B is active
                     _pausedB = _latestB ?? _pausedA;
-                    _pausedMatchedA = _pausedA;
-                    _pausedD = _latestD ?? AbsDiff(_pausedA, _pausedB);
+                    if (ethActive && _latestB != null && _matchedAForDiff != null)
+                    {
+                        _pausedMatchedA = _matchedAForDiff;
+                        _pausedA = _pausedMatchedA;
+                    }
+                    else
+                    {
+                        _pausedMatchedA = _pausedA;
+                    }
+                    _pausedD = _latestD ?? AbsDiff(_pausedMatchedA, _pausedB);
                 }
             }
 
