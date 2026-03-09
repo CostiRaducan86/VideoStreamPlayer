@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Buffers.Binary;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
@@ -73,6 +74,10 @@ public static class PcapAvtpRvfReplay
             log?.Invoke($"PCAP linktype={network} (expected Ethernet=1). Will still try.");
 
         long? lastTsUs = null;
+        // Absolute-timeline pacing: anchor wall-clock at first endFrame,
+        // sleep only the remaining time after subtracting processing overhead.
+        long? anchorPcapTsUs = null;
+        Stopwatch? replayTimer = null;
         uint seq = 0;
         uint frameId = 0;
         int packets = 0;
@@ -94,8 +99,6 @@ public static class PcapAvtpRvfReplay
                 ? ((long)tsSec * 1_000_000L + (tsSub / 1000L))
                 : ((long)tsSec * 1_000_000L + tsSub);
 
-            pauseGate?.Wait(ct);
-            await DelayByTimestampAsync(lastTsUs, tsUs, speed, ct).ConfigureAwait(false);
             lastTsUs = tsUs;
 
             if (AvtpRvfParser.TryParseAvtpRvfEthernet(data, out var line1, out var endFrame, out var payload))
@@ -103,7 +106,25 @@ public static class PcapAvtpRvfReplay
                 avtpMatches++;
                 onChunk(new RvfChunk((ushort)W, (ushort)H, (ushort)line1, (byte)NumLines, endFrame, frameId, seq++, payload));
                 chunks++;
-                if (endFrame) frameId++;
+                if (endFrame)
+                {
+                    frameId++;
+                    pauseGate?.Wait(ct);
+                    // Absolute-timeline pacing
+                    if (anchorPcapTsUs == null)
+                    {
+                        anchorPcapTsUs = tsUs;
+                        replayTimer = Stopwatch.StartNew();
+                    }
+                    else
+                    {
+                        long targetElapsedUs = (long)((tsUs - anchorPcapTsUs.Value) / speed);
+                        long actualElapsedUs = replayTimer!.ElapsedTicks * 1_000_000L / Stopwatch.Frequency;
+                        long remainUs = targetElapsedUs - actualElapsedUs;
+                        if (remainUs > 100)
+                            await PreciseDelayAsync(remainUs, ct).ConfigureAwait(false);
+                    }
+                }
             }
         }
 
@@ -137,7 +158,8 @@ public static class PcapAvtpRvfReplay
         // Endianness is per-section; we support little endian sections.
 
         var ifaces = new Dictionary<uint, (ushort linkType, double tsResSeconds)>();
-        long? lastTsUs = null;
+        long? anchorPcapTsUs = null;
+        Stopwatch? replayTimer = null;
         uint seq = 0;
         uint frameId = 0;
         int packets = 0;
@@ -232,16 +254,29 @@ public static class PcapAvtpRvfReplay
                         ulong ts = ((ulong)tsHigh << 32) | tsLow;
                         long tsUs = (long)(ts * tsRes * 1_000_000.0);
 
-                        pauseGate?.Wait(ct);
-                        await DelayByTimestampAsync(lastTsUs, tsUs, speed, ct).ConfigureAwait(false);
-                        lastTsUs = tsUs;
-
                         if (AvtpRvfParser.TryParseAvtpRvfEthernet(packet, out var line1, out var endFrame, out var payload))
                         {
                             avtpMatches++;
                             onChunk(new RvfChunk((ushort)W, (ushort)H, (ushort)line1, (byte)NumLines, endFrame, frameId, seq++, payload));
                             chunks++;
-                            if (endFrame) frameId++;
+                            if (endFrame)
+                            {
+                                frameId++;
+                                pauseGate?.Wait(ct);
+                                if (anchorPcapTsUs == null)
+                                {
+                                    anchorPcapTsUs = tsUs;
+                                    replayTimer = Stopwatch.StartNew();
+                                }
+                                else
+                                {
+                                    long targetElapsedUs = (long)((tsUs - anchorPcapTsUs.Value) / speed);
+                                    long actualElapsedUs = replayTimer!.ElapsedTicks * 1_000_000L / Stopwatch.Frequency;
+                                    long remainUs = targetElapsedUs - actualElapsedUs;
+                                    if (remainUs > 100)
+                                        await PreciseDelayAsync(remainUs, ct).ConfigureAwait(false);
+                                }
+                            }
                         }
                         break;
                     }
@@ -414,16 +449,30 @@ public static class PcapAvtpRvfReplay
         }
     }
 
-    private static async Task DelayByTimestampAsync(long? lastTsUs, long tsUs, double speed, CancellationToken ct)
+    /// <summary>
+    /// Precise delay for a given number of microseconds.
+    /// Uses SpinWait for sub-16ms and Task.Delay for longer durations.
+    /// </summary>
+    private static async Task PreciseDelayAsync(long delayUs, CancellationToken ct)
     {
-        if (!lastTsUs.HasValue) return;
-        long deltaUs = tsUs - lastTsUs.Value;
-        if (deltaUs <= 0) return;
+        double ms = delayUs / 1000.0;
+        if (ms > 250) ms = 250;
 
-        double ms = (deltaUs / 1000.0) / speed;
-        if (ms <= 0.1) return;
-        if (ms > 250) ms = 250; // avoid huge pauses on sparse captures
-        await Task.Delay(TimeSpan.FromMilliseconds(ms), ct).ConfigureAwait(false);
+        if (ms < 16.0)
+        {
+            long ticks = (long)(ms * Stopwatch.Frequency / 1000.0);
+            long deadline = Stopwatch.GetTimestamp() + ticks;
+            var sw = new SpinWait();
+            while (Stopwatch.GetTimestamp() < deadline)
+            {
+                ct.ThrowIfCancellationRequested();
+                sw.SpinOnce();
+            }
+        }
+        else
+        {
+            await Task.Delay(TimeSpan.FromMilliseconds(ms), ct).ConfigureAwait(false);
+        }
     }
 
     private static void ReadExactly(Stream s, Span<byte> buf)
