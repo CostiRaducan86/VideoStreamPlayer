@@ -996,6 +996,17 @@ namespace VilsSharpX
             StopAll();
             ReinitializeForNewResolution();
 
+            // Send device-mode command to ECU firmware via Ethernet
+            try
+            {
+                string? txDev = GetTxPcapDeviceNameOrNull();
+                if (!string.IsNullOrWhiteSpace(txDev))
+                    DeviceModeCommand.SendDeviceMode(txDev, _currentDeviceType, AppendDiagLog);
+                else
+                    AppendDiagLog("[cmd] No NIC selected — device-mode command not sent");
+            }
+            catch (Exception ex) { AppendDiagLog($"[cmd] {ex.Message}"); }
+
             LblStatus.Text = $"Device Type: {_currentDeviceType.GetDisplayName()} ({GetCurrentWidth()}x{GetCurrentHeight()}). Load a file or start live capture.";
         }
 

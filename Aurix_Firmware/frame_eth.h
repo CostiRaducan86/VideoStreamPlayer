@@ -41,6 +41,8 @@
 #define FE_ETHERTYPE              0x88B5u     /* IEEE 802 local experimental */
 #define FE_MAGIC_NICHIA           0x4E49u     /* "NI" */
 #define FE_MAGIC_OSRAM            0x4F53u     /* "OS" */
+#define FE_MAGIC_COMMAND          0x434Du     /* "CM" — command packet from PC */
+#define FE_CMD_SET_DEVICE         0x01u       /* Command: set device mode */
 #define FE_HDR_LEN                18u
 #define FE_MTU                    1500u
 #define FE_MAX_PAYLOAD            (FE_MTU - FE_HDR_LEN)  /* 1482 */
@@ -162,6 +164,15 @@ boolean frame_eth_send_pending(void);
  * Reset frame assembly state (for device mode switch).
  */
 void frame_eth_reset_frame_state(void);
+
+/**
+ * Poll for incoming Ethernet command packets.
+ * Drains ALL RX buffers to prevent DMA descriptor exhaustion.
+ * Recognises magic "CM" (0x434D) on ethertype 0x88B5;
+ * currently handles CMD_SET_DEVICE (0x01) → device_mode_set().
+ * Call from the main loop.
+ */
+void frame_eth_poll_rx(void);
 
 /**
  * Get a pointer to the current Osram assembly buffer for zero-copy writes.
