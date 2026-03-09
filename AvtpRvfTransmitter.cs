@@ -24,11 +24,13 @@ namespace VilsSharpX
         private const int AvtpPayloadLen = 1312;  // bytes 0..1311
         private const int FrameLen = EthernetHeaderLen + VlanTagLen + AvtpPayloadLen; // 1330
 
-        // TX pacing (matches CANoe Avtp_gateway.can: burstPerTick=2, tick=1ms)
-        private const int BurstPerTick = 2;           // packets per burst before pacing delay
-        private const int PaceDelayUs = 500;          // µs between bursts (~1ms per 2 packets)
-        private static readonly long PaceDelayTicks =
-            (long)PaceDelayUs * Stopwatch.Frequency / 1_000_000;
+        // TX pacing
+        // CAPL Avtp_new.can sends ALL 20 packets in a single tight loop (no delay).
+        // We mirror that: burst all 20 packets as fast as possible so the gateway
+        // receives a complete frame before its 1ms timer fires again, avoiding
+        // partial-frame reads from rxImg.
+        // The old BurstPerTick=2 / PaceDelayUs=500 spread packets over ~5ms,
+        // giving the gateway timer ≈5 chances to read partially-updated rxImg.
 
         private readonly LibPcapLiveDevice _dev;
 
@@ -106,16 +108,9 @@ namespace VilsSharpX
                 headerCounter += 4;
                 if (headerCounter == 0x51) headerCounter = 1;
 
-                // Inter-packet pacing (CANoe gateway style):
-                // Send BurstPerTick packets, then spin-wait ~PaceDelayUs µs.
-                // 20 packets / 2 per burst = 10 bursts × 500µs = ~5ms per frame.
-                if ((p % BurstPerTick) == (BurstPerTick - 1) && !endFrame)
-                {
-                    long deadline = Stopwatch.GetTimestamp() + PaceDelayTicks;
-                    SpinWait sw = default;
-                    while (Stopwatch.GetTimestamp() < deadline)
-                        sw.SpinOnce();
-                }
+                // All 20 packets sent in a tight loop — no inter-packet delay.
+                // Matches the CAPL Avtp_new.can pattern: one burst per frame,
+                // then the caller waits for the frame period.
             }
 
             return Task.CompletedTask;

@@ -2164,6 +2164,7 @@ namespace VilsSharpX
             var period = TimeSpan.FromSeconds(1.0 / Math.Max(1, fps));
             var sw = Stopwatch.StartNew();
             var next = sw.Elapsed;
+            int lastPcapGen = _liveCapture.FrameGeneration; // track PCAP frame changes
         
             while (!ct.IsCancellationRequested)
             {
@@ -2176,7 +2177,26 @@ namespace VilsSharpX
                 var aBytes = GetASourceBytes();
                 var a = new Frame(_currentWidth, _currentHeight, aBytes, DateTime.UtcNow);
                 _playback.IncrementCountA();
-                PushSyncFrame(a);
+
+                // For PCAP sources: only push to sync ring when the PCAP replay has
+                // produced a genuinely NEW frame. Duplicate pushes (same frame data at
+                // 100fps while PCAP produces ~63fps) pollute the ring and degrade the
+                // NCC-based A↔B matching precision during animation.
+                bool isPcap = (_lastLoaded == LoadedSource.Pcap);
+                bool isNewPcapFrame;
+                if (isPcap)
+                {
+                    int gen = _liveCapture.FrameGeneration;
+                    isNewPcapFrame = (gen != lastPcapGen);
+                    if (isNewPcapFrame) lastPcapGen = gen;
+                }
+                else
+                {
+                    isNewPcapFrame = true; // non-PCAP: always treat as new
+                }
+
+                if (isNewPcapFrame)
+                    PushSyncFrame(a);
         
                 // B: prefer real Ethernet LVDS when available; otherwise simulated LVDS (A + delta)
                 Frame b;
@@ -2222,7 +2242,22 @@ namespace VilsSharpX
                 {
                     try
                     {
-                        await _txManager.SendFrameAsync(a.Data, ct);
+                        if (isPcap)
+                        {
+                            // PCAP: use full 320×80 frame directly (no crop→repad).
+                            // Only TX when a new frame arrived — avoids sending
+                            // duplicate data that can cause gateway partial-frame reads.
+                            if (isNewPcapFrame)
+                            {
+                                var txFrame = _liveCapture.AvtpTxFrame;
+                                if (txFrame != null)
+                                    await _txManager.SendFrameAsync(txFrame, ct);
+                            }
+                        }
+                        else
+                        {
+                            await _txManager.SendFrameAsync(a.Data, ct);
+                        }
                     }
                     catch (OperationCanceledException) { break; }
                 }

@@ -30,9 +30,17 @@ namespace VilsSharpX
     private readonly int _displayHeight;
 
     // AVTP frame buffer – always at display resolution (cropped from 320×80 if needed)
+    // Uses copy-on-publish: OnRvfFrameReady allocates a NEW array each time and
+    // atomically publishes it via Volatile.Write.  The consumer (AvtpFrame property)
+    // reads a stable, immutable reference — no lock needed.
     private byte[] _avtpFrame;
     private bool _hasAvtpFrame;
     private DateTime _lastAvtpFrameUtc = DateTime.MinValue;
+
+    // Full 320×80 AVTP frame for TX — never cropped, avoids crop→repad round-trip.
+    // Published atomically (copy-on-publish) alongside _avtpFrame.
+    private byte[] _avtpTxFrame;
+    private int _frameGeneration;  // incremented on each new frame
 
     // Signal loss detection
     private DateTime _suppressLiveUntilUtc = DateTime.MinValue;
@@ -48,6 +56,7 @@ namespace VilsSharpX
         // AVTP protocol always uses 320×80 regardless of display device.
         // The reassembler must match the chunk dimensions produced by AvtpLiveCapture.
         _avtpFrame = new byte[width * height];
+        _avtpTxFrame = new byte[RvfReassembler.W * RvfReassembler.H];
         _rvf = new RvfReassembler(RvfReassembler.W, RvfReassembler.H);
         _liveSignalLostTimeout = TimeSpan.FromSeconds(signalLostTimeoutSec);
         _log = log ?? (_ => { });
@@ -61,8 +70,12 @@ namespace VilsSharpX
 
         // Properties
         public RvfReassembler Reassembler => _rvf;
-        public byte[] AvtpFrame => _avtpFrame;
+        public byte[] AvtpFrame => Volatile.Read(ref _avtpFrame);
         public bool HasAvtpFrame => Volatile.Read(ref _hasAvtpFrame);
+        /// <summary>Full 320×80 AVTP frame for TX (never cropped). Avoids crop→repad round-trip.</summary>
+        public byte[] AvtpTxFrame => Volatile.Read(ref _avtpTxFrame);
+        /// <summary>Incremented when a genuinely new frame arrives from PCAP/live. Used to skip duplicate TX.</summary>
+        public int FrameGeneration => Volatile.Read(ref _frameGeneration);
         public DateTime LastAvtpFrameUtc => _lastAvtpFrameUtc;
         public string LastRvfSrcLabel { get => _lastRvfSrcLabel; set => _lastRvfSrcLabel = value; }
         public Feed ActiveFeed => (Feed)Volatile.Read(ref _activeFeed);
@@ -276,13 +289,23 @@ namespace VilsSharpX
                 Buffer.BlockCopy(frame, 0, displayFrame, 0, copyLen);
             }
 
-            // Store the cropped frame in our buffer
-            if (displayFrame.Length <= _avtpFrame.Length)
-            {
-                Buffer.BlockCopy(displayFrame, 0, _avtpFrame, 0, displayFrame.Length);
-                Volatile.Write(ref _hasAvtpFrame, true);
-                _lastAvtpFrameUtc = DateTime.UtcNow;
-            }
+            // Publish a NEW array atomically (copy-on-publish).
+            // The consumer reads via Volatile.Read(ref _avtpFrame) and gets an
+            // immutable, fully-written buffer — no torn frames possible.
+            int len = _displayWidth * _displayHeight;
+            var newBuf = new byte[len];
+            int copyBytes = Math.Min(len, displayFrame.Length);
+            Buffer.BlockCopy(displayFrame, 0, newBuf, 0, copyBytes);
+            Volatile.Write(ref _avtpFrame, newBuf);
+            Volatile.Write(ref _hasAvtpFrame, true);
+            _lastAvtpFrameUtc = DateTime.UtcNow;
+
+            // Publish the full 320×80 frame for TX (avoids crop→repad)
+            int avtpLen = RvfReassembler.W * RvfReassembler.H;
+            var txBuf = new byte[avtpLen];
+            Buffer.BlockCopy(frame, 0, txBuf, 0, Math.Min(frame.Length, avtpLen));
+            Volatile.Write(ref _avtpTxFrame, txBuf);
+            Interlocked.Increment(ref _frameGeneration);
 
             // Forward to subscribers (at display resolution)
             OnFrameReady?.Invoke(displayFrame, meta);
