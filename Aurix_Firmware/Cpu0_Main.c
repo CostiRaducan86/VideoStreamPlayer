@@ -109,16 +109,22 @@ void core0_main(void)
     IfxCpu_enableInterrupts();
 
     /* ── Device mode selection ──
+     * Change to FE_DEVICE_NICHIA for Nichia (12.5 Mbaud, 8O1, 256×64).
      * Change to FE_DEVICE_OSRAM for Osram (20 Mbaud, 8O1, 320×80).
      * This configures ASCLIN9, parsers, and GETH all in one call.
      */
-    device_mode_init(FE_DEVICE_OSRAM);
+    device_mode_init(FE_DEVICE_NICHIA);
 
     /* FPS */
     fps_init();
 
     while (1)
     {
+        /* Poll for incoming command packets (device mode switch from PC).
+         * Must run every iteration to drain all RX buffers and prevent
+         * DMA descriptor ring exhaustion. */
+        frame_eth_poll_rx();
+
         /* Drain ALL completed DMA buffers before sending Ethernet.
          * This prevents data loss when frame_eth_send_pending() takes
          * longer than the DMA buffer fill time (~1.28 ms at 20 Mbaud). */

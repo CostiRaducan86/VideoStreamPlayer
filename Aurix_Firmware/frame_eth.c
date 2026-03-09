@@ -206,15 +206,15 @@ void frame_eth_init(FrameEthDevice device)
     IfxGeth_Eth_initModule(&s_geth, &config);
     g_feStats.initStep = 4;
 
-    /* Enable transmitter only — we use GETH for TX exclusively.
-     * DO NOT start receivers: we never read Ethernet frames, and the
-     * RX DMA ring would be exhausted by broadcast traffic (ARP, mDNS)
-     * without being recycled, leading to DMA abnormal state → bus error. */
+    /* Enable transmitter */
     IfxGeth_Eth_startTransmitters(&s_geth, 1);
     g_feStats.initStep = 5;
 
-    /* RX DMA left disabled (descriptors are configured by initModule
-     * but the DMA engine never runs). */
+    /* Enable receiver for command packets from PC (ethertype 0x88B5, magic "CM").
+     * We MUST poll frame_eth_poll_rx() in every main-loop iteration to drain
+     * all incoming buffers (including broadcast ARP/mDNS) and prevent the 8-deep
+     * RX DMA descriptor ring from being exhausted. */
+    IfxGeth_Eth_startReceivers(&s_geth, 1);
     g_feStats.initStep = 6;
 
     /* Brief delay (~50 ms) for PHY power-up before MDIO scan */
@@ -547,4 +547,51 @@ boolean frame_eth_send_pending(void)
 
     g_feStats.framesSent++;
     return TRUE;
+}
+
+/* ==================== Ethernet RX — command processing ==================== */
+
+#include "device_mode.h"   /* device_mode_set() */
+
+void frame_eth_poll_rx(void)
+{
+    /* Drain ALL available RX buffers.  Every buffer MUST be freed even if the
+     * frame is not for us, otherwise the 8-deep descriptor ring fills up and
+     * the DMA enters an abnormal state (bus error trap). */
+    while (IfxGeth_Eth_isRxDataAvailable(&s_geth, IfxGeth_RxDmaChannel_0))
+    {
+        uint8 *pRxBuf = (uint8 *)IfxGeth_Eth_getReceiveBuffer(&s_geth, IfxGeth_RxDmaChannel_0);
+        if (pRxBuf == NULL_PTR)
+        {
+            /* Shouldn't happen when isRxDataAvailable returned TRUE, but be safe */
+            IfxGeth_Eth_freeReceiveBuffer(&s_geth, IfxGeth_RxDmaChannel_0);
+            continue;
+        }
+
+        /* Ethernet header: [12..13] = EtherType */
+        uint16 etherType = ((uint16)pRxBuf[12] << 8) | pRxBuf[13];
+
+        if (etherType == FE_ETHERTYPE)
+        {
+            /* Protocol header: [14..15] = Magic */
+            uint16 magic = ((uint16)pRxBuf[14] << 8) | pRxBuf[15];
+
+            if (magic == FE_MAGIC_COMMAND)
+            {
+                uint8 cmdId      = pRxBuf[16];
+                uint8 cmdPayload = pRxBuf[17];
+
+                if (cmdId == FE_CMD_SET_DEVICE)
+                {
+                    FrameEthDevice newDev = (cmdPayload == (uint8)FE_DEVICE_OSRAM)
+                                          ? FE_DEVICE_OSRAM
+                                          : FE_DEVICE_NICHIA;
+                    device_mode_set(newDev);
+                }
+            }
+        }
+
+        /* Always free — even for unrecognised frames */
+        IfxGeth_Eth_freeReceiveBuffer(&s_geth, IfxGeth_RxDmaChannel_0);
+    }
 }
