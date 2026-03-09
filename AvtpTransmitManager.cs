@@ -26,6 +26,8 @@ public sealed class AvtpTransmitManager : IDisposable
 
     private int _txErrOnce;
     private int _txNoDevOnce;
+    private long _txLogCounter;
+    private const int TxLogInterval = 500; // log every 500 frames (~5 seconds at 100fps)
 
     public AvtpTransmitManager(int width, int height, Action<string> log)
     {
@@ -93,6 +95,16 @@ public sealed class AvtpTransmitManager : IDisposable
             // Pad frame to AVTP protocol size if needed (e.g., Nichia 256×64 -> 320×80)
             byte[] txFrame = PadToAvtpSize(frameData);
             await _tx.SendFrame320x80Async(txFrame, ct);
+
+            // Periodic diagnostic: log actual TX rate every ~5 seconds
+            long count = Interlocked.Increment(ref _txLogCounter);
+            if (count % TxLogInterval == 0)
+            {
+                long sent = _tx.TxFramesSent;
+                long dropped = _tx.TxFramesDropped;
+                _log($"[avtp-tx] rate-limiter: sent={sent} dropped={dropped} (max 100fps enforced)");
+            }
+
             return true;
         }
         catch (OperationCanceledException)

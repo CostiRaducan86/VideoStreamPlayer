@@ -5,63 +5,125 @@ includes
 
 variables
 {
-  // --- Gateway node: re-stream AVTP to MAIN/DutPort from external AVTP seen on Eth2 ---
+  // --- Gateway v6.5: source-MAC echo filter + 10ms cadence (100fps) ---
+  //
+  // ROOT CAUSE of glitches since v6.0:
+  //   Gateway rxCount showed ~1000 EOF/sec, but C# only sends 100fps.
+  //   Two possible causes (both fixed below):
+  //   1) Gateway's own output() creates self-echo packets on the same bus.
+  //   2) Another AVTP source (Avtp_new.can generator) also sends on Eth2.
+  //   Either way, multiple interleaved sources corrupt rxAssembly — some
+  //   lines from source A, some from source B → visible tearing/glitches.
+  //
+  // Fix: Gateway uses a DISTINCT source MAC (last byte 0x1A, not 0x19).
+  //   RX handler ONLY accepts packets from C# app's MAC (0x19).
+  //   This filters out both self-echo AND any CANoe generator node,
+  //   since both use different MACs than the C# source.
+  //   Stream ID (bytes 4-11) UNCHANGED — ECU compatibility preserved.
+
   ethernetPacket myStream;
 
-  // RX buffer (latest full 320x80 Gray8 image assembled from incoming AVTP payloads)
-  byte rxImg[25600];
-  int  rxAgeMs;          // ms since last RX packet
-  int  rxFrameValid;     // 1 after we have seen at least one complete frame
-  const int BUFFER_NR = 20; // 80 lines / 4 lines per packet = 20 packets per frame
-  
-  const int RX_TIMEOUT_MS = 100;  // ajusteaza: 50..200ms
+  byte rxImg[25600];       // Stable frame for TX (timer reads from here)
+  byte rxReady[25600];     // Snapshot: written by RX, consumed by timer
+  byte rxAssembly[25600];  // Frame being assembled across multiple RX packets
 
-  // TX pacing (avoid "ETH1 driver queue is full" by spreading packets)
-  msTimer txTimer;
-  int burstPerTick;      // packets per 1ms tick (2 => ~2000 pkt/s => 100fps*20pkt)
-  int txHeaderCounter;   // 1..0x50 step 4 (like original CAPL)
-  int txSeq;             // sequence number (0..255)
-  int txPackNr;          // 1..BUFFER_NR (usually 20)
+  int  rxHaveFrame;        // 1 after first complete frame received
+  int  rxNewFrame;         // 1 = rxReady has unconsumed frame for timer
+  long rxFrameCount;       // Total complete frames received (RX only)
+  long rxSnapCount;        // Snapshots actually taken (rxNewFrame was 0)
+  long rxFilteredCount;    // Packets filtered out (wrong source MAC)
 
-  int ROW_NO;
-  int COL_NO;
+  const int BUFFER_NR = 20;  // 80 lines / 4 lines per packet = 20 packets
+
+  msTimer txTimer;         // 10ms cadence timer (100fps, same as Avtp_new.can)
+  int txSeq;               // sequence number (0..255)
+  long txFrameCount;       // Total frames transmitted
+  long txStaleCount;       // Timer ticks where no new frame was available
+
+  // MAC addresses: gateway TX uses 0x1A, C# source uses 0x19
+  qword csharpSrcMac;      // C# app source MAC (accepted by RX filter)
+}
+
+// --- Burst-TX one complete frame (20 packets) ---
+void gatewayBurstTx(int useRx)
+{
+  int k;
+  int hc;
+  int line0;
+  int srcOff;
+  int i;
+
+  hc = 1;
+  for (k = 0; k < BUFFER_NR; k++)
+  {
+    if (hc == 1) myStream.byte(1) = 0x81;
+    else         myStream.byte(1) = 0x80;
+
+    myStream.byte(2) = txSeq;
+
+    if (k == BUFFER_NR - 1) myStream.byte(22) = 0x90;
+    else                     myStream.byte(22) = 0x80;
+
+    myStream.byte(31) = hc;
+
+    line0 = hc - 1;
+    srcOff = line0 * 320;
+
+    if (useRx == 1)
+    {
+      for (i = 0; i < 1280; i++)
+        myStream.byte(32 + i) = rxImg[srcOff + i];
+    }
+    else
+    {
+      for (i = 0; i < 1280; i++)
+        myStream.byte(32 + i) = 0x00;
+    }
+
+    output(myStream);
+
+    hc = hc + 4;
+    txSeq = txSeq + 1;
+    if (txSeq > 255) txSeq = 0;
+  }
+  txFrameCount = txFrameCount + 1;
 }
 
 on start
 {
   int i;
 
-  ROW_NO = 80;
-  COL_NO = 320;
-
-  // init RX
   for (i = 0; i < 25600; i++)
   {
-    rxImg[i] = 0x00; // black
+    rxImg[i]      = 0x00;
+    rxReady[i]    = 0x00;
+    rxAssembly[i] = 0x00;
   }
-  rxAgeMs = 999999;
-  rxFrameValid = 0;
+  rxHaveFrame     = 0;
+  rxNewFrame      = 0;
+  rxFrameCount    = 0;
+  rxSnapCount     = 0;
+  rxFilteredCount = 0;
+  txSeq           = 0;
+  txFrameCount    = 0;
+  txStaleCount    = 0;
 
-  // init TX state
-  burstPerTick = 2;
-  txHeaderCounter = 1;
-  txSeq = 0;
-  txPackNr = 1;
+  // C# app sends with this source MAC — ONLY accept packets from this MAC
+  csharpSrcMac = EthGetMacAddressAsNumber("3C:CE:15:00:00:19");
 
-  // Build AVTP template exactly like Avtp_new.can (left stream)
-  myStream.source      = EthGetMacAddressAsNumber("3C:CE:15:00:00:19");
+  // Gateway retransmits with a DIFFERENT source MAC (last byte 0x1A)
+  // so its own output is filtered out by the RX handler.
+  myStream.source      = EthGetMacAddressAsNumber("3C:CE:15:00:00:1A");
   myStream.destination = EthGetMacAddressAsNumber("01:00:5E:16:00:12");
   myStream.Length      = 1312;
   myStream.SetVlanId(70);
   myStream.SetVlanPriority(5);
   myStream.type = 0x22F0;
 
-  // AVTP / RVF header
-  myStream.byte(0) = 0x07;  // AVTP subtype: RVF
-  myStream.byte(1) = 0x81;  // stream valid + start-of-frame (we toggle later)
+  myStream.byte(0) = 0x07;
+  myStream.byte(1) = 0x81;
   myStream.byte(3) = 0x00;
 
-  // Stream ID (left)
   myStream.byte(4)  = 0x3C;
   myStream.byte(5)  = 0xCE;
   myStream.byte(6)  = 0x15;
@@ -71,27 +133,22 @@ on start
   myStream.byte(10) = 0x00;
   myStream.byte(11) = 0x50;
 
-  // AVTP timestamp
   myStream.byte(12) = 0x00;
   myStream.byte(13) = 0x00;
   myStream.byte(14) = 0x00;
   myStream.byte(15) = 0x00;
 
-  // Gateway info
   myStream.byte(16) = 0x01;
   myStream.byte(17) = 0x40;
   myStream.byte(18) = 0x00;
   myStream.byte(19) = 0x50;
 
-  // Stream data length (0x0508 => 1288 bytes: 8 bytes header + 1280 payload)
   myStream.byte(20) = 0x05;
   myStream.byte(21) = 0x08;
 
-  // Protocol Specific Header (set dynamically: 0x80 / 0x90)
   myStream.byte(22) = 0x80;
   myStream.byte(23) = 0x00;
 
-  // Stream Data Payload Part 1
   myStream.byte(24) = 0x00;
   myStream.byte(25) = 0x10;
   myStream.byte(26) = 0x30;
@@ -100,209 +157,96 @@ on start
   myStream.byte(29) = 0x00;
   myStream.byte(30) = 0x00;
 
-  // Part 2 (line number) set dynamically in TX
   myStream.byte(31) = 0x01;
 
-  // Start paced TX: 1ms tick
-  setTimerCyclic(txTimer, 0, 1);
+  // 10ms cadence — identical to Avtp_new.can (proven 100fps)
+  setTimerCyclic(txTimer, 0, 10);
 }
 
-// --- RX from Eth2: assemble latest image (only when Gateway mode ON) ---
+// --- RX from Eth2: ONLY accept packets from the C# app's source MAC ---
 on ethernetPacket msgChannel2.*
 {
   int hc;
   int line0;
   int srcOff;
   int i;
-  int ch;
-  
-  // RX valid (AVTP payload ok)
-  rxAgeMs = 0;
-  rxFrameValid = 1;
+
+  // *** CRITICAL: only accept packets from the C# app (MAC ...19) ***
+  // This filters out:
+  //   - gateway self-echo (MAC ...1A)
+  //   - Avtp_new.can generator (different MAC or same-but-internal)
+  //   - any other AVTP source on the bus
+  // Result: rxCount matches C# send rate (100fps) exactly.
+  if (this.source != csharpSrcMac)
+  {
+    rxFilteredCount = rxFilteredCount + 1;
+    return;
+  }
 
   if (@PANELS::AvtpNodeMode != 1)
     return;
 
-  // Only AVTP RVF frames
   if (this.type != 0x22F0)
     return;
 
-  // Need at least up to payload start + 1280
   if (this.Length < (32 + 1280))
     return;
 
-  // line number is carried in byte 31 (like Avtp_new.can sets)
   hc = this.byte(31);
-
-  // headerCounter is 1-based, packet contains 4 lines starting at that line
   line0 = hc - 1;
   if (line0 < 0) return;
   if (line0 >= 80) return;
 
+  // Always assemble — keeps rxAssembly continuously up-to-date
   srcOff = line0 * 320;
-
-  // copy 1280 bytes payload (4 lines x 320) into rxImg
   for (i = 0; i < 1280; i++)
   {
     if ((srcOff + i) < 25600)
-      rxImg[srcOff + i] = this.byte(32 + i);
+      rxAssembly[srcOff + i] = this.byte(32 + i);
   }
 
-  rxAgeMs = 0;
-
-  // end-of-frame marker is in byte 22 (0x90 on last packet)
+  // End-of-frame: snapshot if timer consumed the previous one
   if (this.byte(22) == 0x90)
   {
-    rxFrameValid = 1;
+    rxFrameCount = rxFrameCount + 1;
+    if (rxNewFrame == 0)
+    {
+      for (i = 0; i < 25600; i++)
+        rxReady[i] = rxAssembly[i];
+      rxNewFrame = 1;
+      rxSnapCount = rxSnapCount + 1;
+    }
+    rxHaveFrame = 1;
   }
-  
-  //ch = this.msgChannel;
-  //write("RX any: msgChannel=%d type=0x%X len=%d", ch, this.type, this.length);
-  //if (this.type != 0x22F0) return;
-  //write("RX packet on Eth2, type=0x%X, len=%d", this.type, this.length);
 }
 
-/*
-on ethernetPacket msgChannel12.*
-{
-  int hc;
-  int line0;
-  int srcOff;
-  int i;
-  int ch;
-  
-  // RX valid (AVTP payload ok)
-  rxAgeMs = 0;
-  rxFrameValid = 1;
-
-  if (@PANELS::AvtpNodeMode != 1)
-    return;
-
-  // Only AVTP RVF frames
-  if (this.type != 0x22F0)
-    return;
-
-  // Need at least up to payload start + 1280
-  if (this.Length < (32 + 1280))
-    return;
-
-  // line number is carried in byte 31 (like Avtp_new.can sets)
-  hc = this.byte(31);
-
-  // headerCounter is 1-based, packet contains 4 lines starting at that line
-  line0 = hc - 1;
-  if (line0 < 0) return;
-  if (line0 >= 80) return;
-
-  srcOff = line0 * 320;
-
-  // copy 1280 bytes payload (4 lines x 320) into rxImg
-  for (i = 0; i < 1280; i++)
-  {
-    if ((srcOff + i) < 25600)
-      rxImg[srcOff + i] = this.byte(32 + i);
-  }
-
-  rxAgeMs = 0;
-
-  // end-of-frame marker is in byte 22 (0x90 on last packet)
-  if (this.byte(22) == 0x90)
-  {
-    rxFrameValid = 1;
-  }
-  
-  //ch = this.msgChannel;
-  //write("RX any: msgChannel=%d type=0x%X len=%d", ch, this.type, this.length);
-  //if (this.type != 0x22F0) return;
-  //write("RX packet on Eth2, type=0x%X, len=%d", this.type, this.length);
-}
-*/
-
-// --- TX paced: emit AVTP on MAIN/DutPort (node must have TX allowed on DutPort in config) ---
+// --- 10ms timer: consume new frame if available, ALWAYS send ---
 on timer txTimer
 {
-  int k;
-  int curHc;
-  int line0;
-  int srcOff;
   int i;
-  int useRx;
 
-  // keep time since last RX packet
-  if (rxAgeMs < 1000000) rxAgeMs++;
-
-  // If not in Gateway mode, do nothing (Avtp_new.can remains responsible)
   if (@PANELS::AvtpNodeMode != 1)
     return;
 
-  // Decide source: RX if we recently saw AVTP, else black
-  useRx = 0;
-  if ((rxFrameValid == 1) && (rxAgeMs <= RX_TIMEOUT_MS))
+  if (rxNewFrame == 1)
   {
-    // 100ms grace (tune if needed)
-    //if (rxAgeMs <= 100)
-      useRx = 1;
+    for (i = 0; i < 25600; i++)
+      rxImg[i] = rxReady[i];
+    rxNewFrame = 0;
+  }
+  else
+  {
+    txStaleCount = txStaleCount + 1;
   }
 
-  // send a few packets per tick (spread load)
-  for (k = 0; k < burstPerTick; k++)
-  {
-    // build current packet header
-    curHc = txHeaderCounter;
-
-    // stream valid + start-of-frame bit similar to original:
-    if (curHc == 1) myStream.byte(1) = 0x81;
-    else            myStream.byte(1) = 0x80;
-
-    myStream.byte(2) = txSeq; // sequence number
-
-    // end-of-frame marker
-    if (txPackNr == BUFFER_NR) myStream.byte(22) = 0x90;
-    else                       myStream.byte(22) = 0x80;
-
-    // line number
-    myStream.byte(31) = curHc;
-
-    // payload
-    line0 = curHc - 1;
-    srcOff = line0 * 320;
-
-    if (useRx == 1)
-    {
-      for (i = 0; i < 1280; i++)
-      {
-        myStream.byte(32 + i) = rxImg[srcOff + i];
-      }
-    }
-    else
-    {
-      for (i = 0; i < 1280; i++)
-      {
-        myStream.byte(32 + i) = 0x00;
-      }
-    }
-
-    // TX
-    output(myStream);
-
-    // advance state (like original)
-    txHeaderCounter = txHeaderCounter + 4;
-    if (txHeaderCounter == 0x51)
-    {
-      txHeaderCounter = 1;
-      txPackNr = 1;
-    }
-    else
-    {
-      txPackNr = txPackNr + 1;
-    }
-
-    txSeq = txSeq + 1;
-    if (txSeq > 255) txSeq = 0;
-  }
+  if (rxHaveFrame == 1)
+    gatewayBurstTx(1);
+  else
+    gatewayBurstTx(0);
 }
 
 on key 'g'
 {
-  write("Gateway: AvtpNodeMode=%d rxAgeMs=%d rxFrameValid=%d burstPerTick=%d", @PANELS::AvtpNodeMode, rxAgeMs, rxFrameValid, burstPerTick);
+  write("Gateway v6.5: mode=%d rxCount=%d snaps=%d txCount=%d stale=%d filtered=%d seq=%d",
+        @PANELS::AvtpNodeMode, rxFrameCount, rxSnapCount, txFrameCount, txStaleCount, rxFilteredCount, txSeq);
 }

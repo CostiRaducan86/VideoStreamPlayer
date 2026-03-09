@@ -2165,6 +2165,11 @@ namespace VilsSharpX
             var sw = Stopwatch.StartNew();
             var next = sw.Elapsed;
             int lastPcapGen = _liveCapture.FrameGeneration; // track PCAP frame changes
+
+            // AVTP TX rate limiter: cap at 100fps (10ms) regardless of generator loop fps.
+            // This matches Avtp_new.can's proven 10ms cadence that the ECU expects.
+            const double AvtpTxPeriodMs = 10.0;
+            var lastAvtpTxTime = sw.Elapsed - TimeSpan.FromMilliseconds(AvtpTxPeriodMs); // allow first send immediately
         
             while (!ct.IsCancellationRequested)
             {
@@ -2237,26 +2242,34 @@ namespace VilsSharpX
         
                 // -----------------------------
                 // AVTP Ethernet TX (ONLY PlayerFromFiles)
+                // Rate-limited to 100fps (10ms) to match ECU expectations
+                // (identical cadence to Avtp_new.can)
                 // -----------------------------
                 if (_modeOfOperation == ModeOfOperation.PlayerFromFiles)
                 {
+                    var elapsed = sw.Elapsed;
+                    bool txAllowed = (elapsed - lastAvtpTxTime).TotalMilliseconds >= AvtpTxPeriodMs;
                     try
                     {
-                        if (isPcap)
+                        if (txAllowed)
                         {
-                            // PCAP: use full 320×80 frame directly (no crop→repad).
-                            // Only TX when a new frame arrived — avoids sending
-                            // duplicate data that can cause gateway partial-frame reads.
-                            if (isNewPcapFrame)
+                            if (isPcap)
                             {
-                                var txFrame = _liveCapture.AvtpTxFrame;
-                                if (txFrame != null)
-                                    await _txManager.SendFrameAsync(txFrame, ct);
+                                if (isNewPcapFrame)
+                                {
+                                    var txFrame = _liveCapture.AvtpTxFrame;
+                                    if (txFrame != null)
+                                    {
+                                        await _txManager.SendFrameAsync(txFrame, ct);
+                                        lastAvtpTxTime = elapsed;
+                                    }
+                                }
                             }
-                        }
-                        else
-                        {
-                            await _txManager.SendFrameAsync(a.Data, ct);
+                            else
+                            {
+                                await _txManager.SendFrameAsync(a.Data, ct);
+                                lastAvtpTxTime = elapsed;
+                            }
                         }
                     }
                     catch (OperationCanceledException) { break; }
