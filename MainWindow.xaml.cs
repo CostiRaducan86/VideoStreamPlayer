@@ -1404,37 +1404,49 @@ namespace VilsSharpX
             }
         }
 
-        private void BtnStop_Click(object sender, RoutedEventArgs e)
+        /// <summary>
+        /// Helper: Stop playback and send BLACK AVTP frames to LSM.
+        /// Used when: Stop button pressed, AVI playback ends, or PCAP playback completes without loop.
+        /// Ensures LSM is cleared (off) rather than stuck on last frame.
+        /// </summary>
+        private void SendBlackAndStop(string reason = "")
         {
-            // If we are in Generator/Player: STOP => keep AVTP alive by sending BLACK
-            if (_modeOfOperation == ModeOfOperation.PlayerFromFiles)
+            if (_modeOfOperation != ModeOfOperation.PlayerFromFiles)
             {
-                int fps = 100;
-                _ = int.TryParse(TxtFps.Text, out fps);
-
-                // Stop UI/loops as before
+                // AVTP Live: normal stop without black loop
                 StopAll();
-
-                // StopAll() closes the shared pcap device handle (singleton) used
-                // by captures AND the TX transmitter.  We MUST reinitialize the TX
-                // to reopen a fresh handle before starting the black loop.
-                {
-                    ushort ethType = ParseHexUshort(_avtpEtherType, 0x22F0);
-                    byte stIdByte = ParseHexByte(_streamIdLastByte, 0x50);
-                    string? deviceHint = _nicSelector.GetSelectedDeviceName(CmbLiveNic) ?? _avtpLiveDeviceHint;
-                    _txManager.Initialize(deviceHint, _srcMac, _dstMac,
-                        _vlanId, _vlanPriority, ethType, stIdByte);
-                }
-
-                // Start BLACK TX loop — strict 0x00 for LSM keepalive.
-                _txManager.StartBlackLoop(fps);
-
-                LblStatus.Text = "Player STOP: sending BLACK AVTP (Signal not available).";
                 return;
             }
 
-            // AVTP Live: normal stop
+            int fps = 100;
+            _ = int.TryParse(TxtFps.Text, out fps);
+
+            // Stop UI/loops
             StopAll();
+
+            // StopAll() closes the shared pcap device handle (singleton) used
+            // by captures AND the TX transmitter.  We MUST reinitialize the TX
+            // to reopen a fresh handle before starting the black loop.
+            {
+                ushort ethType = ParseHexUshort(_avtpEtherType, 0x22F0);
+                byte stIdByte = ParseHexByte(_streamIdLastByte, 0x50);
+                string? deviceHint = _nicSelector.GetSelectedDeviceName(CmbLiveNic) ?? _avtpLiveDeviceHint;
+                _txManager.Initialize(deviceHint, _srcMac, _dstMac,
+                    _vlanId, _vlanPriority, ethType, stIdByte);
+            }
+
+            // Start BLACK TX loop — strict 0x00 for LSM keepalive.
+            _txManager.StartBlackLoop(fps);
+
+            string msg = string.IsNullOrWhiteSpace(reason)
+                ? "Player STOP: sending BLACK AVTP (Signal not available)."
+                : $"Player {reason}: sending BLACK AVTP (Signal not available).";
+            LblStatus.Text = msg;
+        }
+
+        private void BtnStop_Click(object sender, RoutedEventArgs e)
+        {
+            SendBlackAndStop("STOP");
         }
 
         private void ChkLoopPlaying_Changed(object sender, RoutedEventArgs e)
@@ -1913,8 +1925,8 @@ namespace VilsSharpX
                         }
                         else
                         {
-                            // No loop: stop
-                            StopAll();
+                            // No loop: stop with BLACK
+                            SendBlackAndStop("PCAP-END");
                         }
                     });
                 },
@@ -2299,10 +2311,10 @@ namespace VilsSharpX
                     catch (OperationCanceledException) { break; }
                 }
 
-                // Detect AVI end-of-file when loop is disabled → auto-stop
+                // Detect AVI end-of-file when loop is disabled → auto-stop with BLACK
                 if (_lastLoaded == LoadedSource.Avi && _aviPlayer.IsAtEnd)
                 {
-                    _ = Dispatcher.BeginInvoke(() => StopAll());
+                    _ = Dispatcher.BeginInvoke(() => SendBlackAndStop("END-OF-FILE"));
                     break;
                 }
         
