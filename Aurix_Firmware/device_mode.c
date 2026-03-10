@@ -67,9 +67,12 @@ void device_mode_set(FrameEthDevice device)
         asclin9_dma_init(DM_NICHIA_BAUD, Frame_8N1);
     }
 
-    /* 3. Reset frame parsers */
+    /* 3. Reset/init frame parsers */
     rxmon_reset();
-    osram_frame_reset();
+    if (device == FE_DEVICE_OSRAM)
+        osram_frame_init();   /* builds CRC table + reset + self-test */
+    else
+        osram_frame_reset();
 
     /* 4. Update Ethernet TX parameters + reset frame assembly */
     frame_eth_set_device(device);
