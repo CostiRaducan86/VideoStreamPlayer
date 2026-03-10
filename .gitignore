@@ -1,5 +1,5 @@
 # Build outputs
-bin/
+# bin/ — now tracked (keeping build artifacts)
 obj/
 
 # Visual Studio / VS Code
@@ -44,5 +44,9 @@ Aurix_Firmware/*.csv
 Aurix_Firmware/*.patch
 Aurix_Firmware/Lcf_Gnuc_Tricore_Tc.lsl
 Aurix_Firmware/Lcf_Tasking_Tricore_Tc.lsl
-Aurix_Firmware/TriCore Debug (TASKING)/
+# TriCore build artifacts: track .elf, .map, .hex, .mdf; ignore other generated files
+Aurix_Firmware/TriCore Debug (TASKING)/*
 !Aurix_Firmware/TriCore Debug (TASKING)/VilsSharpX.elf
+!Aurix_Firmware/TriCore Debug (TASKING)/VilsSharpX.map
+!Aurix_Firmware/TriCore Debug (TASKING)/VilsSharpX.hex
+!Aurix_Firmware/TriCore Debug (TASKING)/VilsSharpX.mdf
