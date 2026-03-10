@@ -113,7 +113,7 @@ void core0_main(void)
      * Change to FE_DEVICE_OSRAM for Osram (20 Mbaud, 8O1, 320×80).
      * This configures ASCLIN9, parsers, and GETH all in one call.
      */
-    device_mode_init(FE_DEVICE_NICHIA);
+    device_mode_init(FE_DEVICE_OSRAM);
 
     /* FPS */
     fps_init();

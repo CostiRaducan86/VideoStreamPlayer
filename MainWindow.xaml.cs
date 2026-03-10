@@ -766,6 +766,16 @@ namespace VilsSharpX
 
             // Default button states: Load Files + Start enabled; others disabled
             ApplyButtonStates(false);
+
+            // Send device-mode command to ECU at app startup so the firmware
+            // immediately matches the persisted device type from settings.
+            try
+            {
+                string? txDev = GetTxPcapDeviceNameOrNull();
+                if (!string.IsNullOrWhiteSpace(txDev))
+                    DeviceModeCommand.SendDeviceMode(txDev, _currentDeviceType, AppendDiagLog);
+            }
+            catch (Exception ex) { AppendDiagLog($"[cmd] Startup device-mode: {ex.Message}"); }
         }
 
         private void HandleLiveFrameReady(byte[] frame, FrameMeta meta)
@@ -1797,6 +1807,19 @@ namespace VilsSharpX
             }
 
             // -------------------------------------------------
+            // Send device-mode command to ECU BEFORE any captures start.
+            // DeviceModeCommand opens/closes the global pcap device handle,
+            // so it must run while no captures are active.
+            // -------------------------------------------------
+            try
+            {
+                string? txDev = GetTxPcapDeviceNameOrNull();
+                if (!string.IsNullOrWhiteSpace(txDev))
+                    DeviceModeCommand.SendDeviceMode(txDev, _currentDeviceType, AppendDiagLog);
+            }
+            catch (Exception ex) { AppendDiagLog($"[cmd] Start device-mode: {ex.Message}"); }
+
+            // -------------------------------------------------
             // TX init (ONLY in Generator/Player mode)
             // -------------------------------------------------
             if (_modeOfOperation == ModeOfOperation.PlayerFromFiles)
@@ -1868,7 +1891,8 @@ namespace VilsSharpX
             {
                 StartOsramEthCapture();
             }
-            
+
+
         }
 
         private void StartPcapReplay(string path)
