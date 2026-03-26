@@ -56,6 +56,7 @@ static uint32 s_frameTimestamp = 0;
 static volatile boolean s_frameReady = FALSE;
 static volatile uint8   s_readyIdx   = 0;
 static uint16           s_frameSeq   = 0;
+static volatile uint32  s_displaySeq = 0;
 
 /* ==================== Telemetry ==================== */
 FeStats g_feStats;
@@ -343,6 +344,7 @@ void frame_eth_reset_frame_state(void)
     s_frameReady   = FALSE;
     s_readyIdx     = 0;
     s_frameTimestamp = 0;
+    s_displaySeq   = 0;
 }
 
 /* ==================== Zero-copy Osram API ==================== */
@@ -356,6 +358,7 @@ void frame_eth_mark_osram_ready(void)
 {
     s_frameTimestamp = (uint32)IfxStm_getLower(&MODULE_STM0);
     s_readyIdx   = s_assembleIdx;
+    s_displaySeq++;
     s_frameReady = TRUE;
     g_feStats.osramFramesPushed++;
     s_assembleIdx = (uint8)(1u - s_assembleIdx);
@@ -373,6 +376,7 @@ void frame_eth_push_nichia_row(uint8 row, const uint8 *pixels)
         if (s_rowCount == FE_NICHIA_H && !s_frameReady)
         {
             s_readyIdx   = s_assembleIdx;
+            s_displaySeq++;
             s_frameReady = TRUE;
             g_feStats.nichiaFramesAssembled++;
             s_assembleIdx = (uint8)(1u - s_assembleIdx);
@@ -396,6 +400,7 @@ void frame_eth_push_nichia_row(uint8 row, const uint8 *pixels)
     if (s_rowCount == FE_NICHIA_H && !s_frameReady)
     {
         s_readyIdx   = s_assembleIdx;
+        s_displaySeq++;
         s_frameReady = TRUE;
         g_feStats.nichiaFramesAssembled++;
         s_assembleIdx = (uint8)(1u - s_assembleIdx);
@@ -416,6 +421,7 @@ void frame_eth_push_osram_frame(const uint8 *pixels, uint32 len)
     s_frameTimestamp = (uint32)IfxStm_getLower(&MODULE_STM0);
 
     s_readyIdx   = s_assembleIdx;
+    s_displaySeq++;
     s_frameReady = TRUE;
     g_feStats.osramFramesPushed++;
 
@@ -424,23 +430,16 @@ void frame_eth_push_osram_frame(const uint8 *pixels, uint32 len)
 
 /* ==================== Display frame access (CPU1) ==================== */
 
-static volatile uint32 s_displaySeq = 0;
-
 const uint8 *frame_eth_get_display_frame(uint16 *width, uint16 *height, uint32 *seqNum)
 {
-    /* The "ready" buffer is the one NOT currently being assembled.
-     * s_readyIdx is set before s_frameReady, so this is safe for
-     * lock-free read from a different core. */
-    if (!s_frameReady && s_displaySeq == 0)
+    if (s_displaySeq == 0)
         return NULL_PTR;   /* no frame ever completed */
 
-    /* Return the last sent/ready buffer.
-     * Even after s_frameReady is cleared by send_pending(), the buffer
-     * at (1 - s_assembleIdx) still holds the last complete frame. */
-    uint8 idx = (uint8)(1u - s_assembleIdx);
+    /* Return the last completed frame selected by producer side. */
+    uint8 idx = s_readyIdx;
     *width    = s_width;
     *height   = s_height;
-    *seqNum   = (uint32)s_frameSeq;
+    *seqNum   = s_displaySeq;
 
     return (const uint8 *)s_framePtr[idx];
 }
