@@ -29,7 +29,7 @@
 
 /* Button geometry */
 #define BTN_W           100u
-#define BTN_H           44u
+#define BTN_H           36u
 #define BTN_MARGIN      5u
 #define BTN_Y_CENTER    (BUTTON_Y + (BUTTON_H - BTN_H) / 2)
 
@@ -48,6 +48,7 @@ static uint8  s_running         = 1u;
 static uint32 s_lastStatusFps     = 0xFFFFFFFFu;
 static uint32 s_lastStatusDevice  = 0xFFu;
 static uint32 s_lastStatusLink    = 0xFFu;
+static uint32 s_lastStatusRun     = 0xFFu;
 static uint32 s_statusCycleCount  = 0;
 
 /* Debounce */
@@ -55,8 +56,8 @@ static uint32 s_statusCycleCount  = 0;
 static uint32 s_debounceCounter = 0;
 
 /* Button label pointers (for dynamic update) */
-static const char *s_deviceLabel = "OSRAM";
-static const char *s_runLabel    = "RUNNING";
+static const char *s_deviceLabel = "OSR";
+static const char *s_runLabel    = "RUN";
 
 /* ==================== Utility: uint32 → string ==================== */
 
@@ -158,7 +159,7 @@ static void on_device_btn(uint8 id)
     device_mode_set(next);
 
     /* Update label immediately */
-    s_deviceLabel = (next == FE_DEVICE_OSRAM) ? "OSRAM" : "NICHIA";
+    s_deviceLabel = (next == FE_DEVICE_OSRAM) ? "OSR" : "NIC";
     s_lastStatusDevice = 0xFFu;  /* Force status bar redraw */
 }
 
@@ -166,7 +167,7 @@ static void on_startstop_btn(uint8 id)
 {
     (void)id;
     s_running = !s_running;
-    s_runLabel = s_running ? "RUNNING" : "STOPPED";
+    s_runLabel = s_running ? "RUN" : "STP";
 }
 
 static void on_rotate_btn(uint8 id)
@@ -199,13 +200,15 @@ static void draw_status_bar(void)
     /* Only redraw if something changed */
     if (fps == s_lastStatusFps &&
         (uint32)dev == s_lastStatusDevice &&
-        g_feStats.linkUp == s_lastStatusLink)
+        g_feStats.linkUp == s_lastStatusLink &&
+        (uint32)s_running == s_lastStatusRun)
     {
         return;
     }
     s_lastStatusFps    = fps;
     s_lastStatusDevice = (uint32)dev;
     s_lastStatusLink   = g_feStats.linkUp;
+    s_lastStatusRun    = (uint32)s_running;
 
     /* Clear status bar area */
     tft_fill_rect_color(0, STATUS_Y, TFT_WIDTH, STATUS_H, TFT_NAVY);
@@ -250,7 +253,7 @@ static void draw_status_bar(void)
 
     tft_set_text_color(TFT_YELLOW);
     tft_set_back_color(TFT_NAVY);
-    tft_draw_string_at(0, 0, buf);
+    tft_draw_string_at(0, 1, buf);
 }
 
 /* ==================== LVDS cadran rendering ==================== */
@@ -273,6 +276,16 @@ static void update_cadran(void)
         return;
     s_lastDisplaySeq = seq;
 
+    /* Clear uncovered area for smaller sources (e.g. Nichia 256x64). */
+    if (fw < TFT_WIDTH)
+    {
+        tft_fill_rect_color(fw, CADRAN_Y, TFT_WIDTH - fw, CADRAN_H, TFT_BLACK);
+    }
+    if ((uint16)(fh * 2u) < CADRAN_H)
+    {
+        tft_fill_rect_color(0, CADRAN_Y + (uint16)(fh * 2u), fw, CADRAN_H - (uint16)(fh * 2u), TFT_BLACK);
+    }
+
     /* Render with 2x vertical scaling into the cadran area.
      * Source: fw × fh Gray8 → Screen: fw × (fh*2) pixels.
      * Osram: 320×80 → 320×160.  Nichia: 256×64 → 256×128.
@@ -294,6 +307,7 @@ void tft_ui_init(void)
     s_lastStatusFps    = 0xFFFFFFFFu;
     s_lastStatusDevice = 0xFFu;
     s_lastStatusLink   = 0xFFu;
+    s_lastStatusRun    = 0xFFu;
 
     /* Init display hardware */
     tft_init();
@@ -305,8 +319,8 @@ void tft_ui_init(void)
     tft_clear(TFT_BLACK);
 
     /* Initialize device label based on current mode */
-    s_deviceLabel = (device_mode_get() == FE_DEVICE_OSRAM) ? "OSRAM" : "NICHIA";
-    s_runLabel    = "RUNNING";
+    s_deviceLabel = (device_mode_get() == FE_DEVICE_OSRAM) ? "OSR" : "NIC";
+    s_runLabel    = "RUN";
 
     /* ── Status bar ── */
     draw_status_bar();
@@ -315,7 +329,7 @@ void tft_ui_init(void)
     tft_fill_rect_color(0, CADRAN_Y, TFT_WIDTH, CADRAN_H, TFT_BLACK);
     tft_set_text_color(TFT_DARKGREY);
     tft_set_back_color(TFT_BLACK);
-    tft_draw_string_at(80, CADRAN_Y + 68, "No frame yet");
+    tft_draw_string_at(80, CADRAN_Y + 68, "No signal yet");
 
     /* ── Buttons ── */
     /* [OSRAM/NICHIA]  [RUN/STOP]  [ROTATE] */
@@ -458,6 +472,7 @@ void tft_ui_cyclic(void)
         s_lastStatusFps    = 0xFFFFFFFFu;
         s_lastStatusDevice = 0xFFu;
         s_lastStatusLink   = 0xFFu;
+        s_lastStatusRun    = 0xFFu;
         s_lastDisplaySeq   = 0xFFFFFFFFu;
 
         draw_status_bar();
