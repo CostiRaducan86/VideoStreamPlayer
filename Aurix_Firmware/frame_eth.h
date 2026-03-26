@@ -189,4 +189,16 @@ uint8 *frame_eth_get_assembly_buffer(void);
  */
 void frame_eth_mark_osram_ready(void);
 
+/**
+ * Get a pointer to the last-completed frame for display (read-only).
+ * Safe to call from CPU1 while CPU0 is assembling the next frame.
+ * Returns NULL if no frame has been completed yet.
+ *
+ * @param[out] width   Frame width in pixels
+ * @param[out] height  Frame height in pixels
+ * @param[out] seqNum  Frame sequence number (for change detection)
+ * @return Pointer to pixel data (width × height bytes, Gray8), or NULL
+ */
+const uint8 *frame_eth_get_display_frame(uint16 *width, uint16 *height, uint32 *seqNum);
+
 #endif /* FRAME_ETH_H */

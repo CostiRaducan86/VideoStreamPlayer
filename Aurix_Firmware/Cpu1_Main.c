@@ -27,7 +27,10 @@
 #include "Ifx_Types.h"
 #include "IfxCpu.h"
 #include "IfxScuWdt.h"
+#include "IfxStm.h"
 #include "Ifx_Cfg_Ssw.h"
+
+#include "tft_ui.h"
 
 extern IfxCpu_syncEvent cpuSyncEvent;
 
@@ -43,8 +46,22 @@ void core1_main(void)
     /* Wait for CPU sync event */
     IfxCpu_emitEvent(&cpuSyncEvent);
     IfxCpu_waitEvent(&cpuSyncEvent, 1);
-    
-    while(1)
+
+    /* ── TFT Display initialisation (Phase 2) ──
+     * Configures QSPI0, ILI9341 LCD (180° rotation), backlight, touch.
+     * Draws status bar, LVDS cadran placeholder, and control buttons.
+     */
+    tft_ui_init();
+
+    /* ── TFT main loop ──
+     * Polls touch + updates status bar + renders LVDS frames at ~50 Hz.
+     * This does NOT interfere with CPU0's UART/DMA/Ethernet pipeline.
+     */
+    while (1)
     {
+        tft_ui_cyclic();
+
+        /* ~20 ms delay → ~50 Hz poll rate */
+        IfxStm_wait(IfxStm_getTicksFromMilliseconds(IFXSTM_DEFAULT_TIMER, 20));
     }
 }

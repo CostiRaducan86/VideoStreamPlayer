@@ -422,6 +422,29 @@ void frame_eth_push_osram_frame(const uint8 *pixels, uint32 len)
     s_assembleIdx = (uint8)(1u - s_assembleIdx);
 }
 
+/* ==================== Display frame access (CPU1) ==================== */
+
+static volatile uint32 s_displaySeq = 0;
+
+const uint8 *frame_eth_get_display_frame(uint16 *width, uint16 *height, uint32 *seqNum)
+{
+    /* The "ready" buffer is the one NOT currently being assembled.
+     * s_readyIdx is set before s_frameReady, so this is safe for
+     * lock-free read from a different core. */
+    if (!s_frameReady && s_displaySeq == 0)
+        return NULL_PTR;   /* no frame ever completed */
+
+    /* Return the last sent/ready buffer.
+     * Even after s_frameReady is cleared by send_pending(), the buffer
+     * at (1 - s_assembleIdx) still holds the last complete frame. */
+    uint8 idx = (uint8)(1u - s_assembleIdx);
+    *width    = s_width;
+    *height   = s_height;
+    *seqNum   = (uint32)s_frameSeq;
+
+    return (const uint8 *)s_framePtr[idx];
+}
+
 /* ==================== Ethernet TX (fragmented) ==================== */
 
 /**
