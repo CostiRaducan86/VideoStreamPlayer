@@ -57,6 +57,8 @@ uint8 tft_get_rotation(void);
 void tft_clear(uint16 color);
 void tft_set_text_color(uint16 color);
 void tft_set_back_color(uint16 color);
+void tft_set_font_bold(uint8 bold);
+uint8 tft_get_font_bold(void);
 
 /* Big */
 void tft_draw_char(uint16 row, uint16 col, char c);
