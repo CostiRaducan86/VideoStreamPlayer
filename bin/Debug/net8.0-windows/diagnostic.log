@@ -108,3 +108,4 @@
 [10:57:01.805] [lvds-sim] test mode started for Nichia
 [10:57:04.726] [lvds-sim] simulated source stopped
 [10:57:04.730] [lvds-sim] test mode stopped
+[10:08:35.225] [cmd] Sent SET_DEVICE_MODE → Nichia (0x00)

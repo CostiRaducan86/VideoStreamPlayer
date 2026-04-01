@@ -15,4 +15,8 @@
     <PackageReference Include="System.IO.Ports" Version="10.0.3" />
   </ItemGroup>
 
+  <ItemGroup>
+    <Page Include="docs\tehnical_docs\ARCHITECTURE_HARDWARE.md" />
+  </ItemGroup>
+
 </Project>
