@@ -22,8 +22,8 @@
 
 ## Logs and crash handling
 - App is `WinExe` (no console). Runtime diagnostics are written to files:
-  - `diagnostic.log` for AVTP/capture diagnostic traces (written via `DiagnosticLogger`).
-  - `crash.log` for unhandled exceptions (see `App.xaml.cs`).
+	- `diagnostic.log` for AVTP/capture diagnostic traces (written via `DiagnosticLogger`).
+	- `crash.log` for unhandled exceptions (see `App.xaml.cs`).
 - Prefer file logging (append) over `Console.WriteLine` for anything important.
 
 ## PGM loader notes
@@ -38,3 +38,6 @@
 - Keep constants consistent: `W=320`, active height `80`, LVDS height `84` with bottom 4 metadata lines cropped (see `MainWindow.xaml`/`.cs`).
 - Preserve protocol compatibility in `RvfProtocol.cs`, `AvtpRvfParser.cs`, and `RvfReassembler.cs`.
 - If you refactor frame handling, mind that `Frame` clones buffers for safety today; avoid introducing shared-buffer race bugs.
+
+---
+

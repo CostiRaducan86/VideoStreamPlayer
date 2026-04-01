@@ -483,82 +483,393 @@ void tft_set_back_color(uint16 color)
     s_backColor = color;
 }
 
+static uint16 tft_row_bottom_from_top(uint16 yTop)
+{
+    uint16 rowBottom;
+
+    rowBottom = (uint16)(yTop + TFT_CHAR_HEIGHT - 1u);
+    if (rowBottom >= TFT_HEIGHT)
+    {
+        rowBottom = (uint16)(TFT_HEIGHT - 1u);
+    }
+
+    return rowBottom;
+}
+
+static uint16 tft_row_bottom_from_top_medium(uint16 yTop)
+{
+    uint16 rowBottom;
+
+    rowBottom = (uint16)(yTop + TFT_MEDIUM_CHAR_HEIGHT - 1u);
+    if (rowBottom >= TFT_HEIGHT)
+    {
+        rowBottom = (uint16)(TFT_HEIGHT - 1u);
+    }
+
+    return rowBottom;
+}
+
+static uint16 tft_row_bottom_from_top_small(uint16 yTop)
+{
+    uint16 rowBottom;
+
+    rowBottom = (uint16)(yTop + TFT_SMALL_CHAR_HEIGHT - 1u);
+    if (rowBottom >= TFT_HEIGHT)
+    {
+        rowBottom = (uint16)(TFT_HEIGHT - 1u);
+    }
+
+    return rowBottom;
+}
 
 void tft_draw_char(uint16 row, uint16 col, char c)
 {
-    if (c < 0x20 || c > 0x7E)
-        return;
-
-    const uint16 *glyph = &tft_font_table[(c - 0x20) * TFT_CHAR_HEIGHT];
-    uint16 x = row;
+    const uint16 *glyph;
+    uint16 x;
     uint8 idx;
     int i;
 
+    if ((c < 0x20) || (c > 0x7E))
+    {
+        return;
+    }
+
+    glyph = &tft_font_table[(c - 0x20) * TFT_CHAR_HEIGHT];
+    x = row;
+
     set_position(x, col);
 
-    for (idx = TFT_CHAR_HEIGHT - 1; ; idx--)
+    for (idx = TFT_CHAR_HEIGHT - 1u; ; idx--)
     {
         start_gram_write();
+
         for (i = 0; i < (int)TFT_CHAR_WIDTH; ++i)
         {
-            if ((glyph[idx] & (1u << i)) == 0)
+            if ((glyph[idx] & (1u << i)) == 0u)
+            {
                 wr_dat_endless(s_backColor);
+            }
             else
+            {
                 wr_dat_endless(s_textColor);
+            }
         }
-        if (idx == 0)
+
+        if (idx == 0u)
+        {
             break;
+        }
+
         wr_end_transfer();
-        --x;
+        x = (uint16)(x - 1u);
         set_position(x, col);
+    }
+
+    wr_end_transfer();
+}
+
+/* Render a character at medium size (12x18) by downscaling the 16x24 big font.
+ * Uses linear interpolation: each target pixel maps to a rectangular region in
+ * the source glyph.  If ANY source pixel in that region is set, the target
+ * pixel is drawn as foreground.  This avoids an additional font table.
+ */
+void tft_draw_char_medium(uint16 row, uint16 col, char c)
+{
+    const uint16 *glyph;
+    uint16 x;
+    uint8 trgY;
+    uint8 trgX;
+    uint8 srcY0;
+    uint8 srcY1;
+    uint8 srcX0;
+    uint8 srcX1;
+    uint8 sy;
+    uint8 sx;
+    uint16 rowBits;
+    uint8 pixelOn;
+
+    if ((c < 0x20) || (c > 0x7E))
+    {
+        return;
+    }
+
+    glyph = &tft_font_table[(c - 0x20) * TFT_CHAR_HEIGHT];
+    x = row;
+
+    for (trgY = TFT_MEDIUM_CHAR_HEIGHT; trgY > 0u; trgY--)
+    {
+        uint8 yIdx;
+
+        yIdx = (uint8)(trgY - 1u);
+        srcY0 = (uint8)(((uint16)yIdx * TFT_CHAR_HEIGHT) / TFT_MEDIUM_CHAR_HEIGHT);
+        srcY1 = (uint8)((((uint16)(yIdx + 1u) * TFT_CHAR_HEIGHT) / TFT_MEDIUM_CHAR_HEIGHT) - 1u);
+
+        set_position(x, col);
+        start_gram_write();
+
+        for (trgX = 0u; trgX < TFT_MEDIUM_CHAR_WIDTH; trgX++)
+        {
+            srcX0 = (uint8)(((uint16)trgX * TFT_CHAR_WIDTH) / TFT_MEDIUM_CHAR_WIDTH);
+            srcX1 = (uint8)((((uint16)(trgX + 1u) * TFT_CHAR_WIDTH) / TFT_MEDIUM_CHAR_WIDTH) - 1u);
+
+            pixelOn = 0u;
+
+            for (sy = srcY0; sy <= srcY1; sy++)
+            {
+                rowBits = glyph[sy];
+
+                for (sx = srcX0; sx <= srcX1; sx++)
+                {
+                    if ((rowBits & (1u << sx)) != 0u)
+                    {
+                        pixelOn = 1u;
+                        break;
+                    }
+                }
+
+                if (pixelOn != 0u)
+                {
+                    break;
+                }
+            }
+
+            if (pixelOn == 0u)
+            {
+                wr_dat_endless(s_backColor);
+            }
+            else
+            {
+                wr_dat_endless(s_textColor);
+            }
+        }
+
+        wr_end_transfer();
+
+        if (yIdx > 0u)
+        {
+            x = (uint16)(x - 1u);
+        }
     }
 }
 
+/* Render a character at small size (8x12) using a fixed 2:1 downscale of the
+ * 16x24 big font.  Each small pixel tests a 2x2 block in the source glyph;
+ * if any source bit is set the target pixel is drawn as foreground.
+ */
+void tft_draw_char_small(uint16 row, uint16 col, char c)
+{
+    const uint16 *glyph;
+    uint16 x;
+    uint8 smallRow;
+    uint8 smallCol;
+    uint8 srcRow0;
+    uint8 srcRow1;
+    uint8 bit0;
+    uint16 rowBits0;
+    uint16 rowBits1;
+    uint16 mask;
+    uint16 pixelOn;
+
+    if ((c < 0x20) || (c > 0x7E))
+    {
+        return;
+    }
+
+    glyph = &tft_font_table[(c - 0x20) * TFT_CHAR_HEIGHT];
+    x = row;
+
+    for (smallRow = 0u; smallRow < TFT_SMALL_CHAR_HEIGHT; ++smallRow)
+    {
+        srcRow0 = (uint8)(TFT_CHAR_HEIGHT - 1u - (smallRow * 2u));
+        srcRow1 = (uint8)(srcRow0 - 1u);
+
+        rowBits0 = glyph[srcRow0];
+        rowBits1 = glyph[srcRow1];
+
+        set_position(x, col);
+        start_gram_write();
+
+        for (smallCol = 0u; smallCol < TFT_SMALL_CHAR_WIDTH; ++smallCol)
+        {
+            bit0 = (uint8)(smallCol * 2u);
+            mask = (uint16)((1u << bit0) | (1u << (bit0 + 1u)));
+
+            pixelOn = (uint16)(((rowBits0 & mask) != 0u) || ((rowBits1 & mask) != 0u));
+
+            if (pixelOn == 0u)
+            {
+                wr_dat_endless(s_backColor);
+            }
+            else
+            {
+                wr_dat_endless(s_textColor);
+            }
+        }
+
+        wr_end_transfer();
+
+        if (smallRow < (TFT_SMALL_CHAR_HEIGHT - 1u))
+        {
+            x = (uint16)(x - 1u);
+        }
+    }
+}
 
 void tft_draw_string_ln(uint8 line, const char *s)
 {
-    uint16 ln;
-    uint16 refcol = 0;
-    uint8 i = 0;
+    uint16 rowBottom;
+    uint16 refcol;
+    uint8 i;
 
     if (line >= TFT_MAX_LINES)
-        return;
-
-    /* top-to-bottom: line 0 at top, line 9 at bottom */
-    ln = (uint16)(((TFT_MAX_LINES - line) * TFT_CHAR_HEIGHT) - 1);
-
-    while (*s != '\0' && i < TFT_MAX_COLS)
     {
-        tft_draw_char(ln, refcol, *s);
-        refcol += TFT_CHAR_WIDTH;
+        return;
+    }
+
+    rowBottom = tft_row_bottom_from_top((uint16)line * TFT_CHAR_HEIGHT);
+    refcol = 0u;
+    i = 0u;
+
+    while ((*s != '\0') && (i < TFT_MAX_COLS))
+    {
+        tft_draw_char(rowBottom, refcol, *s);
+        refcol = (uint16)(refcol + TFT_CHAR_WIDTH);
         s++;
         i++;
     }
-    /* clear remaining columns */
+
     while (i < TFT_MAX_COLS)
     {
-        tft_draw_char(ln, refcol, ' ');
-        refcol += TFT_CHAR_WIDTH;
+        tft_draw_char(rowBottom, refcol, ' ');
+        refcol = (uint16)(refcol + TFT_CHAR_WIDTH);
         i++;
     }
 }
 
+void tft_draw_string_ln_medium(uint8 line, const char *s)
+{
+    uint16 rowBottom;
+    uint16 refcol;
+    uint8 i;
+
+    if (line >= TFT_MAX_MEDIUM_LINES)
+    {
+        return;
+    }
+
+    rowBottom = tft_row_bottom_from_top_medium((uint16)line * TFT_MEDIUM_CHAR_HEIGHT);
+    refcol = 0u;
+    i = 0u;
+
+    while ((*s != '\0') && (i < TFT_MAX_MEDIUM_COLS))
+    {
+        tft_draw_char_medium(rowBottom, refcol, *s);
+        refcol = (uint16)(refcol + TFT_MEDIUM_CHAR_WIDTH);
+        s++;
+        i++;
+    }
+
+    while (i < TFT_MAX_MEDIUM_COLS)
+    {
+        tft_draw_char_medium(rowBottom, refcol, ' ');
+        refcol = (uint16)(refcol + TFT_MEDIUM_CHAR_WIDTH);
+        i++;
+    }
+}
+
+void tft_draw_string_ln_small(uint8 line, const char *s)
+{
+    uint16 rowBottom;
+    uint16 refcol;
+    uint8 i;
+
+    if (line >= TFT_MAX_SMALL_LINES)
+    {
+        return;
+    }
+
+    rowBottom = tft_row_bottom_from_top_small((uint16)line * TFT_SMALL_CHAR_HEIGHT);
+    refcol = 0u;
+    i = 0u;
+
+    while ((*s != '\0') && (i < TFT_MAX_SMALL_COLS))
+    {
+        tft_draw_char_small(rowBottom, refcol, *s);
+        refcol = (uint16)(refcol + TFT_SMALL_CHAR_WIDTH);
+        s++;
+        i++;
+    }
+
+    while (i < TFT_MAX_SMALL_COLS)
+    {
+        tft_draw_char_small(rowBottom, refcol, ' ');
+        refcol = (uint16)(refcol + TFT_SMALL_CHAR_WIDTH);
+        i++;
+    }
+}
 
 void tft_draw_string_at(uint16 x, uint16 y, const char *s)
 {
-    /* Convert pixel-y (0=top) to the internal row coordinate.
-     * The font renderer uses "non-normal VDIR": row = (max-1) - y */
-    uint16 row = (uint16)((TFT_MAX_LINES * TFT_CHAR_HEIGHT) - 1 - y);
-    uint16 col = x;
+    uint16 rowBottom;
+    uint16 col;
 
-    while (*s != '\0' && col + TFT_CHAR_WIDTH <= TFT_WIDTH)
+    if (y > (TFT_HEIGHT - TFT_CHAR_HEIGHT))
     {
-        tft_draw_char(row, col, *s);
-        col += TFT_CHAR_WIDTH;
+        y = (uint16)(TFT_HEIGHT - TFT_CHAR_HEIGHT);
+    }
+
+    rowBottom = tft_row_bottom_from_top(y);
+    col = x;
+
+    while ((*s != '\0') && ((col + TFT_CHAR_WIDTH) <= TFT_WIDTH))
+    {
+        tft_draw_char(rowBottom, col, *s);
+        col = (uint16)(col + TFT_CHAR_WIDTH);
         s++;
     }
 }
 
+void tft_draw_string_at_medium(uint16 x, uint16 y, const char *s)
+{
+    uint16 rowBottom;
+    uint16 col;
+
+    if (y > (TFT_HEIGHT - TFT_MEDIUM_CHAR_HEIGHT))
+    {
+        y = (uint16)(TFT_HEIGHT - TFT_MEDIUM_CHAR_HEIGHT);
+    }
+
+    rowBottom = tft_row_bottom_from_top_medium(y);
+    col = x;
+
+    while ((*s != '\0') && ((col + TFT_MEDIUM_CHAR_WIDTH) <= TFT_WIDTH))
+    {
+        tft_draw_char_medium(rowBottom, col, *s);
+        col = (uint16)(col + TFT_MEDIUM_CHAR_WIDTH);
+        s++;
+    }
+}
+
+void tft_draw_string_at_small(uint16 x, uint16 y, const char *s)
+{
+    uint16 rowBottom;
+    uint16 col;
+
+    if (y > (TFT_HEIGHT - TFT_SMALL_CHAR_HEIGHT))
+    {
+        y = (uint16)(TFT_HEIGHT - TFT_SMALL_CHAR_HEIGHT);
+    }
+
+    rowBottom = tft_row_bottom_from_top_small(y);
+    col = x;
+
+    while ((*s != '\0') && ((col + TFT_SMALL_CHAR_WIDTH) <= TFT_WIDTH))
+    {
+        tft_draw_char_small(rowBottom, col, *s);
+        col = (uint16)(col + TFT_SMALL_CHAR_WIDTH);
+        s++;
+    }
+}
 
 void tft_put_pixel(uint16 x, uint16 y)
 {
@@ -619,6 +930,11 @@ void tft_blit_gray8(uint16 x, uint16 y, uint16 w, uint16 h, const uint8 *pixels)
 }
 
 
+/* Blit a Gray8 frame to the TFT with 2x vertical scaling.
+ * Each source row is sent twice to produce a doubled-height image.
+ * Gray8 → RGB565 conversion: R5=G>>3, G6=G>>2, B5=G>>3.
+ * This is the primary rendering path used by tft_ui for live frames.
+ */
 void tft_blit_gray8_v2x(uint16 x, uint16 y, uint16 w, uint16 h, const uint8 *pixels)
 {
     uint16 row, col;
