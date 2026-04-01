@@ -2,11 +2,15 @@
 #define TFT_FONT_H
 
 /******************************************************************************
- * tft_font.h — 16×24 fixed-width font for the TFT display
+ * tft_font.h — 16×24 fixed-width font for the TFT display (original/classic)
  *
  * ASCII characters 0x20 (space) through 0x7E (~).
  * Each character is 24 rows of 16-bit patterns (bit = pixel on/off).
  * Total: 95 characters × 24 = 2280 entries.
+ *
+ * Provides tft_font_table_bold[] and tft_font_table_regular[] pointing to
+ * the same classic data, so this header is a drop-in replacement for
+ * tft_font_modern.h when switching fonts via tft_display.c #include.
  ******************************************************************************/
 
 #include "Ifx_Types.h"
@@ -16,7 +20,7 @@ extern "C" {
 #endif
 
 /* 95 printable ASCII characters (0x20..0x7E), 24 rows each */
-static const uint16 tft_font_table[] =
+static const uint16 tft_font_table_classic[] =
 {
     /* Space ' ' (0x20) */
     0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000,
@@ -399,6 +403,11 @@ static const uint16 tft_font_table[] =
     0x10F0, 0x1FF8, 0x0F08, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000,
     0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000,
 };
+
+/* Aliases so this header is a drop-in replacement for tft_font_modern.h.
+ * Bold and Regular both point to the same classic font data. */
+static const uint16 * const tft_font_table_bold    = tft_font_table_classic;
+static const uint16 * const tft_font_table_regular  = tft_font_table_classic;
 
 #ifdef __cplusplus
 }

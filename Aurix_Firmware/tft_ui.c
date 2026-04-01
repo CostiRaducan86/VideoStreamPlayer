@@ -110,6 +110,13 @@
 #define CFG_VIEW_INACTIVE_TX      (VIEW_X + 126u)
 #define CFG_VIEW_INACTIVE_TY      CFG_OPTION_Y
 
+#define CFG_VIEW_FONT_TITLE_Y     (VIEW_Y + 104u)
+#define CFG_VIEW_FONT_OPTION_Y    (VIEW_Y + 126u)
+#define CFG_VIEW_FONT_BOLD_TX     (VIEW_X + 34u)
+#define CFG_VIEW_FONT_BOLD_TY     CFG_VIEW_FONT_OPTION_Y
+#define CFG_VIEW_FONT_REGULAR_TX  (VIEW_X + 126u)
+#define CFG_VIEW_FONT_REGULAR_TY  CFG_VIEW_FONT_OPTION_Y
+
 #define CFG_TOUCH_PAD_X           6u
 #define CFG_TOUCH_PAD_Y           4u
 
@@ -865,6 +872,31 @@ static uint8 handle_config_option_touch(uint16 px, uint16 py)
             }
             return 1u;
         }
+
+        {
+            uint16 boldW = medium_text_rect_w("Bold");
+            uint16 regularW = medium_text_rect_w("Regular");
+
+            if (point_in_rect(px, py,
+                              (uint16)(CFG_VIEW_FONT_BOLD_TX - CFG_TOUCH_PAD_X),
+                              (uint16)(CFG_VIEW_FONT_BOLD_TY - CFG_TOUCH_PAD_Y),
+                              boldW, optH) != 0u)
+            {
+                tft_set_font_bold(1u);
+                draw_config_page();
+                return 1u;
+            }
+
+            if (point_in_rect(px, py,
+                              (uint16)(CFG_VIEW_FONT_REGULAR_TX - CFG_TOUCH_PAD_X),
+                              (uint16)(CFG_VIEW_FONT_REGULAR_TY - CFG_TOUCH_PAD_Y),
+                              regularW, optH) != 0u)
+            {
+                tft_set_font_bold(0u);
+                draw_config_page();
+                return 1u;
+            }
+        }
     }
 
     return 0u;
@@ -1004,9 +1036,19 @@ static void draw_config_page(void)
     }
     else if (s_cfgTab == UI_CFG_TAB_VIEW)
     {
+        uint16 boldColor;
+        uint16 regularColor;
+
         draw_left_text_medium(CFG_CONTENT_TITLE_X, CFG_CONTENT_TITLE_Y, "Vertical Flip:", TFT_WHITE, TFT_BLACK);
         draw_left_text_medium(CFG_VIEW_ACTIVE_TX, CFG_VIEW_ACTIVE_TY, "Active", activeColor, TFT_BLACK);
         draw_left_text_medium(CFG_VIEW_INACTIVE_TX, CFG_VIEW_INACTIVE_TY, "Inactive", inactiveColor, TFT_BLACK);
+
+        boldColor    = (tft_get_font_bold() != 0u) ? TFT_CYAN : TFT_DARKGREY;
+        regularColor = (tft_get_font_bold() == 0u) ? TFT_CYAN : TFT_DARKGREY;
+
+        draw_left_text_medium(CFG_CONTENT_TITLE_X, CFG_VIEW_FONT_TITLE_Y, "Font Weight:", TFT_WHITE, TFT_BLACK);
+        draw_left_text_medium(CFG_VIEW_FONT_BOLD_TX, CFG_VIEW_FONT_BOLD_TY, "Bold", boldColor, TFT_BLACK);
+        draw_left_text_medium(CFG_VIEW_FONT_REGULAR_TX, CFG_VIEW_FONT_REGULAR_TY, "Regular", regularColor, TFT_BLACK);
     }
     else
     {
