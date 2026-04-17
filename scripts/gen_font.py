@@ -13,7 +13,8 @@ Row ordering: glyph[0] = top row, glyph[23] = bottom row.
 """
 
 from PIL import Image, ImageDraw, ImageFont, ImageFilter
-import os, sys
+import os
+import sys
 
 CELL_W = 16
 CELL_H = 24
@@ -37,8 +38,8 @@ VARIANTS = [
         "path": "C:/Windows/Fonts/consola.ttf",
         "fallback": "C:/Windows/Fonts/lucon.ttf",
         "size": 190,
-        "blur": 1.5,
-        "threshold": 115,
+        "blur": 2.0,
+        "threshold": 95,
     },
 ]
 

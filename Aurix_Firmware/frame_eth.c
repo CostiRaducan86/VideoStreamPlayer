@@ -15,6 +15,7 @@
  ******************************************************************************/
 
 #include "frame_eth.h"
+#include "can_diag.h"
 #include "Geth/Eth/IfxGeth_Eth.h"
 #include "Geth/Std/IfxGeth.h"
 #include "Stm/Std/IfxStm.h"
@@ -57,6 +58,7 @@ static volatile boolean s_frameReady = FALSE;
 static volatile uint8   s_readyIdx   = 0;
 static uint16           s_frameSeq   = 0;
 static volatile uint32  s_displaySeq = 0;
+static uint16           s_diagSeq    = 0;
 
 /* ==================== Telemetry ==================== */
 FeStats g_feStats;
@@ -533,6 +535,92 @@ static boolean send_fragment(const uint8 *framePixels, uint16 frameSeq,
     return TRUE;
 }
 
+static boolean send_can_diag_record(const CanDiagRecord *record, uint16 sequence)
+{
+    uint32 ethPayload = FE_DIAG_HDR_LEN + FE_DIAG_PAYLOAD_LEN;
+    uint32 ethTotal   = 14u + ethPayload;
+    uint8 *pTxBuf;
+    uint8 *hdr;
+    uint8 *payload;
+
+    if (record == NULL_PTR)
+    {
+        g_feStats.diagTxErrors++;
+        return FALSE;
+    }
+
+    if (ethTotal < 60u)
+        ethTotal = 60u;
+
+    pTxBuf = (uint8 *)IfxGeth_Eth_getTransmitBuffer(&s_geth, IfxGeth_TxDmaChannel_0);
+    if (pTxBuf == NULL_PTR)
+    {
+        pTxBuf = (uint8 *)IfxGeth_Eth_waitTransmitBuffer(&s_geth, IfxGeth_TxDmaChannel_0);
+        if (pTxBuf == NULL_PTR)
+        {
+            g_feStats.diagTxErrors++;
+            return FALSE;
+        }
+    }
+
+    memcpy(&pTxBuf[0], s_dstMac, 6);
+    memcpy(&pTxBuf[6], s_srcMac, 6);
+    put_be16(&pTxBuf[12], FE_ETHERTYPE);
+
+    hdr = &pTxBuf[14];
+    put_be16(&hdr[0], FE_MAGIC_CAN_DIAG);
+    hdr[2] = CAN_DIAG_PROTOCOL_VERSION;
+    hdr[3] = CAN_DIAG_RECORD_TYPE_REG_IO;
+    put_be16(&hdr[4], sequence);
+    put_be16(&hdr[6], FE_DIAG_PAYLOAD_LEN);
+
+    payload = &pTxBuf[14 + FE_DIAG_HDR_LEN];
+    put_be32(&payload[0],  record->sourceTimestamp);
+    put_be16(&payload[4],  record->address);
+    put_be16(&payload[6],  record->responseDelayUs);
+    put_be16(&payload[8],  record->interFrameDelayUs);
+    put_be32(&payload[10], record->value);
+    put_be32(&payload[14], record->checksum);
+    payload[18] = record->deviceId;
+    payload[19] = record->operation;
+    payload[20] = record->status;
+    payload[21] = record->valueLen;   /* raw UART bytes count */
+    /* raw UART frame bytes (up to CAN_DIAG_RAW_MAX) */
+    {
+        uint8 rawLen = (record->valueLen < CAN_DIAG_RAW_MAX) ? record->valueLen : (uint8)CAN_DIAG_RAW_MAX;
+        if (rawLen > 0u)
+            memcpy(&payload[FE_DIAG_PAYLOAD_FIXED], record->rawPayload, rawLen);
+        if (rawLen < FE_DIAG_PAYLOAD_RAW_MAX)
+            memset(&payload[FE_DIAG_PAYLOAD_FIXED + rawLen], 0, FE_DIAG_PAYLOAD_RAW_MAX - rawLen);
+    }
+
+    if (ethTotal > (14u + ethPayload))
+        memset(&pTxBuf[14u + ethPayload], 0, ethTotal - (14u + ethPayload));
+
+    IfxGeth_dma_clearInterruptFlag(s_geth.gethSFR, IfxGeth_DmaChannel_0,
+                                   IfxGeth_DmaInterruptFlag_transmitInterrupt);
+    IfxGeth_Eth_sendTransmitBuffer(&s_geth, ethTotal, IfxGeth_TxDmaChannel_0);
+
+    {
+        uint32 timeout = 100000u;
+        while (!IfxGeth_dma_isInterruptFlagSet(s_geth.gethSFR, IfxGeth_DmaChannel_0,
+                                                IfxGeth_DmaInterruptFlag_transmitInterrupt))
+        {
+            if (--timeout == 0u)
+            {
+                g_feStats.diagTxErrors++;
+                return FALSE;
+            }
+        }
+    }
+
+    IfxGeth_dma_clearInterruptFlag(s_geth.gethSFR, IfxGeth_DmaChannel_0,
+                                   IfxGeth_DmaInterruptFlag_transmitInterrupt);
+
+    g_feStats.diagRecordsSent++;
+    return TRUE;
+}
+
 boolean frame_eth_send_pending(void)
 {
     if (!s_frameReady)
@@ -568,6 +656,19 @@ boolean frame_eth_send_pending(void)
     }
 
     g_feStats.framesSent++;
+    return TRUE;
+}
+
+boolean frame_eth_send_can_diag_pending(void)
+{
+    CanDiagRecord record;
+
+    if (!can_diag_pop_record(&record))
+        return FALSE;
+
+    if (!send_can_diag_record(&record, s_diagSeq++))
+        return FALSE;
+
     return TRUE;
 }
 

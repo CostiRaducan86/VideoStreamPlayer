@@ -1,52 +1,51 @@
-# Handoff Summary - Aurix DMA Step 1
+# Handoff Summary — Aurix Firmware v7 (April 2026)
 
-## What Was Implemented
+## Architecture: Dual-Channel DMA
 
-- DMA-based ASCLIN9 RX pipeline on TC397
-- Dual-buffer ping-pong acquisition model
-- Non-blocking consumer integration in `Cpu0_Main.c`
-- Documentation pack for build and validation flow
-
----
-
-## Changed Files
-
-## New
-
-- `Aurix_Firmware/asclin9_dma.h`
-- `Aurix_Firmware/asclin9_dma.c`
-- `Aurix_Firmware/BUILD_INSTRUCTIONS.md`
-- `Aurix_Firmware/CODE_STATUS.md`
-- `Aurix_Firmware/DMA_DUAL_BUFFER_DESIGN.md`
-- `Aurix_Firmware/FILE_MANIFEST.md`
-- `Aurix_Firmware/STEP1_BUILD_VALIDATE.md`
-- `Aurix_Firmware/COMPLETION_CHECKLIST.md`
-
-## Modified
-
-- `Aurix_Firmware/Cpu0_Main.c`
-
----
-
-## Technical Summary
-
-### Data Path
+Two independent ASCLIN+DMA pipelines run in parallel:
 
 ```text
-ASCLIN9 RX -> DMA channel -> ping-pong buffers -> main loop consumer -> rxmon parser
+LVDS:       ASCLIN1/P14.8 (X103 pin7) → DMA ch1 → ping-pong → osram/rxmon parser → ETH TX
+Diagnostic: ASCLIN9/P20.7 (TLE9251V)  → DMA ch0 → ping-pong → diag_uart_tick()   → ETH TX
 ```
 
-### Integration Pattern
+### Critical Discovery (M2)
 
-- ISR marks completed buffer
-- Main loop polls completion pointer (non-blocking)
-- Parser consume runs only when data is available
+The "CAN diagnostic" bus is **UART at 1 Mbaud, 8-Odd-2** through CAN transceivers
+(differential PHY only). MCMCAN was abandoned after v1-v5 all failed with Stuff Errors.
+v6 proved ASCLIN9 UART works; v7 runs both channels in parallel.
 
-### Intended Outcome
+---
 
-- Lower CPU overhead compared to polling/FIFO drain model
-- Better timing consistency at 12.5 Mbaud stream rate
-- Cleaner ownership boundary between ISR and application loop
+## Key Files
+
+| File | Role |
+|------|------|
+
+| `asclin1_dma.h/.c` | LVDS pixel DMA (ASCLIN1, P14.8, DMA ch1) |
+| `can_hw.h/.c` | Diagnostic UART sniffer (ASCLIN9, P20.7, DMA ch0) |
+| `can_diag.h/.c` | Diagnostic record queue + Ethernet bridge |
+| `device_mode.h/.c` | Device switching (Osram/Nichia) |
+| `Cpu0_Main.c` | Main loop: drain both DMA channels + ETH TX |
+| `lvds_frame_mode.h` | Frame mode enum (8N1/8O1) |
+
+See `FILE_MANIFEST.md` for complete file list.
+
+---
+
+## Build & Flash
+
+1. Copy modified `.c/.h` files to ADS project (replace existing)
+2. Build in Aurix Development Studio (TASKING)
+3. Flash via WinIDEA or ADS debugger
+4. Connect LVDS wire to X103 pin 7 (P14.8)
+5. Connect X202 to ECU CAN diagnostic bus
+
+## Validation
+
+- **LVDS**: `g_osramStats.framesOk` increments, FPS ~48.7
+- **Diagnostic**: `g_diagUartStats.dmaCompletions` increments, `synced=1`
+- Both channels verified running simultaneously on target
 
 ---
 

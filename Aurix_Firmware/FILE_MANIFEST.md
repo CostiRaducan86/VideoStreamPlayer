@@ -1,89 +1,99 @@
-# Complete File Manifest for Step 1 DMA Implementation
+# Aurix Firmware — File Manifest
 
-## Summary
+## Architecture Overview (v7, April 2026)
 
-- **Implementation files created:** 2 (`asclin9_dma.h`, `asclin9_dma.c`)
-- **Core files modified:** 1 (`Cpu0_Main.c`)
-- **Documentation files created:** 5
-- **Build status:** Ready for Aurix Development Studio
+Two independent UART channels run in parallel via DMA:
 
----
+| Channel | ASCLIN | Pin | Connector | DMA Ch | ISR Prio | Baudrate | Purpose |
+|---------|--------|-----|-----------|--------|----------|----------|---------|
 
-## Implementation Files
+| LVDS pixel | ASCLIN1 | P14.8 | X103 pin 7 | 1 | 14 | 20M/12.5M | Osram/Nichia camera frames |
+| Diagnostic | ASCLIN9 | P20.7 | TLE9251V→X202 | 0 | 13 | 1M 8O2 | ECU↔LSM register R/W |
 
-### 1) `asclin9_dma.h` (new)
-
-**Location:** `Aurix_Firmware/asclin9_dma.h`
-
-**Contains:**
-
-- Configuration constants:
-  - `ASCLIN9_DMA_BUFFER_SIZE = 2560`
-  - `ASCLIN9_DMA_ELEMENT_SIZE = 32`
-  - `ASCLIN9_DMA_TRANSFERS_PER_BUFFER = 80`
-- Opaque handle `Asclin9Dma` (dual buffers, DMA resources, bookkeeping)
-- Public API:
-  - `asclin9_dma_init(...)`
-  - `asclin9_dma_get_completed_buffer()`
-  - `asclin9_dma_get_completion_count()`
-  - `asclin9_dma_get_timeout_warnings()`
-
-**Dependencies:**
-
-- `Ifx_Types.h`
-- `IfxDma.h`
-- `IfxDma_Dma.h`
-
-### 2) `asclin9_dma.c` (new)
-
-**Location:** `Aurix_Firmware/asclin9_dma.c`
-
-**Contains:**
-
-- Global DMA/ASCLIN state
-- DMA completion ISR (priority 13)
-- ASCLIN + DMA channel configuration
-- Dual-buffer ping-pong swap logic
-- Non-blocking consumer API for main loop
-
-**Key snippets:**
-
-```c
-Asclin9Dma g_asclin9_dma = {0};
-IFX_INTERRUPT(ASCLIN9_DMA_ISR, 0, 13) { ... }
-uint8* asclin9_dma_get_completed_buffer(void);
-```
-
-**Build requirements:**
-
-- iLLD libraries compiled and linked
-- DMA module enabled in build configuration
+**Critical discovery**: The "CAN diagnostic" bus is actually **UART at 1 Mbaud, 8-Odd-2**
+through CAN transceivers (TLE9251V/TJA1057/TCAN1057 differential PHY only).
+MCMCAN is NOT used.
 
 ---
 
-## Modified Files
+## Source Files
 
-### 3) `Cpu0_Main.c` (modified)
+### LVDS Pixel Data (ASCLIN1)
 
-**Location:** `Aurix_Firmware/Cpu0_Main.c`
+| File | Role |
+|------|------|
 
-**Changes:**
+| `asclin1_dma.h` | ASCLIN1 DMA config, `Asclin1Dma` handle, consumer API |
+| `asclin1_dma.c` | ASCLIN1 RX on P14.8, DMA ch 1, ping-pong 2560B buffers |
+| `lvds_frame_mode.h` | `LvdsFrameMode` enum (Frame_8N1, Frame_8Odd1) |
 
-1. Include switch:
+### Diagnostic UART (ASCLIN9)
 
-   ```diff
-   - #include "asclin9_rx.h"
-   + #include "asclin9_dma.h"
-   ```
+| File | Role |
+|------|------|
 
-2. Initialization switch:
+| `can_hw.h` | `DiagUartStats`, `DiagUartFrame`, sniffer API |
+| `can_hw.c` | ASCLIN9 RX on P20.7, DMA ch 0, ping-pong 2560B buffers |
+| `can_diag.h` | `CanDiagRecord`, ring buffer queue, synthetic producer API |
+| `can_diag.c` | Diagnostic record queue + Ethernet bridge (magic 0x4344) |
+
+### Device Mode / Orchestration
+
+| File | Role |
+|------|------|
+
+| `device_mode.h` | Baud constants (20M Osram, 12.5M Nichia), mode API |
+| `device_mode.c` | ASCLIN1 reconfiguration, parser selection, GETH init |
+
+### Frame Parsers
+
+| File | Role |
+|------|------|
+
+| `rxmon.h/.c` | Nichia line parser (0x5D sync, CRC-16) |
+| `osram_frame.h/.c` | Osram frame parser (header hunt, CRC-32) |
+| `osram_crc32.h/.c` | CRC-32 (MSB-first, seed 0xDEADAFFE) |
+
+### Ethernet TX
+
+| File | Role |
+|------|------|
+
+| `frame_eth.h/.c` | Unified Ethernet TX: pixel (0x4F53/0x4E49) + diag (0x4344) |
+
+### Main Loop
+
+| File | Role |
+|------|------|
+
+| `Cpu0_Main.c` | Main loop: DMA drain → parsers → diag_uart_tick → ETH TX |
+
+### Support / Other
+
+| File | Role |
+|------|------|
+
+| `trap_diag.h/.c` | Trap/exception handler diagnostics |
+| `dma_sanity.h/.c` | DMA self-test utilities |
+| `tft_display.h/.c` | ILI9341 TFT driver (CPU1) |
+| `tft_font.h` | 16×24 font data |
+| `tft_font_modern.h` | Alternative modern font |
+| `tft_ui.h/.c` | TFT button/touch UI (CPU1) |
+
+---
+
+## Deleted Files (replaced by asclin1_dma)
+
+- `asclin9_dma.c/h` → replaced by `asclin1_dma.c/h`
+- `asclin9_rx.c/h` → enum moved to `lvds_frame_mode.h`
+- `asclin9_rx_dma.c/h` → older variant, unused
 
    ```diff
    - asclin9_init(12500000u, Frame_8N1);
    + asclin9_dma_init(12500000u, Frame_8N1);
    ```
 
-3. Main loop switch to non-blocking consume:
+   #Main loop switch to non-blocking consume:
 
    ```diff
    while (1)

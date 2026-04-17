@@ -6,7 +6,7 @@
  *
  * Manages the active device type (Nichia or Osram) and coordinates the
  * reconfiguration of:
- *   - ASCLIN9 (baud rate + parity)
+ *   - ASCLIN1 (baud rate + parity) for LVDS pixel data on P14.8
  *   - Frame parser selection (rxmon vs. osram_frame)
  *   - Ethernet TX parameters (magic, dimensions)
  *
@@ -19,7 +19,7 @@
 #include "Ifx_Types.h"
 #include "frame_eth.h"       /* FrameEthDevice */
 
-/* ─── ASCLIN9 parameters per device ─── */
+/* ─── ASCLIN1 parameters per device (LVDS on P14.8) ─── */
 
 /* Nichia: 12.5 Mbaud, 8N1, oversampling 8 */
 #define DM_NICHIA_BAUD        12500000u

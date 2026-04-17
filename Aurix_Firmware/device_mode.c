@@ -1,15 +1,17 @@
 /******************************************************************************
  * device_mode.c — LSM device type management
  *
- * Coordinates ASCLIN9, frame parsers, and Ethernet TX when switching
- * between Nichia (12.5 Mbaud, 8N1) and Osram (20 Mbaud, 8O1).
+ * Coordinates ASCLIN1 (LVDS), ASCLIN9 (diagnostic), frame parsers, and
+ * Ethernet TX when switching between Nichia (12.5 Mbaud) and Osram (20 Mbaud).
  *
  * At startup, device_mode_init() is called with the desired mode.
  * Runtime switching via device_mode_set() reconfigures all subsystems.
  ******************************************************************************/
 
 #include "device_mode.h"
-#include "asclin9_dma.h"
+#include "asclin1_dma.h"
+#include "can_diag.h"
+#include "can_hw.h"
 #include "rxmon.h"
 #include "osram_frame.h"
 
@@ -33,18 +35,22 @@ void device_mode_init(FrameEthDevice device)
         rxmon_reset();
     }
 
-    /* Configure ASCLIN9 for the selected device */
+    /* Configure ASCLIN1 for LVDS pixel data */
     if (device == FE_DEVICE_OSRAM)
     {
-        asclin9_dma_init(DM_OSRAM_BAUD, Frame_8Odd1);
+        asclin1_dma_init(DM_OSRAM_BAUD, Frame_8Odd1);
     }
     else
     {
-        asclin9_dma_init(DM_NICHIA_BAUD, Frame_8N1);
+        asclin1_dma_init(DM_NICHIA_BAUD, Frame_8N1);
     }
 
     /* Initialise GETH + PHY for Ethernet TX */
     frame_eth_init(device);
+    can_diag_init();
+
+    /* Initialise diagnostic UART sniffer on ASCLIN9 / P20.7 */
+    diag_uart_init();
 }
 
 void device_mode_set(FrameEthDevice device)
@@ -53,18 +59,18 @@ void device_mode_set(FrameEthDevice device)
         return;
 
     /* 1. Drain any pending DMA buffer (ignore it) */
-    g_asclin9_dma.pCompletedBuffer = NULL_PTR;
+    g_asclin1_dma.pCompletedBuffer = NULL_PTR;
 
-    /* 2. Reconfigure ASCLIN9 (baudrate + parity).
-     *    asclin9_dma_init() disables interrupts, reprograms ASCLIN + DMA,
+    /* 2. Reconfigure ASCLIN1 (baudrate + parity).
+     *    asclin1_dma_init() disables interrupts, reprograms ASCLIN + DMA,
      *    then re-enables interrupts.  Safe to call again. */
     if (device == FE_DEVICE_OSRAM)
     {
-        asclin9_dma_init(DM_OSRAM_BAUD, Frame_8Odd1);
+        asclin1_dma_init(DM_OSRAM_BAUD, Frame_8Odd1);
     }
     else
     {
-        asclin9_dma_init(DM_NICHIA_BAUD, Frame_8N1);
+        asclin1_dma_init(DM_NICHIA_BAUD, Frame_8N1);
     }
 
     /* 3. Reset/init frame parsers */
@@ -77,6 +83,7 @@ void device_mode_set(FrameEthDevice device)
     /* 4. Update Ethernet TX parameters + reset frame assembly */
     frame_eth_set_device(device);
     frame_eth_reset_frame_state();
+    can_diag_reset();
 
     s_currentDevice = device;
 }

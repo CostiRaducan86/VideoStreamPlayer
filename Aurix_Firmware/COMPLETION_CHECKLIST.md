@@ -1,63 +1,49 @@
-# Completion Checklist - Step 1 DMA + Dual Buffer
+# Completion Checklist — Aurix Firmware
 
-## Status
+## Milestone 1: Synthetic CAN Diagnostic (COMPLETE)
 
-### Implementation Complete and Ready for Build
+- [x] `can_diag.c/h` — record queue + synthetic producer
+- [x] Ethernet bridge (magic 0x4344) via `frame_eth.c`
+- [x] C# parser (`LsmCanDiagParser.cs`) + capture + GUI
+- [x] Validated end-to-end with synthetic data
 
----
+## Milestone 2: Real Diagnostic UART Sniffer (IN PROGRESS)
 
-## Core Files
+### Firmware — ASCLIN9 DMA (COMPLETE)
 
-- [x] `asclin9_dma.h` created
-- [x] `asclin9_dma.c` created
-- [x] `Cpu0_Main.c` updated to use DMA API
+- [x] `can_hw.c/h` — ASCLIN9 + DMA ch0, 1M 8O2
+- [x] `diag_uart_init()`, `diag_uart_tick()` working
+- [x] DMA completions incrementing on target
+- [x] `synced=1` confirmed
+- [x] 0 build errors, 0 warnings
 
-## Code Quality
+### Firmware — Frame Parser (TODO)
 
-- [x] No syntax issues in new DMA module
-- [x] Main loop updated to non-blocking buffer consume
-- [x] DMA ISR and consumer API split cleanly
+- [ ] Implement `diag_uart_try_receive()` — extract transactions from DMA byte stream
+- [ ] ECU frame format: `[0x80][0xA5][HCTRL][HADR]+data+CRC16`
+- [ ] Feed parsed frames to `can_diag_enqueue()`
+- [ ] Validate against VILS monitor screenshots
 
-## Step 1 Goals (DMA + Dual Buffer)
+### C# GUI (TODO)
 
-- [x] Zero-copy DMA transfers implemented
-- [x] Ping-pong buffer mechanism implemented
-- [x] Non-blocking consumer path implemented
-- [x] Parser feed path integrated
+- [ ] Wire real Ethernet diagnostic packets to `LsmCanDiagParser`
+- [ ] UartTransaction detail view in CanDetailWindow
+- [ ] File export (CSV/binary)
+- [ ] Validate parsed fields against reference screenshots
 
-## Build Preconditions
+## LVDS Pixel Pipeline (COMPLETE)
 
-- [ ] Aurix Development Studio (ADS) installed
-- [ ] TASKING toolchain available
-- [ ] Project imports successfully in ADS
-- [ ] Build configuration set to `TriCore Debug (TASKING)`
+- [x] `asclin1_dma.c/h` — ASCLIN1/P14.8/DMA ch1
+- [x] `lvds_frame_mode.h` — frame mode enum
+- [x] `device_mode.c` — Osram/Nichia switching
+- [x] Osram: 48.7 FPS on target
+- [ ] Nichia: not yet re-validated (camera not connected)
 
-## Build Checklist
+## TFT Display (COMPLETE)
 
-1. [ ] Open ADS
-2. [ ] Clean project
-3. [ ] Build project
-4. [ ] Confirm `VilsSharpX.elf` generated
-5. [ ] Confirm no build errors
-
-## Runtime Validation Checklist
-
-1. [ ] Start debugger session
-2. [ ] Confirm DMA ISR fires
-3. [ ] Observe `completionCount` increasing
-4. [ ] Confirm parser receives data
-5. [ ] Confirm `timeoutWarnings == 0` in nominal case
-
-## Success Criteria
-
-- [ ] Build completes with 0 errors and 0 warnings
-- [ ] `VilsSharpX.elf` exists in `TriCore Debug (TASKING)`
-- [ ] DMA receive pipeline runs without stalls
-- [ ] Frame parser reports healthy counters
-
-## Phase 2 Backlog (Not in Step 1)
-
-- Ethernet protocol design
+- [x] `tft_display.c/h` — ILI9341 driver (CPU1)
+- [x] `tft_ui.c/h` — button/touch demo
+- [x] Classic + Modern fonts
 - Ethernet TX implementation
 - Host-side frame ingestion updates
 

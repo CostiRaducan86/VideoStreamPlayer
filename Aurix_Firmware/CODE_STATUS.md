@@ -1,103 +1,57 @@
-# Code Status - DMA Step 1
+# Code Status — Aurix Firmware v7
 
-## Current State
+## Current State: VALIDATED ON TARGET
 
-### Implementation Complete, Awaiting Build + Hardware Validation
-
----
-
-## Scope Delivered
-
-- DMA-based ASCLIN9 RX path
-- Dual-buffer ping-pong buffer model
-- Main loop integration in `Cpu0_Main.c`
-- Documentation package for build and validation
-
-## Files
-
-### New
-
-- `asclin9_dma.h`
-- `asclin9_dma.c`
-- `BUILD_INSTRUCTIONS.md`
-- `DMA_DUAL_BUFFER_DESIGN.md`
-- `STEP1_BUILD_VALIDATE.md`
-- `FILE_MANIFEST.md`
-- `HANDOFF_SUMMARY.md`
-- `COMPLETION_CHECKLIST.md`
-
-### Modified
-
-- `Cpu0_Main.c`
+Both channels run in parallel. Tested 2026-04-17.
 
 ---
 
-## Quality Checklist
+## Modules
 
-### Compilation Safety
+### LVDS Pixel Data (ASCLIN1)
 
-- [ ] No syntax errors in `*.c` / `*.h`
-- [ ] iLLD include paths resolved
-- [ ] DMA symbols linked correctly
+| Item | Status |
+|------|--------|
 
-### Runtime Safety
+| `asclin1_dma.c/h` | Working — 48.7 FPS Osram |
+| DMA channel 1, ISR prio 14 | Stable |
+| Pin P14.8 (X103 pin 7) | Connected, verified |
+| Osram frame parser | framesOk incrementing |
+| Nichia parser | Untested (camera not connected) |
 
-- [ ] ISR/consumer ownership is race-safe
-- [ ] `timeoutWarnings` remains stable in nominal load
-- [ ] Parser receives complete buffer flow
+### Diagnostic UART (ASCLIN9)
 
-### Integration
+| Item | Status |
+|------|--------|
 
-- [ ] Existing timing/fps update path unaffected
-- [ ] Main loop remains non-blocking
-- [ ] Legacy module kept only as reference
+| `can_hw.c/h` — diag_uart API | Working — DMA completions incrementing |
+| DMA channel 0, ISR prio 13 | Stable |
+| Pin P20.7 via TLE9251V→X202 | Connected, synced=1 |
+| `diag_uart_try_receive()` | Stub — returns FALSE (parser not yet implemented) |
+| Ethernet bridge (0x4344) | M1 working (synthetic), M2 pending real frames |
 
----
+### Support Modules
 
-## Design Parameters
+| Item | Status |
+|------|--------|
 
-| Parameter | Value | Note |
-| --- | --- | --- |
-| RX baud | 12.5 Mbaud | Nichia stream |
-| Buffer size | 2560 bytes | ~10 lines batch |
-| Buffers | 2 | ping-pong |
-| DMA completion cadence | ~1.6 ms | at nominal baud |
-| ISR priority | 13 | below ASCLIN RX/ERR |
-
----
-
-## Common Build Issues
-
-### `IfxDma.h` not found
-
-- **Cause:** iLLD include path missing
-- **Fix:** add iLLD include directories in ADS settings
-
-### `undefined reference to IfxDma_DmaChannel_init`
-
-- **Cause:** iLLD DMA module not linked
-- **Fix:** ensure iLLD sources/libraries are compiled in current config
-
-### `asclin9_dma.h: No such file or directory`
-
-- **Cause:** index/build state stale
-- **Fix:** rebuild project index + clean build
+| `device_mode.c` | Initializes both channels |
+| `frame_eth.c` | Pixel + diag Ethernet TX working |
+| `can_diag.c` | Record queue + synthetic producer working |
+| `tft_display/tft_ui` | Working on CPU1 |
 
 ---
 
-## Validation Strategy
+## Build
 
-### Pre-Hardware
+- 0 errors, 0 warnings (TASKING)
+- Target: TC397 TFT board (5V variant)
 
-1. Build with `TriCore Debug (TASKING)`
-2. Confirm `VilsSharpX.elf` output
-3. Check map/link symbols for DMA references
+## Next Steps
 
-### Hardware
-
-1. Flash firmware
-2. Run debugger watch on completion counters
-3. Confirm parser counters increase and CRC stays healthy
+1. Implement UART frame parser in `diag_uart_try_receive()`
+2. Wire real diagnostic records into Ethernet bridge
+3. Validate parsed records against VILS monitor screenshots
 
 ### Success Targets
 

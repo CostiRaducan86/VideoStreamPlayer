@@ -43,15 +43,16 @@ This is an **Aurix Development Studio (Eclipse CDT)** project for the TC397 TriC
 
 6. **Expected Success Output:**
 
-   ```powershell
-   Building: asclin9_dma.c
-   Building: asclin9_rx.c
+   ```text
+   Building: asclin1_dma.c
+   Building: can_hw.c
+   Building: can_diag.c
    Building: Cpu0_Main.c
    Building: rxmon.c
+   Building: osram_frame.c
    ...
-   13:20:45 Build Finished
-   [RESULT] VilsSharpX.elf (xxx bytes)
-   [RESULT] VilsSharpX.hex
+   Build Finished
+   [RESULT] VilsSharpX.elf
    ```
 
 7. **Output Artifacts:**
@@ -67,7 +68,8 @@ Aurix_Firmware/
 ├── TriCore Debug (TASKING)/
 │   ├── VilsSharpX.elf          ← Main firmware image
 │   ├── VilsSharpX.hex          ← Hex format (for programmers)
-│   ├── asclin9_dma.o           ← New DMA object file
+│   ├── asclin1_dma.o           ← LVDS DMA module
+│   ├── can_hw.o                ← Diagnostic UART module
 │   ├── Cpu0_Main.o
 │   ├── rxmon.o
 │   └── ...
@@ -114,7 +116,7 @@ cd "Aurix_Firmware\TriCore Debug (TASKING)"
 
 ## Troubleshooting Build Errors
 
-### Error: `asclin9_dma.h: No such file or directory`
+### Error: `asclin1_dma.h: No such file or directory`
 
 - **Cause:** Eclipse hasn't indexed the new files yet
 - **Fix:** Right-click project → Index → Rebuild
@@ -149,32 +151,30 @@ cd "Aurix_Firmware\TriCore Debug (TASKING)"
 
 ### Check Object Files Were Created
 
-After successful build, verify new files exist:
+After successful build, verify key files exist:
 
 ```powershell
-# Check if DMA object was compiled
-Test-Path "Aurix_Firmware\TriCore Debug (TASKING)\asclin9_dma.o"
-# Expected: True
+# Check if LVDS DMA object was compiled
+Test-Path "Aurix_Firmware\TriCore Debug (TASKING)\asclin1_dma.o"
+
+# Check if diagnostic UART object was compiled
+Test-Path "Aurix_Firmware\TriCore Debug (TASKING)\can_hw.o"
 
 # Check main ELF was linked
 Test-Path "Aurix_Firmware\TriCore Debug (TASKING)\VilsSharpX.elf"
-# Expected: True
 ```
 
-### Check Map File for DMA Symbols
+### Check Map File for Symbols
 
 ```bash
-grep -i "asclin9_dma" "TriCore Debug (TASKING)/VilsSharpX.map"
-# Should show something like:
-# .text.asclin9_dma_init   0x80001200  0x200  asclin9_dma.o
-# .text.ASCLIN9_DMA_ISR    0x80001400  0x100  asclin9_dma.o
+grep -i "asclin1_dma\|diag_uart" "TriCore Debug (TASKING)/VilsSharpX.map"
 ```
 
 ---
 
 ## Next Steps After Successful Build
 
-### Option A: Delta Testing (Verify DMA Is Actually Being Used)
+### Option A: Debug on Target
 
 1. **Use Eclipse Debugger (Recommended):**
 
@@ -182,13 +182,11 @@ grep -i "asclin9_dma" "TriCore Debug (TASKING)/VilsSharpX.map"
    Run → Debug As → Embedded C/C++ Application (TASKING)
    ```
 
-   - Set breakpoint in `ASCLIN9_DMA_ISR`
-   - Run and verify ISR fires (should hit every ~1.6 ms)
-
 2. **Watch Variables:**
 
-   - Add to Variables panel: `g_asclin9_dma.completionCount`
-   - Observe it increment (should reach ~48/sec)
+   - LVDS: `g_asclin1_dma.completionCount` (should reach ~48/sec)
+   - Diagnostic: `g_diagUartStats.dmaCompletions` (should increment)
+   - Frame: `g_osramStats.framesOk` (should increment)
 
 ### Option B: Flash to Hardware
 
@@ -196,47 +194,15 @@ grep -i "asclin9_dma" "TriCore Debug (TASKING)/VilsSharpX.map"
 2. **In Eclipse:** Run → Debug As → (TASKING configured debug target)
 3. **Flash automatically and break at `main()`**
 
-### Option C: Export ELF for External Programmer
-
-If using a standalone programmer:
-
-- Copy `VilsSharpX.elf` to programmer tool
-- Or use `.hex` format for universal compatibility
-
 ---
 
-## Build Configuration Details
-
-### Clean vs. Rebuild
-
-- **Clean Project:** Deletes all `.o` files and `.elf`
-
-  ```text
-  Right-click project → Clean Project
-  ```
-
-  - Takes ~5 seconds
-  - Next build will recompile everything (Full Build)
-
-- **Incremental Build:** Only recompiles changed files
-
-  ```text
-  Ctrl+B or Project → Build Project
-  ```
-
-  - Takes ~2-5 seconds
-  - Most common during development
-
-### File Dependencies
+## File Dependencies
 
 The Aurix build system tracks:
 
-- **asclin9_dma.c** depends on:
-  - `asclin9_dma.h` (header with constants)
-  - `IfxDma.h` (from iLLD Libraries/)
-  - `IfxAsclin.h` (from iLLD Libraries/)
-
-If any `.h` changes, all depending `.c` files auto-recompile.
+- **asclin1_dma.c** depends on: `asclin1_dma.h`, `IfxDma.h`, `IfxAsclin.h` (from iLLD)
+- **can_hw.c** depends on: `can_hw.h`, `IfxDma.h`, `IfxAsclin.h` (from iLLD)
+- **Cpu0_Main.c** depends on: `asclin1_dma.h`, `can_hw.h`, `can_diag.h`, etc.
 
 ---
 
@@ -244,10 +210,9 @@ If any `.h` changes, all depending `.c` files auto-recompile.
 
 After build completes successfully, you should have:
 
-✅ **VilsSharpX.elf** created (main firmware)  
-✅ **VilsSharpX.map** shows asclin9_dma.o linked  
-✅ **Compilation log** shows "0 error, 0 warning"  
-✅ **asclin9_dma.o** file size > 0 (typically 5-15 KB)
+✅ **VilsSharpX.elf** created (main firmware)
+✅ **Compilation log** shows "0 error, 0 warning"
+✅ **asclin1_dma.o** + **can_hw.o** object files created
 
 ---
 
@@ -260,9 +225,9 @@ If build fails, provide:
 3. **Verification** that files exist:
 
    ```powershell
-   Test-Path "Aurix_Firmware/asclin9_dma.c"          # Should be True
-   Test-Path "Aurix_Firmware/asclin9_dma.h"          # Should be True
-   Test-Path "Aurix_Firmware/.project"               # Should be True
+   Test-Path "Aurix_Firmware/asclin1_dma.c"          # Should be True
+   Test-Path "Aurix_Firmware/can_hw.c"                # Should be True
+   Test-Path "Aurix_Firmware/.project"                # Should be True
    ```
 
 4. **TASKING compiler version:**
@@ -270,9 +235,3 @@ If build fails, provide:
    ```text
    In Eclipse: Help → About Aurix Development Studio
    ```
-
----
-
-## Next: Hardware Validation
-
-Once build succeeds, proceed to [STEP1_BUILD_VALIDATE.md](STEP1_BUILD_VALIDATE.md) for hardware testing!

@@ -29,6 +29,10 @@ docs/outputs/
 # Large sample inputs (pcap/avi) are kept locally
 docs/inputs/
 
+# Specific technical documents are kept locally
+docs/Aurix_Docs/
+docs/LSM_CAN_Docs/
+
 # Aurix ADS local/generated/vendor artifacts
 Aurix_Firmware/.ads/
 Aurix_Firmware/.settings/

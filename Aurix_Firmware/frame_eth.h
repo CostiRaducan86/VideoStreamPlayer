@@ -33,6 +33,7 @@
  ******************************************************************************/
 
 #include "Ifx_Types.h"
+#include "can_diag.h"
 
 /* ─── Max frame size (Osram worst case) ─── */
 #define FE_MAX_FRAME_BYTES        25600u
@@ -42,8 +43,15 @@
 #define FE_MAGIC_NICHIA           0x4E49u     /* "NI" */
 #define FE_MAGIC_OSRAM            0x4F53u     /* "OS" */
 #define FE_MAGIC_COMMAND          0x434Du     /* "CM" — command packet from PC */
+#define FE_MAGIC_CAN_DIAG         0x4344u     /* "CD" — CAN diagnostic record */
 #define FE_CMD_SET_DEVICE         0x01u       /* Command: set device mode */
 #define FE_HDR_LEN                18u
+#define FE_DIAG_HDR_LEN           8u
+/* v2 payload: 22 fixed bytes + 72 raw UART bytes = 94 bytes
+ * Fixed: ts(4)+addr(2)+rspDly(2)+ifDly(2)+val(4)+crc(4)+devId(1)+op(1)+status(1)+rawLen(1) = 22 */
+#define FE_DIAG_PAYLOAD_FIXED     22u
+#define FE_DIAG_PAYLOAD_RAW_MAX   72u
+#define FE_DIAG_PAYLOAD_LEN       (FE_DIAG_PAYLOAD_FIXED + FE_DIAG_PAYLOAD_RAW_MAX)
 #define FE_MTU                    1500u
 #define FE_MAX_PAYLOAD            (FE_MTU - FE_HDR_LEN)  /* 1482 */
 
@@ -109,6 +117,8 @@ typedef struct
     volatile uint32 initStep;
     volatile uint32 mdioRawReg2;
     volatile uint32 mdioRawReg3;
+    volatile uint32 diagRecordsSent;
+    volatile uint32 diagTxErrors;
 
     /* Assembly counters */
     volatile uint32 nichiaRowsReceived;
@@ -159,6 +169,12 @@ void frame_eth_push_osram_frame(const uint8 *pixels, uint32 len);
  * @return TRUE if a frame was sent, FALSE otherwise
  */
 boolean frame_eth_send_pending(void);
+
+/**
+ * If a diagnostic record is pending, send one Ethernet packet.
+ * Call from the main loop after frame transport so diagnostics remain secondary.
+ */
+boolean frame_eth_send_can_diag_pending(void);
 
 /**
  * Reset frame assembly state (for device mode switch).

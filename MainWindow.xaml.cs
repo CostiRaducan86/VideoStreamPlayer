@@ -1,9 +1,11 @@
 ﻿using Microsoft.Win32;
 using System;
+using System.Collections.ObjectModel;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Globalization;
 using System.IO;
+using System.Linq;
 using SharpPcap;
 using System.Threading;
 using System.Threading.Tasks;
@@ -142,6 +144,12 @@ namespace VilsSharpX
         // Ethernet capture from Aurix GETH → raw ethertype 0x88B5 (pane B)
         private NichiaEthCapture? _nichiaEthCapture;
         private OsramEthCapture? _osramEthCapture;
+        private LsmCanDiagCapture? _canDiagCapture;
+        private readonly LsmCanDiagStore _canDiagStore = new(512);
+        private readonly ObservableCollection<CanDiagRowView> _canDiagRows = new();
+        private const int CanDiagPageSize = 14;
+        private int _canDiagCurrentPage = 1;
+        private int _canDiagTotalPages = 1;
 
         private Frame? _latestA;
         private Frame? _latestB;
@@ -230,6 +238,7 @@ namespace VilsSharpX
             // Treat that phase like settings-load to avoid running app logic before controls/bitmaps are wired.
             _settingsManager.IsLoading = true;
             InitializeComponent();
+            InitializeCanDiagMonitor();
             ImgA.Source = _wbA;
             ImgB.Source = _wbB;
             ImgD.Source = _wbD;
@@ -1120,6 +1129,394 @@ namespace VilsSharpX
             }
         }
 
+        private DispatcherTimer? _canDiagStatusTimer;
+
+        private void InitializeCanDiagMonitor()
+        {
+            if (LvCanDiag != null)
+                LvCanDiag.ItemsSource = _canDiagRows;
+
+            if (LblCanPageInfo != null)
+                LblCanPageInfo.Text = "Page: 1 / 1";
+
+            _canDiagStatusTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
+            _canDiagStatusTimer.Tick += (_, _) => UpdateCanDiagStatusText();
+            _canDiagStatusTimer.Start();
+
+            UpdateCanDiagStatusText();
+        }
+
+        private void StartCanDiagCapture()
+        {
+            try
+            {
+                StopCanDiagCapture();
+                string? nicHint = _nicSelector.GetSelectedDeviceName(CmbLiveNic) ?? _avtpLiveDeviceHint;
+                _canDiagCapture = LsmCanDiagCapture.Start(nicHint, AppendDiagLog);
+                _canDiagCapture.OnRecordReady += record => Dispatcher.BeginInvoke(() => HandleCanDiagRecord(record));
+                AppendDiagLog("[can] diagnostic capture started");
+                UpdateCanDiagStatusText();
+            }
+            catch (Exception ex)
+            {
+                AppendDiagLog($"[can] capture error: {ex.Message}");
+                UpdateCanDiagStatusText();
+            }
+        }
+
+        private void StopCanDiagCapture()
+        {
+            if (_canDiagCapture != null)
+            {
+                _canDiagCapture.Dispose();
+                _canDiagCapture = null;
+                AppendDiagLog("[can] diagnostic capture stopped");
+            }
+
+            UpdateCanDiagStatusText();
+        }
+
+        private void HandleCanDiagRecord(LsmCanDiagRecord record)
+        {
+            if (_canDiagCapture == null || !_canDiagCapture.IsCapturing)
+                return;
+
+            _canDiagStore.Append(record);
+            AppendRawCanLine(record);
+
+            AppendDiagLog(
+                $"[can] seq={record.Sequence} dev={record.DeviceName} op={record.OperationName} " +
+                $"addr=0x{record.Address:X4} value=0x{record.Value:X8} status={record.Status}");
+
+            RefreshCanDiagView();
+        }
+
+        private void RefreshCanDiagView()
+        {
+            string orderBy = GetSelectedComboContent(CmbCanOrderBy);
+            string sort = GetSelectedComboContent(CmbCanSort);
+
+            var filtered = _canDiagStore
+                .SnapshotNewestFirst(512)
+                .Where(MatchesCanDiagFilter)
+                .Select(CanDiagRowView.FromRecord)
+                .ToList();
+
+            IEnumerable<CanDiagRowView> ordered = orderBy switch
+            {
+                "Time" => filtered.OrderBy(row => row.RawReceivedUtc),
+                _ => filtered.OrderBy(row => row.RawSequence),
+            };
+
+            if (!string.Equals(sort, "asc", StringComparison.OrdinalIgnoreCase))
+                ordered = ordered.Reverse();
+
+            var pageSource = ordered.ToList();
+            _canDiagTotalPages = Math.Max(1, (int)Math.Ceiling(pageSource.Count / (double)CanDiagPageSize));
+            _canDiagCurrentPage = Math.Max(1, Math.Min(_canDiagCurrentPage, _canDiagTotalPages));
+
+            var pageItems = pageSource
+                .Skip((_canDiagCurrentPage - 1) * CanDiagPageSize)
+                .Take(CanDiagPageSize)
+                .ToList();
+
+            _canDiagRows.Clear();
+
+            foreach (var row in pageItems)
+                _canDiagRows.Add(row);
+
+            if (LblCanPageInfo != null)
+                LblCanPageInfo.Text = $"Page: {_canDiagCurrentPage} / {_canDiagTotalPages}";
+
+            if (BtnCanPrevPage != null)
+                BtnCanPrevPage.IsEnabled = _canDiagCurrentPage > 1;
+
+            if (BtnCanNextPage != null)
+                BtnCanNextPage.IsEnabled = _canDiagCurrentPage < _canDiagTotalPages;
+
+            UpdateCanDiagStatusText();
+        }
+
+        private bool MatchesCanDiagFilter(LsmCanDiagRecord record)
+        {
+            string deviceFilter = GetSelectedComboContent(CmbCanDeviceFilter);
+            string opFilter = GetSelectedComboContent(CmbCanOpFilter);
+            string statusFilter = GetSelectedComboContent(CmbCanStatusFilter);
+
+            bool deviceOk = deviceFilter switch
+            {
+                "OSRAM" => record.DeviceId == 1,
+                "NICHIA" => record.DeviceId == 0,
+                _ => true,
+            };
+
+            bool opOk = opFilter switch
+            {
+                "R" => record.Operation == LsmCanDiagOperation.Read,
+                "W" => record.Operation == LsmCanDiagOperation.Write,
+                _ => true,
+            };
+
+            bool statusOk = statusFilter switch
+            {
+                "OK" => record.Status == LsmCanDiagStatus.Ok,
+                "Error" => record.Status != LsmCanDiagStatus.Ok,
+                _ => true,
+            };
+
+            return deviceOk && opOk && statusOk;
+        }
+
+        private void UpdateCanDiagStatusText()
+        {
+            if (LblCanMonitorStatus == null)
+                return;
+
+            int visible = _canDiagRows.Count;
+            int stored = _canDiagStore.Count;
+            long packets = _canDiagCapture?.TotalPackets ?? 0;
+            long parserErrors = _canDiagCapture?.ParserErrors ?? 0;
+            string state = _canDiagCapture?.IsCapturing == true ? "listening" : "stopped";
+
+            long magicMatches = _canDiagCapture?.DiagMagicMatches ?? 0;
+                        long niMatches = _canDiagCapture?.NiMagicMatches ?? 0;
+                        long osMatches = _canDiagCapture?.OsMagicMatches ?? 0;
+                        long other88b5 = _canDiagCapture?.Other88b5Matches ?? 0;
+                        string lastErr = _canDiagCapture?.LastParserError ?? string.Empty;
+
+            LblCanMonitorStatus.Text = magicMatches == 0
+                                ? $"State: {state}. Stored: {stored}. Rx: {packets}. CD:{magicMatches} NI:{niMatches} OS:{osMatches} OTH:{other88b5} ParseErr:{parserErrors}" +
+                                    (string.IsNullOrWhiteSpace(lastErr) ? string.Empty : $" LastErr:{lastErr}")
+                                : $"State: {state}. Stored: {stored}. Rx: {packets}. CD:{magicMatches} NI:{niMatches} OS:{osMatches} OTH:{other88b5} ParseErr:{parserErrors}" +
+                                    (string.IsNullOrWhiteSpace(lastErr) ? string.Empty : $" LastErr:{lastErr}");
+        }
+
+        private static string GetSelectedComboContent(System.Windows.Controls.ComboBox? combo)
+        {
+            if (combo?.SelectedItem is System.Windows.Controls.ComboBoxItem item)
+                return item.Content?.ToString() ?? string.Empty;
+
+            return string.Empty;
+        }
+
+        private void CmbCanFilters_SelectionChanged(object sender, System.Windows.Controls.SelectionChangedEventArgs e)
+        {
+            if (_settingsManager.IsLoading || !IsLoaded)
+                return;
+
+            _canDiagCurrentPage = 1;
+            RefreshCanDiagView();
+        }
+
+        private void BtnCanClear_Click(object sender, RoutedEventArgs e)
+        {
+            _canDiagStore.Clear();
+            _rawCanLines.Clear();
+            if (TblRawCan != null) TblRawCan.Text = string.Empty;
+            _canDiagCurrentPage = 1;
+            RefreshCanDiagView();
+        }
+
+        private void BtnCanPrevPage_Click(object sender, RoutedEventArgs e)
+        {
+            if (_canDiagCurrentPage <= 1)
+                return;
+
+            _canDiagCurrentPage--;
+            RefreshCanDiagView();
+        }
+
+        private void BtnCanNextPage_Click(object sender, RoutedEventArgs e)
+        {
+            if (_canDiagCurrentPage >= _canDiagTotalPages)
+                return;
+
+            _canDiagCurrentPage++;
+            RefreshCanDiagView();
+        }
+
+        // ── CAN Monitor: tab switching ──────────────────────────────────────────
+
+        private enum CanTab { Monitor, RawCan, UartTransaction }
+        private CanTab _activeCanTab = CanTab.Monitor;
+        private readonly System.Collections.Generic.List<string> _rawCanLines = new();
+        private const int RawCanMaxLines = 500;
+
+        private void BtnCanTabMonitor_Click(object sender, RoutedEventArgs e)  => SetCanTab(CanTab.Monitor);
+        private void BtnCanTabRawCan_Click(object sender, RoutedEventArgs e)   => SetCanTab(CanTab.RawCan);
+        private void BtnCanTabUart_Click(object sender, RoutedEventArgs e)     => SetCanTab(CanTab.UartTransaction);
+
+        private void SetCanTab(CanTab tab)
+        {
+            _activeCanTab = tab;
+
+            if (LvCanDiag != null)   LvCanDiag.Visibility   = tab == CanTab.Monitor          ? Visibility.Visible : Visibility.Collapsed;
+            if (ScvRawCan != null)   ScvRawCan.Visibility   = tab == CanTab.RawCan            ? Visibility.Visible : Visibility.Collapsed;
+            if (GridUartTx != null)  GridUartTx.Visibility  = tab == CanTab.UartTransaction  ? Visibility.Visible : Visibility.Collapsed;
+
+            // Update pill button styles
+            ApplyCanTabStyle(BtnCanTabMonitor,  tab == CanTab.Monitor);
+            ApplyCanTabStyle(BtnCanTabRawCan,   tab == CanTab.RawCan);
+            ApplyCanTabStyle(BtnCanTabUart,     tab == CanTab.UartTransaction);
+
+            if (tab == CanTab.RawCan)
+                FlushRawCanText();
+        }
+
+        private static void ApplyCanTabStyle(System.Windows.Controls.Button? btn, bool active)
+        {
+            if (btn == null) return;
+            if (active)
+            {
+                btn.Background = new System.Windows.Media.SolidColorBrush(
+                    (System.Windows.Media.Color)System.Windows.Media.ColorConverter.ConvertFromString("#1EA6E6"));
+                btn.Foreground = System.Windows.Media.Brushes.White;
+                btn.BorderBrush = btn.Background;
+                btn.FontWeight = FontWeights.SemiBold;
+            }
+            else
+            {
+                btn.Background = new System.Windows.Media.SolidColorBrush(
+                    (System.Windows.Media.Color)System.Windows.Media.ColorConverter.ConvertFromString("#F6F6F6"));
+                btn.Foreground = new System.Windows.Media.SolidColorBrush(
+                    (System.Windows.Media.Color)System.Windows.Media.ColorConverter.ConvertFromString("#444444"));
+                btn.BorderBrush = new System.Windows.Media.SolidColorBrush(
+                    (System.Windows.Media.Color)System.Windows.Media.ColorConverter.ConvertFromString("#D8D8D8"));
+                btn.FontWeight = FontWeights.Normal;
+            }
+        }
+
+        private void AppendRawCanLine(LsmCanDiagRecord record)
+        {
+            string line;
+            if (record.IsCanRawFrame)
+            {
+                // CAN frame format: > CAN[ ts ID=0x123 [DLC] AA BB CC DD ]
+                string idStr = record.IsExtendedCanId ? $"0x{record.CanId:X8}" : $"0x{record.CanId:X3}";
+                string dataHex = record.RawLength > 0
+                    ? BitConverter.ToString(record.RawPayload, 0, Math.Min(record.RawLength, record.RawPayload.Length)).Replace("-", " ")
+                    : "";
+                line = $"> CAN[ {record.SourceTimestamp} ID={idStr} [{record.RawLength}] {dataHex} ]";
+            }
+            else
+            {
+                // UART diagnostic format: > cCAN[ UnixTs 0xHEX_FULL_PAYLOAD ]
+                string hex = record.RawLength > 0
+                    ? "0x" + BitConverter.ToString(record.RawPayload, 0, Math.Min(record.RawLength, record.RawPayload.Length)).Replace("-", "")
+                    : $"0x{record.Value:X8}";
+                line = $"> cCAN[ {record.SourceTimestamp} {hex} ]";
+            }
+            _rawCanLines.Add(line);
+            if (_rawCanLines.Count > RawCanMaxLines)
+                _rawCanLines.RemoveAt(0);
+
+            if (_activeCanTab == CanTab.RawCan)
+                FlushRawCanText();
+        }
+
+        private void FlushRawCanText()
+        {
+            if (TblRawCan == null) return;
+            TblRawCan.Text = string.Join("\n", _rawCanLines);
+            // Scroll to end
+            if (ScvRawCan != null)
+                ScvRawCan.ScrollToEnd();
+        }
+
+        // ── CAN Monitor: row double-click → detail popup ────────────────────────
+
+        private void LvCanDiag_MouseDoubleClick(object sender, System.Windows.Input.MouseButtonEventArgs e)
+        {
+            if (LvCanDiag?.SelectedItem is CanDiagRowView row && row.Record != null)
+            {
+                var win = new CanDetailWindow(row.Record) { Owner = this };
+                win.ShowDialog();
+            }
+        }
+
+        private sealed class CanDiagRowView
+        {
+            public string Timestamp { get; init; } = string.Empty;
+            public string Number { get; init; } = string.Empty;
+            public string Name { get; init; } = string.Empty;
+            public string Address { get; init; } = string.Empty;
+            public string MemoryType { get; init; } = string.Empty;
+            public string Device { get; init; } = string.Empty;
+            public string Operation { get; init; } = string.Empty;
+            public string Value { get; init; } = string.Empty;
+            public string Error { get; init; } = string.Empty;
+            public ushort RawSequence { get; init; }
+            public DateTime RawReceivedUtc { get; init; }
+            public LsmCanDiagRecord? Record { get; init; }
+
+            public static CanDiagRowView FromRecord(LsmCanDiagRecord record)
+            {
+                string regName, memType, addrStr, valueStr;
+
+                if (record.IsCanRawFrame)
+                {
+                    // CAN raw frame: show CAN ID as address, data bytes as value
+                    regName = "CAN";
+                    memType = "BUS";
+                    addrStr = record.IsExtendedCanId ? $"0x{record.CanId:X8}" : $"0x{record.CanId:X3}";
+                    valueStr = record.RawLength > 0
+                        ? "0x" + BitConverter.ToString(record.RawPayload, 0, Math.Min(record.RawLength, record.RawPayload.Length)).Replace("-", "")
+                        : "/";
+                }
+                else
+                {
+                    var resolved = LsmRegisterMap.Resolve(record.Address);
+                    regName = resolved.Name;
+                    memType = resolved.MemType;
+                    addrStr = $"0x{record.Address:X4}";
+                    valueStr = FormatValueHex(record);
+                }
+
+                return new CanDiagRowView
+                {
+                    Timestamp = record.ReceivedUtc.ToLocalTime().ToString("HH:mm:ss.fff", CultureInfo.InvariantCulture),
+                    Number = record.Sequence.ToString(CultureInfo.InvariantCulture),
+                    Name = regName,
+                    Address = addrStr,
+                    MemoryType = memType,
+                    Device = $"0x{record.DeviceId:X2}",
+                    Operation = record.OperationName,
+                    Value = valueStr,
+                    Error = record.Status == LsmCanDiagStatus.Ok ? "/" : record.Status switch
+                    {
+                        LsmCanDiagStatus.Timeout => "timeout",
+                        LsmCanDiagStatus.CrcMismatch => "CRC",
+                        _ => "Error",
+                    },
+                    RawSequence = record.Sequence,
+                    RawReceivedUtc = record.ReceivedUtc,
+                    Record = record,
+                };
+            }
+            /// <summary>
+            /// Format Value hex from data register bytes (skip UART header: SYNC+Resp+DLC+Addr = 4 bytes).
+            /// Classic VILS shows concatenated register values as "0xDATA..." with truncation.
+            /// </summary>
+            private static string FormatValueHex(LsmCanDiagRecord record)
+            {
+                if (record.RawLength >= 5 && record.RawPayload.Length >= 5)
+                {
+                    // Data starts at byte 4, skip last CRC byte
+                    int dataStart = 4;
+                    int dataEnd = record.RawLength - 1; // exclude CRC
+                    if (dataEnd > dataStart && dataEnd <= record.RawPayload.Length)
+                    {
+                        var sb = new System.Text.StringBuilder("0x");
+                        for (int i = dataStart; i < dataEnd; i++)
+                            sb.Append(record.RawPayload[i].ToString("X2"));
+                        return sb.ToString();
+                    }
+                }
+                // Fallback: simple value field
+                return $"0x{record.Value:X8}";
+            }
+        }
+
         private void HandleLvdsFrameReady(byte[] frame, LvdsFrameMeta meta)
         {
             // Guard: reject stale callbacks that arrive via Dispatcher.BeginInvoke
@@ -1377,6 +1774,7 @@ namespace VilsSharpX
             SaveUiSettings();
             if (_recordingManager.IsRecording) StopRecording();
             StopAll();
+            try { StopCanDiagCapture(); } catch { /* ignore */ }
             try { StopNichiaEthCapture(); } catch { /* ignore */ }
             try { StopOsramEthCapture(); } catch { /* ignore */ }
             try { _lvdsManager?.Dispose(); } catch { /* ignore */ }
@@ -1892,6 +2290,7 @@ namespace VilsSharpX
                 _avtpLiveDeviceHint = deviceHint;
 
                 _liveCapture.StartEthernetCapture(deviceHint);
+                StartCanDiagCapture();
             }
 
             // Pane B real LVDS over Ethernet (Aurix GETH), managed by Start/Stop.
@@ -1972,6 +2371,7 @@ namespace VilsSharpX
 
             // Stop all live capture sources
             _liveCapture.StopAll();
+            StopCanDiagCapture();
             StopNichiaEthCapture();
             StopOsramEthCapture();
 

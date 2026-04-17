@@ -31,7 +31,7 @@
 
 /******************************************************************************
  * \file Cpu0_Main.c
- * \brief ASCLIN9 RX @ P14.7 (Nichia / Osram dual-device) + FPS via STM0
+ * \brief ASCLIN1 RX @ P14.8 (Nichia / Osram dual-device) + FPS via STM0
  ******************************************************************************/
 
 #include "Ifx_Types.h"
@@ -39,7 +39,9 @@
 #include "IfxScuWdt.h"
 #include "Ifx_Cfg_Ssw.h"
 
-#include "asclin9_dma.h"
+#include "asclin1_dma.h"
+#include "can_diag.h"
+#include "can_hw.h"
 #include "rxmon.h"
 #include "osram_frame.h"
 #include "frame_eth.h"
@@ -47,6 +49,7 @@
 
 /* STM timing */
 #include "Stm/Std/IfxStm.h"
+#include <string.h>
 
 /* -------------------- CPU sync -------------------- */
 IFX_ALIGN(4) IfxCpu_syncEvent cpuSyncEvent = 0;
@@ -129,13 +132,38 @@ void core0_main(void)
          * This prevents data loss when frame_eth_send_pending() takes
          * longer than the DMA buffer fill time (~1.28 ms at 20 Mbaud). */
         uint8 *completed;
-        while ((completed = asclin9_dma_get_completed_buffer()) != NULL_PTR)
+        while ((completed = asclin1_dma_get_completed_buffer()) != NULL_PTR)
         {
-            consume_dma_buffer(completed, ASCLIN9_DMA_BUFFER_SIZE);
+            consume_dma_buffer(completed, ASCLIN1_DMA_BUFFER_SIZE);
         }
+
+        /* ── Diagnostic UART sniffer: poll counters ── */
+        diag_uart_tick();
+        {
+            DiagUartFrame diagFrame;
+            while (diag_uart_try_receive(&diagFrame))
+            {
+                CanDiagRecord rec;
+                memset(&rec, 0, sizeof(rec));
+                rec.sourceTimestamp    = diagFrame.timestampUs;
+                rec.deviceId           = (uint8)device_mode_get();
+                rec.operation          = CAN_DIAG_OP_CAN_RAW;
+                rec.status             = CAN_DIAG_STATUS_OK;
+                rec.valueLen           = (diagFrame.len <= CAN_DIAG_RAW_MAX)
+                                       ? diagFrame.len : (uint8)CAN_DIAG_RAW_MAX;
+                memcpy(rec.rawPayload, diagFrame.data, rec.valueLen);
+                if (can_diag_push_record(&rec))
+                    g_canDiagStats.canRxBridged++;
+            }
+        }
+
+        /* Milestone 1 validation source: emit synthetic diagnostics until
+         * real CAN capture is wired into the same queue API. */
+        can_diag_synthetic_cyclic((uint8)device_mode_get());
 
         /* Send assembled frame over Ethernet (if ready) */
         frame_eth_send_pending();
+        frame_eth_send_can_diag_pending();
 
         /* Update FPS once per second */
         fps_update();

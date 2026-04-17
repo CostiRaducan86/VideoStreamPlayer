@@ -1,0 +1,84 @@
+#ifndef ASCLIN1_DMA_H
+#define ASCLIN1_DMA_H
+
+#include "Ifx_Types.h"
+#include "Dma/Dma/IfxDma_Dma.h"
+#include "lvds_frame_mode.h"         /* LvdsFrameMode */
+
+/**
+ * @file asclin1_dma.h
+ * @brief ASCLIN1 RX with DMA + dual buffer (ping-pong) for LVDS pixel data.
+ *
+ * Replaces the former asclin9_dma module.  LVDS pixel data now arrives on
+ * ASCLIN1 via P14.8 (X103 pin 7), freeing ASCLIN9 for diagnostic UART
+ * on P20.7 (TLE9251V CAN transceiver).
+ *
+ * DMA reads 8-bit data from ASCLIN1 RXDATA register.  Source address is
+ * kept fixed via TC3xx circular buffer mode (SCBE=1, CBLS=0).
+ *
+ * Dual buffer sizing:
+ * - Osram frame  = 326 bytes/line × 80 lines = 25600 px (plus headers/CRC)
+ * - Nichia frame = 260 bytes/line × 64 lines = 16384 px
+ * - BUFFER_SIZE = 2560 bytes ≈ 10 Nichia lines → balances ISR rate vs latency
+ */
+
+/* ==================== Configuration ==================== */
+
+/** DMA buffer size (bytes per ping-pong buffer). */
+#define ASCLIN1_DMA_BUFFER_SIZE   (2560u)
+
+/** DMA ISR priority for LVDS channel completion. */
+#define ASCLIN1_DMA_ISR_PRIO      (14u)
+
+/** DMA channel for LVDS data (channel 1; channel 0 is used by diagnostic). */
+#define ASCLIN1_DMA_CHANNEL_ID    IfxDma_ChannelId_1
+
+/* ==================== Handle ==================== */
+
+typedef struct
+{
+    /* Dual ping-pong buffers (aligned for DMA) */
+    uint8 bufferA[ASCLIN1_DMA_BUFFER_SIZE];
+    uint8 bufferB[ASCLIN1_DMA_BUFFER_SIZE];
+
+    /* Guard zone: absorbs any stray DMA writes past bufferB. */
+    uint8 _guard[32];
+
+    /* DMA resources */
+    IfxDma_Dma          dmaHandle;
+    IfxDma_Dma_Channel  dmaChannel;
+
+    /* Ping-pong bookkeeping */
+    uint8           *pCurrentDest;      /**< Points to bufferA or bufferB */
+    volatile uint8  *pCompletedBuffer;  /**< Non-NULL when a buffer is ready */
+    volatile uint32  completionCount;   /**< Total DMA buffer completions */
+    volatile uint32  missedBuffers;     /**< Overwritten before consumer read */
+    uint32           timeoutWarnings;   /**< Consumer-lag warnings */
+} Asclin1Dma;
+
+extern Asclin1Dma g_asclin1_dma;
+
+/* ==================== API ==================== */
+
+/**
+ * @brief Initialize ASCLIN1 + DMA with dual-buffer ping-pong for LVDS.
+ * @param baud_bps  Baud rate (e.g. 20000000 for 20 Mbaud Osram).
+ * @param frameMode Frame layout (Frame_8N1 or Frame_8Odd1).
+ */
+void asclin1_dma_init(uint32 baud_bps, LvdsFrameMode frameMode);
+
+/**
+ * @brief Check if a DMA buffer is ready for the parser to consume.
+ * @return Pointer to completed buffer (ASCLIN1_DMA_BUFFER_SIZE bytes),
+ *         or NULL_PTR if no data yet.  Resets the ready flag.
+ */
+uint8* asclin1_dma_get_completed_buffer(void);
+
+/**
+ * @brief Query current DMA diagnostics.
+ */
+uint32 asclin1_dma_get_completion_count(void);
+uint32 asclin1_dma_get_timeout_warnings(void);
+uint32 asclin1_dma_get_missed_buffers(void);
+
+#endif /* ASCLIN1_DMA_H */
