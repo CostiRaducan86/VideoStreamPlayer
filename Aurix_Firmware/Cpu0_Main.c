@@ -145,13 +145,46 @@ void core0_main(void)
             {
                 CanDiagRecord rec;
                 memset(&rec, 0, sizeof(rec));
-                rec.sourceTimestamp    = diagFrame.timestampUs;
-                rec.deviceId           = (uint8)device_mode_get();
-                rec.operation          = CAN_DIAG_OP_CAN_RAW;
-                rec.status             = CAN_DIAG_STATUS_OK;
-                rec.valueLen           = (diagFrame.len <= CAN_DIAG_RAW_MAX)
-                                       ? diagFrame.len : (uint8)CAN_DIAG_RAW_MAX;
+                rec.sourceTimestamp = diagFrame.timestampUs;
+                rec.deviceId       = (uint8)device_mode_get();
+                rec.status         = CAN_DIAG_STATUS_OK;
+
+                /* Copy raw UART frame into rawPayload for PC-side decoding */
+                rec.valueLen = (diagFrame.len <= CAN_DIAG_RAW_MAX)
+                             ? diagFrame.len : (uint8)CAN_DIAG_RAW_MAX;
                 memcpy(rec.rawPayload, diagFrame.data, rec.valueLen);
+
+                /* Decode UART frame header:
+                 *   [0]=SYNC  [1]=SlaveResp  [2]=DLC/FUN  [3]=RegAddr  [4..]=data
+                 * DLC/FUN: hi nibble 1=Read, 2=Write; lo nibble=nRegs (0→16) */
+                if (diagFrame.len >= 7u)
+                {
+                    uint8 dlcFun  = diagFrame.data[2];
+                    uint8 hi      = (dlcFun >> 4u) & 0x0Fu;
+                    rec.address   = (uint16)diagFrame.data[3];
+                    rec.operation = (hi == 2u) ? CAN_DIAG_OP_WRITE : CAN_DIAG_OP_READ;
+
+                    /* Extract first register value (bytes 4-5 MSB:LSB) */
+                    rec.value = ((uint32)diagFrame.data[4] << 8u) | (uint32)diagFrame.data[5];
+
+                    /* CRC is last byte before optional ACK bytes */
+                    rec.checksum = (uint32)diagFrame.data[diagFrame.len - 1u];
+                    if (hi == 2u && diagFrame.len >= 9u)
+                    {
+                        /* Write frames: CRC is 2 bytes before ACK pair */
+                        uint8 nRegs   = (dlcFun & 0x0Fu);
+                        if (nRegs == 0u) nRegs = 16u;
+                        uint8 crcIdx  = (uint8)(4u + nRegs * 2u);
+                        if (crcIdx < diagFrame.len)
+                            rec.checksum = (uint32)diagFrame.data[crcIdx];
+                    }
+                }
+                else
+                {
+                    rec.operation = CAN_DIAG_OP_READ;
+                    rec.status    = CAN_DIAG_STATUS_MALFORMED;
+                }
+
                 if (can_diag_push_record(&rec))
                     g_canDiagStats.canRxBridged++;
             }
