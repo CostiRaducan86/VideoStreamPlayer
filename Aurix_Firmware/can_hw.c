@@ -61,6 +61,18 @@ static IfxAsclin_Asc s_ascDiag;
 static uint32 s_prevCompletionCount;
 static uint32 s_prevRxBytes;
 
+/* ======================== Frame parser state ======================== */
+
+#define DIAG_PARSE_BUF_SIZE   256u
+#define DIAG_SYNC_BYTE        0x80u
+#define DIAG_MIN_FRAME_LEN    7u     /* SYNC+Slave+DLC+Addr+ValMSB+ValLSB+CRC */
+#define DIAG_MAX_FRAME_LEN    71u    /* EEPROM write (max per UART_Protocol) */
+
+static uint8  s_parseBuf[DIAG_PARSE_BUF_SIZE];
+static uint16 s_parseLen;           /* valid bytes in parse accumulator   */
+static const uint8 *s_dmaSrc;       /* current read position in DMA buf   */
+static uint16       s_dmaSrcRemain; /* remaining bytes in claimed DMA buf */
+
 /* ======================== DMA Completion ISR ======================== */
 
 IFX_INTERRUPT(DIAG_DMA_ISR, 0, DIAG_DMA_ISR_PRIO)
@@ -319,18 +331,6 @@ boolean diag_uart_tick(void)
 
     return (g_diagUartStats.synced != 0u) ? TRUE : FALSE;
 }
-
-/* ======================== Frame parser state ======================== */
-
-#define DIAG_PARSE_BUF_SIZE   256u
-#define DIAG_SYNC_BYTE        0x80u
-#define DIAG_MIN_FRAME_LEN    7u     /* SYNC+Slave+DLC+Addr+ValMSB+ValLSB+CRC */
-#define DIAG_MAX_FRAME_LEN    71u    /* EEPROM write (max per UART_Protocol) */
-
-static uint8  s_parseBuf[DIAG_PARSE_BUF_SIZE];
-static uint16 s_parseLen;           /* valid bytes in parse accumulator   */
-static const uint8 *s_dmaSrc;       /* current read position in DMA buf   */
-static uint16       s_dmaSrcRemain; /* remaining bytes in claimed DMA buf */
 
 /* Fill parse accumulator from current DMA source */
 static void diag_fill_parse_buf(void)
