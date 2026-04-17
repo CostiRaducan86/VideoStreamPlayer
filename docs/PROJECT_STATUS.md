@@ -623,6 +623,25 @@ delayMs2 = 200
 - **`RvfTypes.cs`** – Frame, FrameMeta, RvfChunk structures
 - **`LsmDeviceType.cs`** – Osram_1Chip / Nichia_1Chip enum
 
+### 12.11 CAN Diagnostic Monitor
+
+- **`LsmCanDiagRecord.cs`** – v2 record model (RawPayload, DecodedRegisters, RawHex)
+- **`LsmCanDiagParser.cs`** – binary parser (v1/v2 compat, VLAN strip)
+- **`LsmCanDiagCapture.cs`** – SharpPcap capture thread (magic 0x4344)
+- **`LsmCanDiagStore.cs`** – thread-safe ring buffer (512 entries)
+- **`LsmRegisterMap.cs`** – TLD816K register name/type lookup (50+ entries)
+- **`CanDetailWindow.xaml/.cs`** – modal detail popup (classic VILS fields)
+
+### 12.12 Firmware (Aurix_Firmware/)
+
+- **`asclin1_dma.h/.c`** – LVDS pixel DMA (ASCLIN1, P14.8, DMA ch1)
+- **`lvds_frame_mode.h`** – LvdsFrameMode enum (8N1/8O1)
+- **`can_hw.h/.c`** – diagnostic UART sniffer (ASCLIN9, P20.7, DMA ch0, 1M 8O2)
+- **`can_diag.h/.c`** – protocol v2, ring queue, synthetic producer
+- **`frame_eth.h/.c`** – pixel + diagnostic Ethernet TX
+- **`device_mode.c`** – ASCLIN1 reconfiguration, parser selection
+- **`Cpu0_Main.c`** – dual DMA drain + parsers + diag bridge in main loop
+
 ---
 
 ## 13. Technical Debt & Improvement Opportunities
@@ -646,9 +665,9 @@ delayMs2 = 200
    - Current code-behind pattern mixes UI logic with business logic
    - **Recommendation:** Migrate to MVVM with ViewModels for testability + separation
 
-4. **CAN/UART Placeholder**
-   - Panel added but not functional
-   - **Recommendation:** Implement CAN/UART message capture (e.g., via SocketCAN, PCAN API, or serial port)
+4. **CAN/UART Monitor — M1 Complete, M2 Pending**
+   - Milestone 1 (synthetic data, GUI, protocol v2) fully implemented
+   - **Next:** Milestone 2 — real CAN bus traffic from TLD816K ASIC
 
 5. **Error Handling Gaps**
    - Some paths (file I/O, network) lack try/catch
@@ -668,7 +687,7 @@ delayMs2 = 200
 
 **Medium-Term (1-2 months):**
 
-- Implement CAN/UART functional logic
+- Implement CAN Milestone 2 (real CAN bus traffic from TLD816K)
 - Migrate core logic to ViewModels (MVVM)
 - Add performance metrics (FPS actual vs. target, frame drop %)
 
@@ -797,6 +816,79 @@ dotnet restore
 **Message:** `feat(ui): Add CAN/UART and AVTP Status panels with optimized layout`
 
 **Purpose:** Stable checkpoint for future development; all changes validated with `dotnet build`
+
+---
+
+## 17. CAN Diagnostic Monitor — Milestone 1 (2026-04-03)
+
+### 17.1 Overview
+
+Full end-to-end CAN diagnostic transport implemented: firmware synthetic producer → Ethernet → C# parser → GUI.
+
+Three GUI views matching classic VILS layout:
+
+- **Monitor**: paginated decoded table (14 rows/page) with register names, filters, sorting, error highlighting
+- **RawCan**: dark Consolas console with raw hex packets
+- **Detail popup**: double-click opens modal with all classic VILS fields
+
+### 17.2 Protocol v2
+
+- **Ethertype**: 0x88B5 (shared with frame transport)
+- **Magic**: 0x4344 ("CD" for CAN Diagnostic)
+- **Payload**: 94 bytes (22 fixed + 72 raw UART)
+- **Fixed fields**: sourceTimestamp(4) + address(2) + responseDelayUs(2) + interFrameDelayUs(2) + value(4) + checksum(4) + deviceId(1) + operation(1) + status(1) + rawLen(1)
+- **Raw UART**: up to 72 bytes of actual UART frame `[SYNC][SlaveResp][DLC/FUN][Addr][Data...][CRC]`
+
+### 17.3 New files
+
+| File | Type | Purpose |
+| --- | --- | --- |
+| `Aurix_Firmware/can_diag.h` | C header | Protocol v2 constants, `CanDiagRecord` struct |
+| `Aurix_Firmware/can_diag.c` | C source | Ring queue (32), synthetic producer (32 ASIC addresses) |
+| `LsmCanDiagRecord.cs` | C# | Record model with RawPayload, DecodedRegisters, RawHex |
+| `LsmCanDiagParser.cs` | C# | Binary parser (v1/v2 backward compat, VLAN strip) |
+| `LsmCanDiagCapture.cs` | C# | SharpPcap capture thread for magic 0x4344 |
+| `LsmCanDiagStore.cs` | C# | Thread-safe ring buffer (512 entries) |
+| `LsmRegisterMap.cs` | C# | TLD816K register name/type lookup (50+ entries) |
+| `CanDetailWindow.xaml/.cs` | WPF | Modal detail popup (classic VILS fields) |
+
+### 17.4 Modified files
+
+| File | Changes |
+| --- | --- |
+| `Aurix_Firmware/frame_eth.h` | Added `FE_DIAG_PAYLOAD_FIXED=22`, `FE_DIAG_PAYLOAD_LEN=94` |
+| `Aurix_Firmware/frame_eth.c` | Added `send_can_diag_record()`, queue drain function |
+| `Aurix_Firmware/device_mode.c` | Calls `can_diag_synthetic_cyclic()` during active mode |
+| `Aurix_Firmware/Cpu0_Main.c` | Queue drain after frame transport in main loop |
+| `MainWindow.xaml` | Tab buttons, Monitor ListView, RawCan panel, filters/paging |
+| `MainWindow.xaml.cs` | Tab switching, RawCan feed, detail popup, register decode |
+
+### 17.5 Validated on hardware
+
+- Osram 2.05 LSM: LVDS 48.5 FPS unaffected, synthetic CAN records flowing
+- Monitor: correct register names (CR, HwSTAT, SR, OSHRS, FCR0, NVMDAT*, ELEDER*)
+- Detail popup: all fields correct (timing, CRC 16-bit, nested decoded registers)
+- RawCan: hex packets scrolling in dark console
+- Filters: Device/R-W/Status filtering verified
+- Error highlighting: timeout=red, CRC=yellow (tested via synthetic status injection)
+
+### 17.6 Milestone 2 scope (next)
+
+- Real CAN peripheral init on AURIX (CAN0, TLE9251V, X202 connector)
+- CAN→UART bridge to TLD816K ASIC
+- Real `CanDiagRecord` with measured timing
+- UartTransaction tab content
+- CAN monitor data export/recording
+
+### 17.7 Detailed documentation
+
+See `docs/tehnical_docs/`:
+
+- `LSM_CAN_System_Requirements.md` — 20 system requirements (all M1-scope met)
+- `LSM_CAN_Software_Requirements.md` — 22 software requirements (all M1-scope met)
+- `LSM_CAN_System_Architecture.md` — block diagram, data flow, constraints
+- `LSM_CAN_Software_Architecture.md` — module inventory, protocol layout, threading
+- `LSM_CAN_Functionality_Description.md` — runtime behavior, UART format, GUI views
 
 ### 16.3 Documentation Phase
 

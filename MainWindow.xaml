@@ -366,8 +366,176 @@
 
         <!-- Right side top: CAN/UART (aligned to A + B/D height) -->
         <GroupBox Grid.Row="0" Grid.RowSpan="2" Grid.Column="2" Header="CAN/UART Monitor" Padding="8" Margin="4" Background="#F0F0F0">
-            <TextBlock Text="CAN/UART monitoring planned for future implementation."
-                       TextWrapping="Wrap" Foreground="LightGray" FontStyle="Italic"/>
+            <Grid>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="*"/>
+                    <RowDefinition Height="Auto"/>
+                </Grid.RowDefinitions>
+                <Border Grid.Row="0" Background="#FBFBFB" BorderBrush="#D7D7D7" BorderThickness="1" CornerRadius="6" Padding="8" Margin="0,0,0,8">
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+
+                        <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center">
+                            <TextBlock FontFamily="Segoe MDL2 Assets" FontSize="12" Text="&#xE946;" Foreground="#6F6F6F" Margin="0,0,8,0"/>
+                            <TextBlock FontFamily="Segoe MDL2 Assets" FontSize="12" Text="&#xE8A7;" Foreground="#6F6F6F"/>
+                        </StackPanel>
+
+                        <StackPanel Grid.Column="2" Orientation="Horizontal" HorizontalAlignment="Right">
+                            <Button x:Name="BtnCanTabRawCan" Content="RawCan"
+                                    Click="BtnCanTabRawCan_Click"
+                                    FontSize="11" Padding="10,3" Margin="0,0,6,0"
+                                    Background="#F6F6F6" Foreground="#444444"
+                                    BorderBrush="#D8D8D8" BorderThickness="1"/>
+                            <Button x:Name="BtnCanTabMonitor" Content="Monitor"
+                                    Click="BtnCanTabMonitor_Click"
+                                    FontSize="11" FontWeight="SemiBold" Padding="12,3" Margin="0,0,6,0"
+                                    Background="#1EA6E6" Foreground="White"
+                                    BorderBrush="#1EA6E6" BorderThickness="1"/>
+                            <Button x:Name="BtnCanTabUart" Content="UartTransaction"
+                                    Click="BtnCanTabUart_Click"
+                                    FontSize="11" Padding="10,3"
+                                    Background="#F6F6F6" Foreground="#444444"
+                                    BorderBrush="#D8D8D8" BorderThickness="1"/>
+                        </StackPanel>
+                    </Grid>
+                </Border>
+
+                <Grid Grid.Row="1" Margin="0,0,0,8">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="120"/>
+                        <ColumnDefinition Width="12"/>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="80"/>
+                        <ColumnDefinition Width="12"/>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="120"/>
+                        <ColumnDefinition Width="*"/>
+                    </Grid.ColumnDefinitions>
+
+                    <TextBlock Grid.Column="0" Text="Order by:" VerticalAlignment="Center" Margin="0,0,6,0" Foreground="#666666"/>
+                    <ComboBox x:Name="CmbCanOrderBy" Grid.Column="1" SelectedIndex="0" SelectionChanged="CmbCanFilters_SelectionChanged">
+                        <ComboBoxItem Content="Nr"/>
+                        <ComboBoxItem Content="Time"/>
+                    </ComboBox>
+
+                    <TextBlock Grid.Column="3" Text="Sort:" VerticalAlignment="Center" Margin="0,0,6,0" Foreground="#666666"/>
+                    <ComboBox x:Name="CmbCanSort" Grid.Column="4" SelectedIndex="0" SelectionChanged="CmbCanFilters_SelectionChanged">
+                        <ComboBoxItem Content="asc"/>
+                        <ComboBoxItem Content="desc"/>
+                    </ComboBox>
+
+                    <TextBlock Grid.Column="6" Text="Select Device:" VerticalAlignment="Center" Margin="0,0,6,0" Foreground="#666666"/>
+                    <ComboBox x:Name="CmbCanDeviceFilter" Grid.Column="7"
+                          SelectionChanged="CmbCanFilters_SelectionChanged">
+                    <ComboBoxItem Content="Both" IsSelected="True"/>
+                    <ComboBoxItem Content="OSRAM"/>
+                    <ComboBoxItem Content="NICHIA"/>
+                    </ComboBox>
+                </Grid>
+
+                <Grid Grid.Row="2" Margin="0,0,0,8">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="120"/>
+                        <ColumnDefinition Width="12"/>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="90"/>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+
+                    <TextBlock Grid.Column="0" Text="Select to show:" VerticalAlignment="Center" Margin="0,0,6,0" Foreground="#666666"/>
+                    <ComboBox x:Name="CmbCanOpFilter" Grid.Column="1" SelectionChanged="CmbCanFilters_SelectionChanged">
+                        <ComboBoxItem Content="All" IsSelected="True"/>
+                        <ComboBoxItem Content="R"/>
+                        <ComboBoxItem Content="W"/>
+                    </ComboBox>
+
+                    <TextBlock Grid.Column="3" Text="Status:" VerticalAlignment="Center" Margin="0,0,6,0" Foreground="#666666"/>
+                    <ComboBox x:Name="CmbCanStatusFilter" Grid.Column="4" SelectionChanged="CmbCanFilters_SelectionChanged">
+                        <ComboBoxItem Content="All" IsSelected="True"/>
+                        <ComboBoxItem Content="OK"/>
+                        <ComboBoxItem Content="Error"/>
+                    </ComboBox>
+
+                    <Button x:Name="BtnCanClear" Grid.Column="6" Content="Clear" Click="BtnCanClear_Click" Padding="10,4"/>
+                </Grid>
+
+                <!-- Monitor view (default visible) -->
+                <ListView x:Name="LvCanDiag" Grid.Row="3" Margin="0,0,0,8"
+                          MouseDoubleClick="LvCanDiag_MouseDoubleClick">
+                    <ListView.View>
+                        <GridView>
+                            <GridViewColumn Header="Time" DisplayMemberBinding="{Binding Timestamp}" Width="86"/>
+                            <GridViewColumn Header="Nr" DisplayMemberBinding="{Binding Number}" Width="44"/>
+                            <GridViewColumn Header="Name" DisplayMemberBinding="{Binding Name}" Width="96"/>
+                            <GridViewColumn Header="Address" DisplayMemberBinding="{Binding Address}" Width="72"/>
+                            <GridViewColumn Header="MemoryType" DisplayMemberBinding="{Binding MemoryType}" Width="78"/>
+                            <GridViewColumn Header="Device" DisplayMemberBinding="{Binding Device}" Width="68"/>
+                            <GridViewColumn Header="R/W" DisplayMemberBinding="{Binding Operation}" Width="44"/>
+                            <GridViewColumn Header="Value" DisplayMemberBinding="{Binding Value}" Width="130"/>
+                            <GridViewColumn Header="Error" DisplayMemberBinding="{Binding Error}" Width="80"/>
+                        </GridView>
+                    </ListView.View>
+                    <ListView.ItemContainerStyle>
+                        <Style TargetType="ListViewItem">
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding Error}" Value="Timeout">
+                                    <Setter Property="Background" Value="#FFEEEE"/>
+                                    <Setter Property="Foreground" Value="#CC0000"/>
+                                </DataTrigger>
+                                <DataTrigger Binding="{Binding Error}" Value="CRC">
+                                    <Setter Property="Background" Value="#FFF3CC"/>
+                                    <Setter Property="Foreground" Value="#886600"/>
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </ListView.ItemContainerStyle>
+                </ListView>
+
+                <!-- RawCan view (hidden by default) -->
+                <ScrollViewer x:Name="ScvRawCan" Grid.Row="3" Margin="0,0,0,8"
+                              Visibility="Collapsed"
+                              VerticalScrollBarVisibility="Auto"
+                              HorizontalScrollBarVisibility="Disabled"
+                              Background="#1E1E1E">
+                    <TextBlock x:Name="TblRawCan" FontFamily="Consolas" FontSize="11"
+                               Foreground="#D4D4D4" Padding="8,6"
+                               TextWrapping="Wrap"/>
+                </ScrollViewer>
+
+                <!-- UartTransaction view (hidden by default) -->
+                <Grid x:Name="GridUartTx" Grid.Row="3" Margin="0,0,0,8" Visibility="Collapsed">
+                    <TextBlock Text="UartTransaction view — coming soon." Foreground="#888888"
+                               HorizontalAlignment="Center" VerticalAlignment="Center" FontStyle="Italic"/>
+                </Grid>
+
+                <Grid Grid.Row="4">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+
+                    <TextBlock x:Name="LblCanMonitorStatus" Grid.Column="0"
+                               Foreground="DimGray" TextWrapping="Wrap"
+                               Text="Waiting for live diagnostic packets."/>
+
+                    <TextBlock x:Name="LblCanPageInfo" Grid.Column="1" Foreground="#666666" VerticalAlignment="Center" Margin="0,0,8,0"
+                               Text="Page: 1 / 1"/>
+                    <Button x:Name="BtnCanPrevPage" Grid.Column="2" Content="Previous" Click="BtnCanPrevPage_Click" Padding="12,4" Margin="0,0,6,0"/>
+                    <Button x:Name="BtnCanNextPage" Grid.Column="3" Content="Next" Click="BtnCanNextPage_Click" Padding="12,4"/>
+                </Grid>
+            </Grid>
         </GroupBox>
 
         <!-- Right side bottom: LVDS Info + Status (fills configuration/settings height) -->

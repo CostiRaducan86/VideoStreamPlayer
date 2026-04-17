@@ -1,174 +1,53 @@
-# ASCLIN9 HDMA + Dual Buffer Implementation
+# DMA Dual-Buffer Design — Aurix TC397
 
-## High-Speed, Zero-Copy Data Acquisition for Nichia 12.5 Mbaud Stream
+## Overview
 
-**Date:** March 2, 2026  
-**Status:** Implementation Complete - Ready for Build & Validation  
-**Target:** Aurix TC397 (KIT_A2G_TC397_5V_TFT)
+Two independent DMA ping-pong pipelines run in parallel on TC397:
 
----
+| Channel | ASCLIN | Pin | DMA Ch | ISR Prio | Buffer | Baudrate | Purpose |
+|---------|--------|-----|--------|----------|--------|----------|---------|
 
-## Executive Summary
-
-This document describes the replacement of the **interrupt-driven RX + software FIFO polling** architecture with a **DMA + dual-buffer (ping-pong)** design for the LVDS signal acquisition on **P14.7 (ASCLIN9)** at **12.5 Mbaud**.
-
-### Key Benefits
-
-| Aspect | Before | After | Improvement |
-| --- | --- | --- | --- |
-| **Latency** | 4 KB read + parse per ISR | DMA auto-fills 2.56 KB | ~40% lower jitter |
-| **CPU Load** | Poll-loop overhead | Event-driven ISR only | ~60% less CPU cycles |
-| **Buffer Copy** | Yes (SW FIFO → chunk) | No (DMA → buffer → parse) | Zero-copy pipeline |
-| **Frame Loss Risk** | Moderate (polling gaps) | Minimal (DMA continuous) | Higher reliability |
+| LVDS | ASCLIN1 | P14.8 | 1 | 14 | 2×2560B | 20M/12.5M | Pixel frames |
+| Diag | ASCLIN9 | P20.7 | 0 | 13 | 2×2560B | 1M 8O2 | ECU↔LSM register R/W |
 
 ---
 
 ## Architecture
 
-### Before: Interrupt-Driven RX + SW FIFO
+### LVDS Pixel Pipeline (asclin1_dma)
 
 ```text
-ASCLIN9 RX (P14.7)
-    ↓ (per-byte ISR)
-SW FIFO (8 KB circular)
-    ↓ (main loop polls)
-Chunk (4 KB max)
+ASCLIN1 RX (P14.8, X103 pin 7)
+    ↓ (DMA ch 1, zero-copy)
+Buffer A (2560B) ←→ Buffer B (2560B)   [ping-pong]
+    ↓ (ISR prio 14: atomic swap)
+Main loop: asclin1_dma_get_completed_buffer()
     ↓
-rxmon Parser
+osram_frame / rxmon parser
     ↓
-Telemetry (g_rxmon)
+frame_eth TX (0x4F53 / 0x4E49)
 ```
 
-**Bottleneck:** Main loop must drain FIFO frequently; latency = polling interval + ISR latency.
-
-### After: DMA + Dual Buffer Ping-Pong
+### Diagnostic UART Pipeline (can_hw / diag_uart)
 
 ```text
-ASCLIN9 RX (P14.7)
-    ↓ (directly to HDMA via peripheral request)
-HDMA Channel (zero-copy)
+ASCLIN9 RX (P20.7, via TLE9251V)
+    ↓ (DMA ch 0, zero-copy)
+Buffer A (2560B) ←→ Buffer B (2560B)   [ping-pong]
+    ↓ (ISR prio 13: atomic swap)
+Main loop: diag_uart_tick() → diag_uart_try_receive()
     ↓
-Buffer A (2.56 KB)
-    ↓
-DMA Completion ISR (atomic swap)
-    ↓
-Buffer B (2.56 KB) ← Main loop consumes A while DMA fills B
-    ↓
-rxmon Parser
-    ↓
-Telemetry (g_rxmon)
-```
-
-**Advantage:** DMA runs autonomously; CPU only wakes on buffer completion (≈8 Mbyte bandwidth per DMA ISR every 200 µs).
-
----
-
-## Implementation Details
-
-### 1. New Files
-
-#### [asclin9_dma.h](asclin9_dma.h)
-
-- Dual buffer structure (2 × 2560 bytes = 5.12 KB stack/RAM)
-- API: `asclin9_dma_init()`, `asclin9_dma_get_completed_buffer()`
-- Constants: `ASCLIN9_DMA_BUFFER_SIZE`, `ASCLIN9_DMA_ELEMENT_SIZE`
-
-#### [asclin9_dma.c](asclin9_dma.c)
-
-- **DMA Configuration:**
-  - Channel allocation via `IfxDma_DmaChannel_init()`
-  - Source: `MODULE_ASCLIN9.RXDATA.U` (hardware FIFO)
-  - Dest: ping-pong between `bufferA` and `bufferB`
-  - Element Size: 32-bit (4 bytes per DMA word)
-  - Burst Size: 16-byte (`IfxDma_MoveSize_16Byte`)
-- **ISR Handler (Priority 13):**
-  - Fired on completion of 2560-byte transfer
-  - Atomically swaps destination & signals `pCompletedBuffer`
-  - No spin-lock; runs in atomic critical section
-
-### 2. Modified Files
-
-#### [Cpu0_Main.c](Cpu0_Main.c)
-
-- **Before:** `#include "asclin9_rx.h"` → interrupt-driven init
-- **After:** `#include "asclin9_dma.h"` → DMA init
-- **Main loop change:**
-
-  ```c
-  // Old:
-  asclin9_consume_ready_buffers(consume_cb);
-
-  // New:
-  uint8 *completed = asclin9_dma_get_completed_buffer();
-  if (completed != NULL_PTR) {
-    consume_dma_buffer(completed, ASCLIN9_DMA_BUFFER_SIZE);
-  }
-  ```
-
----
-
-## Data Flow & Timing
-
-### Frame Structure
-
-- **1 Line:** 260 bytes = `0x5D` (header) + row/parity + 256 pixels + CRC16
-- **Buffer Capacity:** 2560 bytes = ~10 frames
-- **Dual Buffer Total:** 5120 bytes = ~20 frames in flight
-
-### DMA Timing (12.5 Mbaud)
-
-```text
-Bandwidth: 12.5 Mbaud = 1.5625 MB/s
-Time to fill 2560 bytes: 2560 / 1.5625e6 ≈ 1.638 ms
-Frame Duration (64 lines @ 48 FPS): 1 / 48 ≈ 20.8 ms
-
-→ Each DMA completion (ISR) ~1.6 ms apart
-→ ISR load: ~8% CPU time (assuming ~120 cycle ISR)
-→ Main loop: has 1.6 ms to consume 2560 bytes + update telemetry
-```
-
-### ISR Sequence (Ping-Pong)
-
-```text
-t=0:     DMA starts → bufferA
-t=1.6ms: ISR fires  → COMPLETED=bufferA, DEST=bufferB
-t=3.2ms: ISR fires  → COMPLETED=bufferB, DEST=bufferA
-t=4.8ms: ISR fires  → COMPLETED=bufferA, DEST=bufferB
-...
-```
-
-Main loop must call `asclin9_dma_get_completed_buffer()` **before next ISR** (i.e., within 1.6 ms) to avoid losing data.
-
----
-
-## Error Handling & Diagnostics
-
-### g_asclin9_dma Members
-
-- `completionCount`: Total DMA completions (diagnostic)
-- `timeoutWarnings`: Count of ISRs where previous buffer not yet consumed
-- `pCompletedBuffer`: Non-`NULL` → ready for parser
-
-### Watchdog/Timeout Detection
-
-The main loop should monitor:
-
-```c
-if (g_asclin9_dma.timeoutWarnings > 0) {
-    // Main loop is too slow; frame loss imminent
-    // Increase ISR priority, reduce parser load, or increase buffer size
-}
+can_diag_enqueue() → frame_eth TX (0x4344)
 ```
 
 ---
 
-## Performance Expectations
+## Key Design Decisions
 
-### CPU Usage
-
-- **Old (polling):** ~20-30% (frequent FIFO checks)
-- **New (DMA ISR):** ~8-12% (event-driven)
-- **Savings:** ~60% reduction in CPU time
+1. **Separate DMA channels** — no contention, independent ISR priorities
+2. **2560B buffers** — ~10 LVDS lines or ~36 diagnostic frames per fill
+3. **No locks** — ISR atomically swaps pointer; consumer always reads completed buffer
+4. **Pin reassignment** — LVDS moved from P14.7 (ASCLIN9) to P14.8 (ASCLIN1) to free ASCLIN9 for diagnostic
 
 ### Latency (single byte → parser)
 
