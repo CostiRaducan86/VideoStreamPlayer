@@ -145,11 +145,20 @@ namespace VilsSharpX
         private NichiaEthCapture? _nichiaEthCapture;
         private OsramEthCapture? _osramEthCapture;
         private LsmCanDiagCapture? _canDiagCapture;
-        private readonly LsmCanDiagStore _canDiagStore = new(512);
+        private readonly LsmCanDiagStore _canDiagStore = new(16384);
         private readonly ObservableCollection<CanDiagRowView> _canDiagRows = new();
         private const int CanDiagPageSize = 14;
         private int _canDiagCurrentPage = 1;
         private int _canDiagTotalPages = 1;
+        private DateTime _canDiagLastRefresh = DateTime.MinValue;
+        private bool _canDiagRefreshPending;
+        private bool _canDiagRecording = true;
+        private static readonly TimeSpan CanDiagRefreshInterval = TimeSpan.FromMilliseconds(200);
+
+        // Trace mode: one row per unique (address, operation) pair.
+        // Preserves insertion order; latest record overwrites previous.
+        private readonly Dictionary<(ushort Addr, LsmCanDiagOperation Op), LsmCanDiagRecord> _traceMap = new();
+        private readonly List<(ushort Addr, LsmCanDiagOperation Op)> _traceOrder = new();
 
         private Frame? _latestA;
         private Frame? _latestB;
@@ -1181,14 +1190,44 @@ namespace VilsSharpX
             if (_canDiagCapture == null || !_canDiagCapture.IsCapturing)
                 return;
 
+            if (!_canDiagRecording)
+                return;
+
             _canDiagStore.Append(record);
             AppendRawCanLine(record);
 
-            AppendDiagLog(
-                $"[can] seq={record.Sequence} dev={record.DeviceName} op={record.OperationName} " +
-                $"addr=0x{record.Address:X4} value=0x{record.Value:X8} status={record.Status}");
+            // Update trace map: one row per (address, operation)
+            var traceKey = (record.Address, record.Operation);
+            if (!_traceMap.ContainsKey(traceKey))
+                _traceOrder.Add(traceKey);
+            _traceMap[traceKey] = record;
 
-            RefreshCanDiagView();
+            /* Throttle UI refresh to avoid freezing under high packet rate.
+             * Records are still stored; only the visual update is deferred. */
+            var now = DateTime.UtcNow;
+            if (now - _canDiagLastRefresh >= CanDiagRefreshInterval)
+            {
+                _canDiagLastRefresh = now;
+                _canDiagRefreshPending = false;
+                RefreshCanDiagView();
+            }
+            else if (!_canDiagRefreshPending)
+            {
+                _canDiagRefreshPending = true;
+                var delay = CanDiagRefreshInterval - (now - _canDiagLastRefresh);
+                if (delay < TimeSpan.Zero) delay = TimeSpan.Zero;
+                _ = System.Threading.Tasks.Task.Delay(delay).ContinueWith(_ =>
+                    Dispatcher.BeginInvoke(() =>
+                    {
+                        if (_canDiagRefreshPending)
+                        {
+                            _canDiagRefreshPending = false;
+                            _canDiagLastRefresh = DateTime.UtcNow;
+                            RefreshCanDiagView();
+                        }
+                    }),
+                    System.Threading.Tasks.TaskScheduler.Default);
+            }
         }
 
         private void RefreshCanDiagView()
@@ -1196,8 +1235,11 @@ namespace VilsSharpX
             string orderBy = GetSelectedComboContent(CmbCanOrderBy);
             string sort = GetSelectedComboContent(CmbCanSort);
 
-            var filtered = _canDiagStore
-                .SnapshotNewestFirst(512)
+            // Trace mode: one row per unique (address, operation).
+            // _traceOrder preserves first-seen insertion order.
+            var filtered = _traceOrder
+                .Where(key => _traceMap.ContainsKey(key))
+                .Select(key => _traceMap[key])
                 .Where(MatchesCanDiagFilter)
                 .Select(CanDiagRowView.FromRecord)
                 .ToList();
@@ -1276,7 +1318,9 @@ namespace VilsSharpX
             int stored = _canDiagStore.Count;
             long packets = _canDiagCapture?.TotalPackets ?? 0;
             long parserErrors = _canDiagCapture?.ParserErrors ?? 0;
-            string state = _canDiagCapture?.IsCapturing == true ? "listening" : "stopped";
+            string state = _canDiagCapture?.IsCapturing == true
+                ? (_canDiagRecording ? "recording" : "monitoring")
+                : "stopped";
 
             long magicMatches = _canDiagCapture?.DiagMagicMatches ?? 0;
                         long niMatches = _canDiagCapture?.NiMagicMatches ?? 0;
@@ -1311,10 +1355,40 @@ namespace VilsSharpX
         private void BtnCanClear_Click(object sender, RoutedEventArgs e)
         {
             _canDiagStore.Clear();
+            _traceMap.Clear();
+            _traceOrder.Clear();
             _rawCanLines.Clear();
             if (TblRawCan != null) TblRawCan.Text = string.Empty;
             _canDiagCurrentPage = 1;
             RefreshCanDiagView();
+        }
+
+        private void BtnCanRecord_Click(object sender, RoutedEventArgs e)
+        {
+            _canDiagRecording = true;
+            UpdateCanDiagRecordingButtons();
+        }
+
+        private void BtnCanStopRecord_Click(object sender, RoutedEventArgs e)
+        {
+            _canDiagRecording = false;
+            UpdateCanDiagRecordingButtons();
+        }
+
+        private void UpdateCanDiagRecordingButtons()
+        {
+            if (BtnCanRecord != null)
+            {
+                BtnCanRecord.IsEnabled = !_canDiagRecording;
+                BtnCanRecord.Background = _canDiagRecording
+                    ? new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(0xCC, 0x33, 0x33))
+                    : new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(0xF6, 0xF6, 0xF6));
+                BtnCanRecord.Foreground = _canDiagRecording
+                    ? System.Windows.Media.Brushes.White
+                    : new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(0x44, 0x44, 0x44));
+            }
+            if (BtnCanStopRecord != null)
+                BtnCanStopRecord.IsEnabled = _canDiagRecording;
         }
 
         private void BtnCanPrevPage_Click(object sender, RoutedEventArgs e)
@@ -1501,9 +1575,9 @@ namespace VilsSharpX
             {
                 if (record.RawLength >= 5 && record.RawPayload.Length >= 5)
                 {
-                    // Data starts at byte 4, skip last CRC byte
+                    // Data starts at byte 4, skip last 2 CRC-16 bytes
                     int dataStart = 4;
-                    int dataEnd = record.RawLength - 1; // exclude CRC
+                    int dataEnd = record.RawLength - 2; // exclude CRC-16
                     if (dataEnd > dataStart && dataEnd <= record.RawPayload.Length)
                     {
                         var sb = new System.Text.StringBuilder("0x");

@@ -50,11 +50,11 @@ public partial class CanDetailWindow : Window
             ? "0x" + record.RawHex
             : $"0x{record.Value:X8}";
 
-        // Value = data bytes from raw payload (skip UART header 4B, exclude CRC 1B)
+        // Value = data bytes from raw payload (skip UART header 4B, exclude CRC-16 2B)
         if (record.RawLength >= 5 && record.RawPayload.Length >= 5)
         {
             var vsb = new StringBuilder("0x");
-            int dataEnd = record.RawLength - 1;
+            int dataEnd = record.RawLength - 2;
             for (int i = 4; i < dataEnd && i < record.RawPayload.Length; i++)
                 vsb.Append(record.RawPayload[i].ToString("X2"));
             TxtValue.Text = vsb.ToString();

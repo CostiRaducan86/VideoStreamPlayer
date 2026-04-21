@@ -2,9 +2,9 @@
  * can_hw.c — Diagnostic UART sniffer v7
  *
  * The "CAN" diagnostic bus between ECU (Hella PLU-HD) and LSM (Osram
- * KEWGBXXD1U) is UART at 1 Mbaud, 8-Odd-2, sent through CAN transceivers
- * (TJA1057 on ECU, TCAN1057 on LSM) that only provide differential
- * physical signaling.
+ * KEWGBXXD1U) is UART at 2 Mbaud, 8-Odd-2 (8 data, odd parity, 2 stop),
+ * sent through CAN transceivers (TJA1057 on ECU, TCAN1057 on LSM) that
+ * only provide differential physical signaling.
  *
  * v7 architecture (parallel LVDS + diagnostic):
  *  - ASCLIN9 is DEDICATED to diagnostic UART on P20.7 (TLE9251V CAN xcvr).
@@ -60,18 +60,30 @@ static IfxAsclin_Asc s_ascDiag;
 /* Private tracking */
 static uint32 s_prevCompletionCount;
 static uint32 s_prevRxBytes;
+static uint32 s_prevDmaCountForErrors;  /* gate FE/PE counting to DMA events */
 
 /* ======================== Frame parser state ======================== */
 
 #define DIAG_PARSE_BUF_SIZE   256u
-#define DIAG_SYNC_BYTE        0x80u
-#define DIAG_MIN_FRAME_LEN    7u     /* SYNC+Slave+DLC+Addr+ValMSB+ValLSB+CRC */
-#define DIAG_MAX_FRAME_LEN    71u    /* EEPROM write (max per UART_Protocol) */
+#define DIAG_SYNC0_BYTE       0x80u  /* First sync byte                         */
+#define DIAG_SYNC1_BYTE       0xA5u  /* Second sync byte (master address)       */
+#define DIAG_FRAME_HEADER_LEN 4u     /* SYNC0 + SYNC1 + HCTRL + HADR           */
+#define DIAG_FRAME_CRC_LEN    2u     /* CRC-16 (2 bytes, MSB first)            */
+#define DIAG_MIN_FRAME_LEN    4u     /* Read request: header only, no data/CRC */
+#define DIAG_MAX_FRAME_LEN    38u    /* 16-reg response: 4 + 32 + 2            */
 
 static uint8  s_parseBuf[DIAG_PARSE_BUF_SIZE];
 static uint16 s_parseLen;           /* valid bytes in parse accumulator   */
 static const uint8 *s_dmaSrc;       /* current read position in DMA buf   */
 static uint16       s_dmaSrcRemain; /* remaining bytes in claimed DMA buf */
+
+/* ======================== Debug snapshot (Watch window) ======================== */
+/* First 64 bytes of first DMA buffer + byte occurrence counters */
+volatile uint8  g_diagDebugSnapshot[64];  /* first 64 raw bytes from DMA      */
+volatile uint8  g_diagDebugReady;         /* 1 = snapshot captured            */
+volatile uint32 g_diagCount80;            /* how many 0x80 bytes seen total   */
+volatile uint32 g_diagCountA5;            /* how many 0xA5 bytes seen total   */
+volatile uint32 g_diagCount80A5;          /* consecutive 0x80,0xA5 pairs      */
 
 /* ======================== DMA Completion ISR ======================== */
 
@@ -114,6 +126,19 @@ IFX_INTERRUPT(DIAG_DMA_ISR, 0, DIAG_DMA_ISR_PRIO)
         s_diagMissedBuffers++;
     s_diagCompletedBuf = completed;
     s_diagCompletionCount++;
+
+    /* Debug: capture first 64 bytes of first DMA buffer.
+     * The O(2560) byte-scan loop that used to count 0x80/0xA5 bytes
+     * has been REMOVED — it blocked CPU0 inside the ISR for thousands
+     * of cycles, causing the main loop to stall and miss LVDS DMA
+     * buffers → visible flicker on pane B and TFT.                  */
+    if (g_diagDebugReady == 0u)
+    {
+        uint16 k;
+        for (k = 0u; k < 64u; k++)
+            g_diagDebugSnapshot[k] = completed[k];
+        g_diagDebugReady = 1u;
+    }
 }
 
 /* ======================== ASCLIN9 diagnostic config ======================== */
@@ -125,15 +150,22 @@ static void diag_asclin9_configure(void)
 
     cfg.clockSource = IfxAsclin_ClockSource_ascFastClock;
 
-    /* 1 Mbaud (ECU: Prescaler=0, OVS=15, Den=500, Num=80) */
-    cfg.baudrate.baudrate     = 1000000.0f;
+    /* 2 Mbaud — confirmed by Saleae capture + WinIDEA runtime watch:
+     * ECU params: Prescaler=0, OVS=15(=16x), Den=500, Num=80
+     * Baudrate = fASC * 80 / (500 * 16) = fASC/100.
+     * With fASC = 200 MHz → 2,000,000 baud.                          */
+    cfg.baudrate.baudrate     = 2000000.0f;
     cfg.baudrate.prescaler    = 0;
     cfg.baudrate.oversampling = IfxAsclin_OversamplingFactor_16;
 
     cfg.bitTiming.samplePointPosition = IfxAsclin_SamplePointPosition_8;
     cfg.bitTiming.medianFilter        = IfxAsclin_SamplesPerBit_three;
 
-    /* 8 data, Odd parity, 2 stop bits (8O2) */
+    /* 8 data, Odd parity, 2 stop bits (8O2)
+     * Confirmed by:
+     *  - WinIDEA runtime: StopBits=2, Parity.Enabled=1, Parity.Type=1(Odd)
+     *  - Saleae capture:  2 Mbaud, 8 bits, Odd parity, 2 stop bits
+     *  - XML config:      UartParity=0x03, UartStopBits=0x02            */
     cfg.frame.dataLength = IfxAsclin_DataLength_8;
     cfg.frame.stopBit    = IfxAsclin_StopBit_2;
     cfg.frame.frameMode  = IfxAsclin_FrameMode_asc;
@@ -244,17 +276,24 @@ void diag_uart_init(void)
     s_diagCompletionCount = 0u;
     s_diagMissedBuffers   = 0u;
 
+    /* Debug snapshot reset */
+    g_diagDebugReady = 0u;
+    g_diagCount80    = 0u;
+    g_diagCountA5    = 0u;
+    g_diagCount80A5  = 0u;
+
     IfxCpu_enableInterrupts();
 
-    s_prevCompletionCount = 0u;
-    s_prevRxBytes         = 0u;
+    s_prevCompletionCount  = 0u;
+    s_prevRxBytes          = 0u;
+    s_prevDmaCountForErrors = 0u;
 
     /* Reset frame parser state */
     s_parseLen     = 0u;
     s_dmaSrc       = NULL_PTR;
     s_dmaSrcRemain = 0u;
 
-    g_diagUartStats.baudrate   = 1000000u;
+    g_diagUartStats.baudrate   = 2000000u;
     g_diagUartStats.initOk     = 1u;
     g_diagUartStats.stmFreqHz  = (uint32)IfxStm_getFrequency(&MODULE_STM0);
 
@@ -315,15 +354,35 @@ boolean diag_uart_tick(void)
     g_diagUartStats.regIocr      = MODULE_ASCLIN9.IOCR.U;
     g_diagUartStats.regCsr       = MODULE_ASCLIN9.CSR.U;
 
-    /* Track ASCLIN error flags */
+    /* Track ASCLIN error flags.
+     * On a half-duplex bus through TLE9251V, ASCLIN generates continuous
+     * framing errors from bus turnaround noise during idle periods.
+     * To keep the counter meaningful, only count FE/PE once per DMA
+     * completion (per 2560 received bytes).  Always clear sticky flags
+     * to prevent accumulation.                                          */
     {
         uint32 flags = MODULE_ASCLIN9.FLAGS.U;
-        if (flags & (1u << 5))   /* FE - framing error */
-            g_diagUartStats.framingErrors++;
-        if (flags & (1u << 4))   /* PE - parity error */
-            g_diagUartStats.parityErrors++;
-        if (flags & 0x3Fu)
-            MODULE_ASCLIN9.FLAGSCLEAR.U = flags & 0x3Fu;
+        uint32 errs  = flags & 0x3Fu;
+
+        /* Count errors only on DMA completion edges (real data received) */
+        {
+            uint32 curDma = s_diagCompletionCount;
+            if (curDma != s_prevDmaCountForErrors)
+            {
+                s_prevDmaCountForErrors = curDma;
+                if (errs != 0u)
+                {
+                    if (flags & (1u << 5))   /* FE - framing error */
+                        g_diagUartStats.framingErrors++;
+                    if (flags & (1u << 4))   /* PE - parity error */
+                        g_diagUartStats.parityErrors++;
+                }
+            }
+        }
+
+        /* Always clear sticky error flags regardless of counting */
+        if (errs != 0u)
+            MODULE_ASCLIN9.FLAGSCLEAR.U = errs;
     }
 
     /* GPIO P20.7 level */
@@ -346,6 +405,38 @@ static void diag_fill_parse_buf(void)
     }
 }
 
+/* Try to get more data into the parse buffer.
+ * First fills from current DMA source; if exhausted, claims the
+ * next completed DMA buffer.  This prevents the parser from
+ * deadlocking when a frame straddles a DMA buffer boundary.
+ * Returns TRUE if new bytes were added. */
+static boolean diag_refill(void)
+{
+    uint16 before = s_parseLen;
+
+    /* 1) Drain remaining bytes from current DMA source */
+    if (s_dmaSrcRemain > 0u)
+        diag_fill_parse_buf();
+
+    /* 2) If source exhausted, try to claim next completed DMA buffer */
+    if (s_dmaSrcRemain == 0u)
+    {
+        IfxCpu_disableInterrupts();
+        volatile uint8 *buf = s_diagCompletedBuf;
+        s_diagCompletedBuf  = NULL_PTR;
+        IfxCpu_enableInterrupts();
+
+        if (buf != NULL_PTR)
+        {
+            s_dmaSrc       = (const uint8 *)buf;
+            s_dmaSrcRemain = DIAG_DMA_BUFFER_SIZE;
+            diag_fill_parse_buf();
+        }
+    }
+
+    return (s_parseLen > before) ? TRUE : FALSE;
+}
+
 /* Remove consumed bytes from front of parse buffer */
 static void diag_compact_parse_buf(uint16 n)
 {
@@ -360,31 +451,28 @@ static void diag_compact_parse_buf(uint16 n)
     }
 }
 
-/* Compute expected frame length from DLC/FUN byte.
- * DLC format:  high nibble = 1 (read) or 2 (write)
- *              low  nibble = register count (0 → 16)
- * Frame: SYNC(1) + Slave(1) + DLC(1) + Addr(1) + nRegs*2 + CRC(1)
- *        + 2 ACK bytes for writes.
- * Returns 0 if unrecognised. */
-static uint8 diag_frame_length_from_dlc(uint8 dlcFun)
+/* Compute full-frame length from HCTRL byte.
+ *
+ * Osram KEWGBXXD1U UART protocol (on wire, after ECU byte-swap):
+ *   [0] SYNC0 = 0x80
+ *   [1] SYNC1 = 0xA5
+ *   [2] HCTRL:
+ *        bit 7    = RW  (1=Read, 0=Write)
+ *        bits 6:5 = ID  (device ID, 2 bits)
+ *        bits 4:1 = LEN (nRegs-1, 4 bits -> 1..16 registers)
+ *        bit 0    = ADR[8] (MSB of 9-bit register address)
+ *   [3] HADR = ADR[7:0]
+ *   [4 .. 4+nRegs*2-1] = register data (MSB:LSB per register)
+ *   [4+nRegs*2 .. 4+nRegs*2+1] = CRC-16 (2 bytes, MSB first)
+ *
+ * Read REQUEST from ECU is only 4 bytes (header, no data/CRC).
+ * Read RESPONSE / Write frames carry data + CRC.
+ *
+ * Returns full data-frame length (header + data + CRC16). */
+static uint8 diag_full_frame_length(uint8 hctrl)
 {
-    uint8 hi    = (dlcFun >> 4u) & 0x0Fu;
-    uint8 lo    = dlcFun & 0x0Fu;
-    uint8 nRegs;
-    uint8 len;
-
-    /* hi: 1=read response, 2=write request/ack */
-    if (hi != 1u && hi != 2u)
-        return 0u;
-
-    nRegs = (lo == 0u) ? 16u : lo;
-    /* 5 fixed bytes + 2 per register */
-    len = (uint8)(5u + nRegs * 2u);
-    /* Write frames carry 2 trailing ACK bytes */
-    if (hi == 2u)
-        len += 2u;
-
-    return (len <= DIAG_MAX_FRAME_LEN) ? len : 0u;
+    uint8 nRegs = (uint8)(((hctrl >> 1u) & 0x0Fu) + 1u);
+    return (uint8)(DIAG_FRAME_HEADER_LEN + nRegs * 2u + DIAG_FRAME_CRC_LEN);
 }
 
 /* ================================================================ */
@@ -394,94 +482,107 @@ boolean diag_uart_try_receive(DiagUartFrame *out)
         return FALSE;
 
     /* ---- Ensure parse buffer has data ---- */
-    if (s_dmaSrcRemain > 0u)
-        diag_fill_parse_buf();
+    diag_refill();
 
-    if (s_parseLen < DIAG_MIN_FRAME_LEN && s_dmaSrcRemain == 0u)
-    {
-        /* Atomically claim the completed DMA buffer */
-        IfxCpu_disableInterrupts();
-        volatile uint8 *buf = s_diagCompletedBuf;
-        s_diagCompletedBuf = NULL_PTR;
-        IfxCpu_enableInterrupts();
+    if (s_parseLen < DIAG_MIN_FRAME_LEN)
+        return FALSE;
 
-        if (buf == NULL_PTR)
-            return FALSE;  /* no new data available */
-
-        s_dmaSrc       = (const uint8 *)buf;
-        s_dmaSrcRemain = DIAG_DMA_BUFFER_SIZE;
-        diag_fill_parse_buf();
-    }
-
-    /* ---- Hunt for SYNC and extract frame ---- */
+    /* ---- Hunt for 2-byte SYNC [0x80][0xA5] and extract frame ---- */
     for (;;)
     {
-        /* Skip to next SYNC byte */
-        if (s_parseLen > 0u && s_parseBuf[0] != DIAG_SYNC_BYTE)
+        /* Skip to next potential SYNC0 byte (0x80) */
+        if (s_parseLen > 0u && s_parseBuf[0] != DIAG_SYNC0_BYTE)
         {
             uint16 i;
             for (i = 1u; i < s_parseLen; i++)
             {
-                if (s_parseBuf[i] == DIAG_SYNC_BYTE)
+                if (s_parseBuf[i] == DIAG_SYNC0_BYTE)
                     break;
             }
             g_diagUartStats.syncSkips += i;
             diag_compact_parse_buf(i);
-            /* Refill after skipping */
-            if (s_dmaSrcRemain > 0u)
-                diag_fill_parse_buf();
+            diag_refill();
         }
 
-        /* Not enough bytes for even the smallest frame */
-        if (s_parseLen < DIAG_MIN_FRAME_LEN)
+        /* Need at least 2 bytes to verify SYNC pair */
+        if (s_parseLen < 2u)
         {
-            if (s_dmaSrcRemain > 0u)
+            diag_refill();
+            if (s_parseLen < 2u)
+                return FALSE;
+            continue;
+        }
+
+        /* Verify SYNC1 = 0xA5 at byte[1] */
+        if (s_parseBuf[1] != DIAG_SYNC1_BYTE)
+        {
+            /* Not a real sync pair — skip byte[0] and retry */
+            g_diagUartStats.syncSkips++;
+            diag_compact_parse_buf(1u);
+            continue;
+        }
+
+        /* Need at least 4 bytes for the full header */
+        if (s_parseLen < DIAG_FRAME_HEADER_LEN)
+        {
+            diag_refill();
+            if (s_parseLen < DIAG_FRAME_HEADER_LEN)
+                return FALSE;
+            continue;
+        }
+
+        /* We have [0x80][0xA5][HCTRL][HADR] — decode HCTRL */
+        {
+            uint8 hctrl   = s_parseBuf[2];
+            uint8 isRead  = (hctrl & 0x80u) ? 1u : 0u;
+            uint8 fullLen = diag_full_frame_length(hctrl);
+
+            /* For READ frames: distinguish 4-byte request from
+             * full response by peeking at bytes [4..5].
+             * Read REQUEST = header only; response starts with new sync. */
+            if (isRead != 0u)
             {
-                diag_fill_parse_buf();
-                if (s_parseLen >= DIAG_MIN_FRAME_LEN)
+                /* Ensure we can peek at bytes 4-5 */
+                if (s_parseLen < 6u)
+                    diag_refill();
+
+                if (s_parseLen >= 6u &&
+                    s_parseBuf[4] == DIAG_SYNC0_BYTE &&
+                    s_parseBuf[5] == DIAG_SYNC1_BYTE)
+                {
+                    /* 4-byte read request (ECU query) — skip, no data */
+                    diag_compact_parse_buf(DIAG_FRAME_HEADER_LEN);
                     continue;
-            }
-            return FALSE;
-        }
+                }
 
-        /* SYNC at [0] — determine frame length from DLC/FUN at [2] */
-        {
-            uint8 dlcFun   = s_parseBuf[2];
-            uint8 frameLen = diag_frame_length_from_dlc(dlcFun);
-
-            if (frameLen == 0u)
-            {
-                /* Unrecognised DLC — skip this false SYNC, keep hunting */
-                g_diagUartStats.badDlc++;
-                diag_compact_parse_buf(1u);
-                continue;
+                /* If only 4 bytes and no more data available, wait */
+                if (s_parseLen == DIAG_FRAME_HEADER_LEN)
+                {
+                    diag_refill();
+                    if (s_parseLen == DIAG_FRAME_HEADER_LEN)
+                        return FALSE;
+                    continue;
+                }
             }
 
-            /* Ensure we have the full frame in the parse buffer */
-            if (s_parseLen < frameLen)
+            /* Full data frame expected — ensure we have enough bytes */
+            if (s_parseLen < fullLen)
             {
-                if (s_dmaSrcRemain > 0u)
-                {
-                    diag_fill_parse_buf();
-                    if (s_parseLen < frameLen)
-                        return FALSE;  /* still not enough — wait for next DMA */
-                }
-                else
-                {
-                    return FALSE;  /* partial frame spans DMA boundary */
-                }
+                diag_refill();
+                if (s_parseLen < fullLen)
+                    return FALSE;
             }
 
             /* Full frame available — extract it */
             {
-                uint8 copyLen = (frameLen <= (uint8)sizeof(out->data))
-                              ? frameLen : (uint8)sizeof(out->data);
+                uint8 copyLen = (fullLen <= (uint8)sizeof(out->data))
+                              ? fullLen : (uint8)sizeof(out->data);
                 memcpy(out->data, s_parseBuf, copyLen);
                 out->len = copyLen;
-                /* Timestamp: STM ticks → microseconds */
+                /* Timestamp: STM ticks -> microseconds */
                 out->timestampUs = (uint32)(IfxStm_getLower(&MODULE_STM0)
                                    / (g_diagUartStats.stmFreqHz / 1000000u));
-                diag_compact_parse_buf(frameLen);
+                diag_compact_parse_buf(fullLen);
                 g_diagUartStats.framesDecoded++;
                 return TRUE;
             }

@@ -2,10 +2,11 @@
 #define CAN_DIAG_H
 
 /******************************************************************************
- * can_diag.h — CAN diagnostic record queue, synthetic producer, CAN RX bridge
+ * can_diag.h — CAN diagnostic record queue and UART frame bridge
  ******************************************************************************/
 
 #include "Ifx_Types.h"
+#include "can_hw.h"   /* DiagUartFrame */
 
 /* Protocol version: v2 extends payload to include raw UART frame bytes */
 #define CAN_DIAG_PROTOCOL_VERSION      2u
@@ -16,7 +17,6 @@
 
 #define CAN_DIAG_OP_READ               0u
 #define CAN_DIAG_OP_WRITE              1u
-#define CAN_DIAG_OP_CAN_RAW            2u   /* raw CAN frame (not decoded) */
 
 #define CAN_DIAG_STATUS_OK             0u
 #define CAN_DIAG_STATUS_TIMEOUT        1u
@@ -25,10 +25,6 @@
 
 /* Max raw UART payload bytes per transaction (UART_Protocol.csv: max 71 bytes/frame) */
 #define CAN_DIAG_RAW_MAX               72u
-
-/* Producer mode: synthetic (M1 testing) or real CAN bus */
-#define CAN_DIAG_MODE_SYNTHETIC        0u
-#define CAN_DIAG_MODE_CAN_BUS          1u
 
 typedef struct
 {
@@ -51,10 +47,9 @@ typedef struct
     volatile uint32 recordsPopped;
     volatile uint32 queueOverruns;
     volatile uint32 packErrors;
-    volatile uint32 syntheticSamples;
     volatile uint32 queueDepth;
     volatile uint32 queueDepthHighWater;
-    volatile uint32 canRxBridged;       /* CAN frames pushed from real bus */
+    volatile uint32 uartFramesBridged;  /* UART diag frames decoded and queued */
 } CanDiagStats;
 
 extern CanDiagStats g_canDiagStats;
@@ -63,10 +58,9 @@ void can_diag_init(void);
 void can_diag_reset(void);
 boolean can_diag_push_record(const CanDiagRecord *record);
 boolean can_diag_pop_record(CanDiagRecord *record);
-void can_diag_synthetic_cyclic(uint8 activeDevice);
 
-/* Set producer mode: CAN_DIAG_MODE_SYNTHETIC or CAN_DIAG_MODE_CAN_BUS */
-void can_diag_set_mode(uint8 mode);
-uint8 can_diag_get_mode(void);
+/** Decode a raw UART diagnostic frame and push it into the queue.
+ *  Returns TRUE if the record was successfully queued. */
+boolean can_diag_bridge_uart_frame(const DiagUartFrame *frame, uint8 deviceId);
 
 #endif /* CAN_DIAG_H */

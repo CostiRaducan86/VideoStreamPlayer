@@ -662,14 +662,22 @@ boolean frame_eth_send_pending(void)
 boolean frame_eth_send_can_diag_pending(void)
 {
     CanDiagRecord record;
+    boolean sent = FALSE;
+    uint8 burst = 0u;
 
-    if (!can_diag_pop_record(&record))
-        return FALSE;
+    /* Send at most 2 diagnostic records per call.  The previous
+     * burst of 8 caused GETH TX channel contention that delayed
+     * LVDS frame fragment sending → visible flicker on pane B.
+     * At ~30 diagnostic frames/sec vs 50 LVDS FPS, 2 per iteration
+     * is more than sufficient to keep up without starving LVDS.  */
+    while (burst < 2u && can_diag_pop_record(&record))
+    {
+        if (send_can_diag_record(&record, s_diagSeq++))
+            sent = TRUE;
+        burst++;
+    }
 
-    if (!send_can_diag_record(&record, s_diagSeq++))
-        return FALSE;
-
-    return TRUE;
+    return sent;
 }
 
 /* ==================== Ethernet RX — command processing ==================== */
