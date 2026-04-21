@@ -131,68 +131,26 @@ void core0_main(void)
         /* Drain ALL completed DMA buffers before sending Ethernet.
          * This prevents data loss when frame_eth_send_pending() takes
          * longer than the DMA buffer fill time (~1.28 ms at 20 Mbaud). */
-        uint8 *completed;
-        while ((completed = asclin1_dma_get_completed_buffer()) != NULL_PTR)
         {
-            consume_dma_buffer(completed, ASCLIN1_DMA_BUFFER_SIZE);
-        }
-
-        /* ── Diagnostic UART sniffer: poll counters ── */
-        diag_uart_tick();
-        {
-            DiagUartFrame diagFrame;
-            while (diag_uart_try_receive(&diagFrame))
+            uint8 *completed;
+            while ((completed = asclin1_dma_get_completed_buffer()) != NULL_PTR)
             {
-                CanDiagRecord rec;
-                memset(&rec, 0, sizeof(rec));
-                rec.sourceTimestamp = diagFrame.timestampUs;
-                rec.deviceId       = (uint8)device_mode_get();
-                rec.status         = CAN_DIAG_STATUS_OK;
-
-                /* Copy raw UART frame into rawPayload for PC-side decoding */
-                rec.valueLen = (diagFrame.len <= CAN_DIAG_RAW_MAX)
-                             ? diagFrame.len : (uint8)CAN_DIAG_RAW_MAX;
-                memcpy(rec.rawPayload, diagFrame.data, rec.valueLen);
-
-                /* Decode UART frame header:
-                 *   [0]=SYNC  [1]=SlaveResp  [2]=DLC/FUN  [3]=RegAddr  [4..]=data
-                 * DLC/FUN: hi nibble 1=Read, 2=Write; lo nibble=nRegs (0→16) */
-                if (diagFrame.len >= 7u)
-                {
-                    uint8 dlcFun  = diagFrame.data[2];
-                    uint8 hi      = (dlcFun >> 4u) & 0x0Fu;
-                    rec.address   = (uint16)diagFrame.data[3];
-                    rec.operation = (hi == 2u) ? CAN_DIAG_OP_WRITE : CAN_DIAG_OP_READ;
-
-                    /* Extract first register value (bytes 4-5 MSB:LSB) */
-                    rec.value = ((uint32)diagFrame.data[4] << 8u) | (uint32)diagFrame.data[5];
-
-                    /* CRC is last byte before optional ACK bytes */
-                    rec.checksum = (uint32)diagFrame.data[diagFrame.len - 1u];
-                    if (hi == 2u && diagFrame.len >= 9u)
-                    {
-                        /* Write frames: CRC is 2 bytes before ACK pair */
-                        uint8 nRegs   = (dlcFun & 0x0Fu);
-                        if (nRegs == 0u) nRegs = 16u;
-                        uint8 crcIdx  = (uint8)(4u + nRegs * 2u);
-                        if (crcIdx < diagFrame.len)
-                            rec.checksum = (uint32)diagFrame.data[crcIdx];
-                    }
-                }
-                else
-                {
-                    rec.operation = CAN_DIAG_OP_READ;
-                    rec.status    = CAN_DIAG_STATUS_MALFORMED;
-                }
-
-                if (can_diag_push_record(&rec))
-                    g_canDiagStats.canRxBridged++;
+                consume_dma_buffer(completed, ASCLIN1_DMA_BUFFER_SIZE);
             }
         }
 
-        /* Milestone 1 validation source: emit synthetic diagnostics until
-         * real CAN capture is wired into the same queue API. */
-        can_diag_synthetic_cyclic((uint8)device_mode_get());
+        /* Diagnostic UART sniffer: poll + decode + bridge to queue.
+         * Process at most 1 frame per main-loop iteration to keep
+         * interrupt-disabled time (diag_refill) short and avoid
+         * starving the LVDS DMA buffer drain above.                  */
+        diag_uart_tick();
+        {
+            DiagUartFrame diagFrame;
+            if (diag_uart_try_receive(&diagFrame))
+            {
+                can_diag_bridge_uart_frame(&diagFrame, (uint8)device_mode_get());
+            }
+        }
 
         /* Send assembled frame over Ethernet (if ready) */
         frame_eth_send_pending();

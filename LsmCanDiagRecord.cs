@@ -76,10 +76,10 @@ public sealed class LsmCanDiagRecord
             if (RawLength < 4 || RawPayload.Length < 4)
                 return Array.Empty<(ushort, ushort)>();
 
-            // UART frame: [SYNC][SlaveResp][DLC/FUN][RegAddr][data pairs...][CRC(1B)]
-            // Data starts at byte 4; each register is 2 bytes MSB first; CRC is 1 byte at end
+            // UART frame: [SYNC0][SYNC1][HCTRL][HADR][data pairs...][CRC16(2B)]
+            // Data starts at byte 4; each register is 2 bytes MSB first; CRC-16 is 2 bytes at end
             int dataStart = 4;
-            int dataEnd = RawLength - 1; // exclude CRC byte
+            int dataEnd = RawLength - 2; // exclude CRC-16 (2 bytes)
             if (dataEnd <= dataStart)
                 return Array.Empty<(ushort, ushort)>();
 

@@ -450,6 +450,7 @@
                         <ColumnDefinition Width="90"/>
                         <ColumnDefinition Width="*"/>
                         <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="Auto"/>
                     </Grid.ColumnDefinitions>
 
                     <TextBlock Grid.Column="0" Text="Select to show:" VerticalAlignment="Center" Margin="0,0,6,0" Foreground="#666666"/>
@@ -467,6 +468,12 @@
                     </ComboBox>
 
                     <Button x:Name="BtnCanClear" Grid.Column="6" Content="Clear" Click="BtnCanClear_Click" Padding="10,4"/>
+                    <StackPanel Grid.Column="7" Orientation="Horizontal" Margin="12,0,0,0">
+                        <Button x:Name="BtnCanRecord" Content="⏺ Record" Click="BtnCanRecord_Click" Padding="10,4" Margin="0,0,4,0"
+                                Background="#CC3333" Foreground="White" BorderBrush="#CC3333" BorderThickness="1" IsEnabled="False"/>
+                        <Button x:Name="BtnCanStopRecord" Content="⏹ Stop" Click="BtnCanStopRecord_Click" Padding="10,4"
+                                Background="#F6F6F6" Foreground="#444444" BorderBrush="#D8D8D8" BorderThickness="1"/>
+                    </StackPanel>
                 </Grid>
 
                 <!-- Monitor view (default visible) -->
