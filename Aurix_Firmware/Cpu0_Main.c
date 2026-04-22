@@ -140,21 +140,26 @@ void core0_main(void)
         }
 
         /* Diagnostic UART sniffer: poll + decode + bridge to queue.
+         * Only active when PC has sent FE_CMD_DIAG_SNIFF start command.
          * Process at most 1 frame per main-loop iteration to keep
          * interrupt-disabled time (diag_refill) short and avoid
          * starving the LVDS DMA buffer drain above.                  */
-        diag_uart_tick();
+        if (g_diagSniffEnabled)
         {
-            DiagUartFrame diagFrame;
-            if (diag_uart_try_receive(&diagFrame))
+            diag_uart_tick();
             {
-                can_diag_bridge_uart_frame(&diagFrame, (uint8)device_mode_get());
+                DiagUartFrame diagFrame;
+                if (diag_uart_try_receive(&diagFrame))
+                {
+                    can_diag_bridge_uart_frame(&diagFrame, (uint8)device_mode_get());
+                }
             }
         }
 
         /* Send assembled frame over Ethernet (if ready) */
         frame_eth_send_pending();
-        frame_eth_send_can_diag_pending();
+        if (g_diagSniffEnabled)
+            frame_eth_send_can_diag_pending();
 
         /* Update FPS once per second */
         fps_update();

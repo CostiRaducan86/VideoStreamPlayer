@@ -719,6 +719,13 @@ void frame_eth_poll_rx(void)
                                           : FE_DEVICE_NICHIA;
                     device_mode_set(newDev);
                 }
+                else if (cmdId == FE_CMD_DIAG_SNIFF)
+                {
+                    /* 0 = stop sniffing, 1 = start sniffing */
+                    g_diagSniffEnabled = (cmdPayload != 0u) ? 1u : 0u;
+                    if (cmdPayload != 0u)
+                        can_diag_reset();  /* clear queue on start */
+                }
             }
         }
 

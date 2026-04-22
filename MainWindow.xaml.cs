@@ -1360,6 +1360,18 @@ namespace VilsSharpX
 
         private void BtnCanRecord_Click(object sender, RoutedEventArgs e)
         {
+            // Tell Aurix to start diagnostic sniffing
+            try
+            {
+                string? txDev = GetTxPcapDeviceNameOrNull();
+                if (!string.IsNullOrWhiteSpace(txDev))
+                    DiagSniffCommand.Send(txDev, start: true, AppendDiagLog);
+            }
+            catch (Exception ex) { AppendDiagLog($"[cmd] DiagSniff start: {ex.Message}"); }
+
+            // Reset capture counters so Rx/CD/OS restart from 0
+            _canDiagCapture?.ResetCounters();
+
             // Start a fresh recording session: clear previous data
             _canDiagStore.Clear();
             _rawCanLines.Clear();
@@ -1374,6 +1386,15 @@ namespace VilsSharpX
         {
             _canDiagRecording = false;
             UpdateCanDiagRecordingButtons();
+
+            // Tell Aurix to stop diagnostic sniffing
+            try
+            {
+                string? txDev = GetTxPcapDeviceNameOrNull();
+                if (!string.IsNullOrWhiteSpace(txDev))
+                    DiagSniffCommand.Send(txDev, start: false, AppendDiagLog);
+            }
+            catch (Exception ex) { AppendDiagLog($"[cmd] DiagSniff stop: {ex.Message}"); }
         }
 
         private void UpdateCanDiagRecordingButtons()
