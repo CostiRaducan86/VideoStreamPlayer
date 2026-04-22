@@ -1199,6 +1199,15 @@ namespace VilsSharpX
             {
                 _canDiagRecording = false;
                 UpdateCanDiagRecordingButtons();
+
+                // Tell Aurix to stop sniffing (same as manual Stop button)
+                try
+                {
+                    string? txDev = GetTxPcapDeviceNameOrNull();
+                    if (!string.IsNullOrWhiteSpace(txDev))
+                        DiagSniffCommand.Send(txDev, start: false, AppendDiagLog);
+                }
+                catch (Exception ex) { AppendDiagLog($"[cmd] DiagSniff auto-stop: {ex.Message}"); }
             }
 
             /* Throttle UI refresh to avoid freezing under high packet rate.

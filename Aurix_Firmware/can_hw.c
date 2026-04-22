@@ -310,6 +310,33 @@ void diag_uart_init(void)
 }
 
 /* ================================================================ */
+void diag_uart_reset_state(void)
+{
+    /* Zero all soft counters — hardware (ASCLIN9/DMA) keeps running */
+    memset((void *)&g_diagUartStats, 0, sizeof(g_diagUartStats));
+
+    /* Preserve non-counter fields that diag_uart_init set once */
+    g_diagUartStats.baudrate  = 2000000u;
+    g_diagUartStats.initOk    = 1u;
+    g_diagUartStats.stmFreqHz = (uint32)IfxStm_getFrequency(&MODULE_STM0);
+
+    s_prevCompletionCount   = s_diagCompletionCount;  /* ignore old DMA edges */
+    s_prevRxBytes           = g_diagUartStats.totalRxBytes;
+    s_prevDmaCountForErrors = s_diagCompletionCount;
+
+    /* Flush parser accumulator so stale bytes don't leak into new session */
+    s_parseLen     = 0u;
+    s_dmaSrc       = NULL_PTR;
+    s_dmaSrcRemain = 0u;
+
+    /* Reset debug snapshot counters */
+    g_diagDebugReady = 0u;
+    g_diagCount80    = 0u;
+    g_diagCountA5    = 0u;
+    g_diagCount80A5  = 0u;
+}
+
+/* ================================================================ */
 boolean diag_uart_is_synced(void)
 {
     return (g_diagUartStats.dmaCompletions > 0u) ? TRUE : FALSE;

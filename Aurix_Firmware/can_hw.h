@@ -89,4 +89,8 @@ boolean diag_uart_is_synced(void);
  *  Returns TRUE if a frame was available (not yet implemented). */
 boolean diag_uart_try_receive(DiagUartFrame *out);
 
+/** Reset all soft counters and parser state (does NOT re-init ASCLIN9/DMA).
+ *  Call on sniff-start so a new recording session starts from zero. */
+void diag_uart_reset_state(void);
+
 #endif /* CAN_HW_H */
