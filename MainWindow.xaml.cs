@@ -145,20 +145,15 @@ namespace VilsSharpX
         private NichiaEthCapture? _nichiaEthCapture;
         private OsramEthCapture? _osramEthCapture;
         private LsmCanDiagCapture? _canDiagCapture;
-        private readonly LsmCanDiagStore _canDiagStore = new(16384);
+        private readonly LsmCanDiagStore _canDiagStore = new(32768);
         private readonly ObservableCollection<CanDiagRowView> _canDiagRows = new();
         private const int CanDiagPageSize = 14;
         private int _canDiagCurrentPage = 1;
         private int _canDiagTotalPages = 1;
         private DateTime _canDiagLastRefresh = DateTime.MinValue;
         private bool _canDiagRefreshPending;
-        private bool _canDiagRecording = true;
+        private bool _canDiagRecording;  // starts false — user presses Record to begin
         private static readonly TimeSpan CanDiagRefreshInterval = TimeSpan.FromMilliseconds(200);
-
-        // Trace mode: one row per unique (address, operation) pair.
-        // Preserves insertion order; latest record overwrites previous.
-        private readonly Dictionary<(ushort Addr, LsmCanDiagOperation Op), LsmCanDiagRecord> _traceMap = new();
-        private readonly List<(ushort Addr, LsmCanDiagOperation Op)> _traceOrder = new();
 
         private Frame? _latestA;
         private Frame? _latestB;
@@ -1152,6 +1147,8 @@ namespace VilsSharpX
             _canDiagStatusTimer.Tick += (_, _) => UpdateCanDiagStatusText();
             _canDiagStatusTimer.Start();
 
+            // Recording starts as false — user must press Record
+            UpdateCanDiagRecordingButtons();
             UpdateCanDiagStatusText();
         }
 
@@ -1196,12 +1193,6 @@ namespace VilsSharpX
             _canDiagStore.Append(record);
             AppendRawCanLine(record);
 
-            // Update trace map: one row per (address, operation)
-            var traceKey = (record.Address, record.Operation);
-            if (!_traceMap.ContainsKey(traceKey))
-                _traceOrder.Add(traceKey);
-            _traceMap[traceKey] = record;
-
             /* Throttle UI refresh to avoid freezing under high packet rate.
              * Records are still stored; only the visual update is deferred. */
             var now = DateTime.UtcNow;
@@ -1235,11 +1226,9 @@ namespace VilsSharpX
             string orderBy = GetSelectedComboContent(CmbCanOrderBy);
             string sort = GetSelectedComboContent(CmbCanSort);
 
-            // Trace mode: one row per unique (address, operation).
-            // _traceOrder preserves first-seen insertion order.
-            var filtered = _traceOrder
-                .Where(key => _traceMap.ContainsKey(key))
-                .Select(key => _traceMap[key])
+            // Sequential log: show all stored records in arrival order.
+            var snapshot = _canDiagStore.SnapshotNewestFirst(0);  // 0 = all
+            var filtered = snapshot
                 .Where(MatchesCanDiagFilter)
                 .Select(CanDiagRowView.FromRecord)
                 .ToList();
@@ -1355,8 +1344,6 @@ namespace VilsSharpX
         private void BtnCanClear_Click(object sender, RoutedEventArgs e)
         {
             _canDiagStore.Clear();
-            _traceMap.Clear();
-            _traceOrder.Clear();
             _rawCanLines.Clear();
             if (TblRawCan != null) TblRawCan.Text = string.Empty;
             _canDiagCurrentPage = 1;
@@ -1365,8 +1352,14 @@ namespace VilsSharpX
 
         private void BtnCanRecord_Click(object sender, RoutedEventArgs e)
         {
+            // Start a fresh recording session: clear previous data
+            _canDiagStore.Clear();
+            _rawCanLines.Clear();
+            if (TblRawCan != null) TblRawCan.Text = string.Empty;
+            _canDiagCurrentPage = 1;
             _canDiagRecording = true;
             UpdateCanDiagRecordingButtons();
+            RefreshCanDiagView();
         }
 
         private void BtnCanStopRecord_Click(object sender, RoutedEventArgs e)
