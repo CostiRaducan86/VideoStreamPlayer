@@ -25,6 +25,8 @@ typedef struct
     uint8   data[72];       /* payload bytes (max ECU frame ~70 bytes)  */
     uint8   len;            /* actual data length                       */
     uint32  timestampUs;    /* STM0-based timestamp in microseconds     */
+    uint16  responseDelayUs;   /* time from ECU request end to this response start */
+    uint16  interFrameDelayUs; /* time from previous frame end to this frame start */
 } DiagUartFrame;
 
 /* ── Diagnostic counters & ASCLIN9 register snapshots ── */

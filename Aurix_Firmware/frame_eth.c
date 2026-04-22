@@ -721,14 +721,16 @@ void frame_eth_poll_rx(void)
                 }
                 else if (cmdId == FE_CMD_DIAG_SNIFF)
                 {
-                    /* 0 = stop sniffing, 1 = start sniffing */
-                    g_diagSniffEnabled = (cmdPayload != 0u) ? 1u : 0u;
-                    if (cmdPayload != 0u)
+                    /* Only reset on 0→1 transition; ignore redundant starts
+                     * (PC sends 3× for reliability — don't wipe seq mid-stream). */
+                    uint8 newState = (cmdPayload != 0u) ? 1u : 0u;
+                    if (newState && !g_diagSniffEnabled)
                     {
                         s_diagSeq = 0u;               /* restart Nr from 0     */
                         diag_uart_reset_state();      /* zero counters + flush parser */
                         can_diag_reset();             /* clear send queue + stats     */
                     }
+                    g_diagSniffEnabled = newState;
                 }
             }
         }

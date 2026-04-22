@@ -78,6 +78,20 @@ static uint16 s_parseLen;           /* valid bytes in parse accumulator   */
 static const uint8 *s_dmaSrc;       /* current read position in DMA buf   */
 static uint16       s_dmaSrcRemain; /* remaining bytes in claimed DMA buf */
 
+/* ======================== Byte-position timing ======================== */
+/* At 2 Mbaud, 8O2: 12 bits/byte → 6 µs/byte.  STM ticks per byte =
+ * stmFreq / baudrate * bitsPerByte.  We compute this once at init.     */
+static uint32 s_stmTicksPerByte;          /* STM ticks for 1 UART byte      */
+static volatile uint32 s_diagCompletedStm; /* STM snapshot at DMA completion */
+static uint32 s_dmaBufBaseStm;            /* STM time of byte[0] in current DMA buf */
+static uint16 s_dmaBufBytesConsumed;      /* how many bytes consumed from current buf */
+
+/* Inter-frame timing state (all in STM ticks, not µs, for precision) */
+static uint32 s_lastReqEndStm;     /* wire-time of last 4-byte read request end */
+static uint8  s_awaitingResponse;  /* 1 = read request consumed, waiting for response */
+static uint32 s_lastFrameEndStm;   /* wire-time of last emitted response end   */
+static uint8  s_hasLastFrameEnd;   /* 1 = s_lastFrameEndStm is valid           */
+
 /* ======================== Debug snapshot (Watch window) ======================== */
 /* First 64 bytes of first DMA buffer + byte occurrence counters */
 volatile uint8  g_diagDebugSnapshot[64];  /* first 64 raw bytes from DMA      */
@@ -127,6 +141,7 @@ IFX_INTERRUPT(DIAG_DMA_ISR, 0, DIAG_DMA_ISR_PRIO)
         s_diagMissedBuffers++;
     s_diagCompletedBuf = completed;
     s_diagCompletionCount++;
+    s_diagCompletedStm = IfxStm_getLower(&MODULE_STM0);
 
     /* Debug: capture first 64 bytes of first DMA buffer.
      * The O(2560) byte-scan loop that used to count 0x80/0xA5 bytes
@@ -294,6 +309,20 @@ void diag_uart_init(void)
     s_dmaSrc       = NULL_PTR;
     s_dmaSrcRemain = 0u;
 
+    /* Byte-position timing init */
+    /* 2 Mbaud 8O2 = 12 bits/byte. ticks_per_byte = stmFreq * 12 / 2000000 */
+    {
+        uint32 stmHz = (uint32)IfxStm_getFrequency(&MODULE_STM0);
+        s_stmTicksPerByte = (stmHz / 2000000u) * 12u;
+    }
+    s_diagCompletedStm   = 0u;
+    s_dmaBufBaseStm      = 0u;
+    s_dmaBufBytesConsumed = 0u;
+    s_awaitingResponse   = 0u;
+    s_hasLastFrameEnd    = 0u;
+    s_lastReqEndStm      = 0u;
+    s_lastFrameEndStm    = 0u;
+
     g_diagUartStats.baudrate   = 2000000u;
     g_diagUartStats.initOk     = 1u;
     g_diagUartStats.stmFreqHz  = (uint32)IfxStm_getFrequency(&MODULE_STM0);
@@ -328,6 +357,14 @@ void diag_uart_reset_state(void)
     s_parseLen     = 0u;
     s_dmaSrc       = NULL_PTR;
     s_dmaSrcRemain = 0u;
+
+    /* Reset byte-position timing state */
+    s_dmaBufBaseStm       = 0u;
+    s_dmaBufBytesConsumed = 0u;
+    s_awaitingResponse    = 0u;
+    s_hasLastFrameEnd     = 0u;
+    s_lastReqEndStm       = 0u;
+    s_lastFrameEndStm     = 0u;
 
     /* Reset debug snapshot counters */
     g_diagDebugReady = 0u;
@@ -427,10 +464,19 @@ static void diag_fill_parse_buf(void)
     if (take > 0u)
     {
         memcpy(&s_parseBuf[s_parseLen], s_dmaSrc, take);
-        s_parseLen     += take;
-        s_dmaSrc       += take;
-        s_dmaSrcRemain -= take;
+        s_parseLen            += take;
+        s_dmaSrc              += take;
+        s_dmaSrcRemain        -= take;
+        s_dmaBufBytesConsumed += take;
     }
+}
+
+/* Estimate STM tick when byte at parseBuf[parseOffset] was on the wire.
+ * Uses byte position within the DMA buffer and the known baud rate. */
+static uint32 diag_wire_stm(uint16 parseOffset)
+{
+    uint16 dmaBufIdx = (uint16)(s_dmaBufBytesConsumed - s_parseLen + parseOffset);
+    return s_dmaBufBaseStm + (uint32)(dmaBufIdx) * s_stmTicksPerByte;
 }
 
 /* Try to get more data into the parse buffer.
@@ -450,14 +496,20 @@ static boolean diag_refill(void)
     if (s_dmaSrcRemain == 0u)
     {
         IfxCpu_disableInterrupts();
-        volatile uint8 *buf = s_diagCompletedBuf;
-        s_diagCompletedBuf  = NULL_PTR;
+        volatile uint8 *buf  = s_diagCompletedBuf;
+        uint32 completedStm  = s_diagCompletedStm;
+        s_diagCompletedBuf   = NULL_PTR;
         IfxCpu_enableInterrupts();
 
         if (buf != NULL_PTR)
         {
             s_dmaSrc       = (const uint8 *)buf;
             s_dmaSrcRemain = DIAG_DMA_BUFFER_SIZE;
+            /* Wire time of byte[0] = completion_time - (bufSize * ticks_per_byte).
+             * The last byte in the buffer arrived at ~completion_time. */
+            s_dmaBufBaseStm       = completedStm
+                                  - (uint32)(DIAG_DMA_BUFFER_SIZE * s_stmTicksPerByte);
+            s_dmaBufBytesConsumed = 0u;
             diag_fill_parse_buf();
         }
     }
@@ -501,6 +553,16 @@ static uint8 diag_full_frame_length(uint8 hctrl)
 {
     uint8 nRegs = (uint8)(((hctrl >> 1u) & 0x0Fu) + 1u);
     return (uint8)(DIAG_FRAME_HEADER_LEN + nRegs * 2u + DIAG_FRAME_CRC_LEN);
+}
+
+/* Convert STM tick delta to microseconds, clamped to uint16 */
+static uint16 diag_stm_delta_us(uint32 startStm, uint32 endStm)
+{
+    uint32 delta = endStm - startStm;  /* unsigned subtraction handles wrap */
+    uint32 usDiv = g_diagUartStats.stmFreqHz / 1000000u;
+    if (usDiv == 0u) return 0u;
+    uint32 us = delta / usDiv;
+    return (us > 0xFFFFu) ? 0xFFFFu : (uint16)us;
 }
 
 /* ================================================================ */
@@ -578,7 +640,9 @@ boolean diag_uart_try_receive(DiagUartFrame *out)
                     s_parseBuf[4] == DIAG_SYNC0_BYTE &&
                     s_parseBuf[5] == DIAG_SYNC1_BYTE)
                 {
-                    /* 4-byte read request (ECU query) — skip, no data */
+                    /* 4-byte read request (ECU query) — record timing, then skip */
+                    s_lastReqEndStm    = diag_wire_stm(3u); /* wire time of last byte */
+                    s_awaitingResponse = 1u;
                     diag_compact_parse_buf(DIAG_FRAME_HEADER_LEN);
                     continue;
                 }
@@ -607,9 +671,42 @@ boolean diag_uart_try_receive(DiagUartFrame *out)
                               ? fullLen : (uint8)sizeof(out->data);
                 memcpy(out->data, s_parseBuf, copyLen);
                 out->len = copyLen;
+
+                /* Wire-time of first byte (SYNC0) of this frame */
+                uint32 frameStartStm = diag_wire_stm(0u);
+                /* Wire-time of last byte of this frame */
+                uint32 frameEndStm   = diag_wire_stm((uint16)(fullLen - 1u));
+
                 /* Timestamp: STM ticks -> microseconds */
-                out->timestampUs = (uint32)(IfxStm_getLower(&MODULE_STM0)
-                                   / (g_diagUartStats.stmFreqHz / 1000000u));
+                {
+                    uint32 usDiv = g_diagUartStats.stmFreqHz / 1000000u;
+                    out->timestampUs = (usDiv > 0u) ? (frameStartStm / usDiv) : 0u;
+                }
+
+                /* ResponseDelay: time from read request end → response start */
+                if (s_awaitingResponse)
+                {
+                    out->responseDelayUs = diag_stm_delta_us(s_lastReqEndStm, frameStartStm);
+                    s_awaitingResponse   = 0u;
+                }
+                else
+                {
+                    out->responseDelayUs = 0u;
+                }
+
+                /* InterFrameDelay: time from previous frame end → this frame start */
+                if (s_hasLastFrameEnd)
+                {
+                    out->interFrameDelayUs = diag_stm_delta_us(s_lastFrameEndStm, frameStartStm);
+                }
+                else
+                {
+                    out->interFrameDelayUs = 0u;
+                }
+
+                s_lastFrameEndStm = frameEndStm;
+                s_hasLastFrameEnd = 1u;
+
                 diag_compact_parse_buf(fullLen);
                 g_diagUartStats.framesDecoded++;
                 return TRUE;

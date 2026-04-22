@@ -88,9 +88,11 @@ boolean can_diag_bridge_uart_frame(const DiagUartFrame *frame, uint8 deviceId)
         return FALSE;
 
     memset((void *)&rec, 0, sizeof(rec));
-    rec.sourceTimestamp = frame->timestampUs;
-    rec.deviceId       = deviceId;
-    rec.status         = CAN_DIAG_STATUS_OK;
+    rec.sourceTimestamp    = frame->timestampUs;
+    rec.responseDelayUs   = frame->responseDelayUs;
+    rec.interFrameDelayUs = frame->interFrameDelayUs;
+    rec.deviceId          = deviceId;
+    rec.status            = CAN_DIAG_STATUS_OK;
 
     /* Copy raw UART bytes into rawPayload for PC-side full-frame display */
     rec.valueLen = (frame->len <= CAN_DIAG_RAW_MAX)
