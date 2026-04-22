@@ -531,6 +531,8 @@
                         <ColumnDefinition Width="Auto"/>
                         <ColumnDefinition Width="Auto"/>
                         <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="Auto"/>
                     </Grid.ColumnDefinitions>
 
                     <TextBlock x:Name="LblCanMonitorStatus" Grid.Column="0"
@@ -539,8 +541,11 @@
 
                     <TextBlock x:Name="LblCanPageInfo" Grid.Column="1" Foreground="#666666" VerticalAlignment="Center" Margin="0,0,8,0"
                                Text="Page: 1 / 1"/>
-                    <Button x:Name="BtnCanPrevPage" Grid.Column="2" Content="Previous" Click="BtnCanPrevPage_Click" Padding="12,4" Margin="0,0,6,0"/>
-                    <Button x:Name="BtnCanNextPage" Grid.Column="3" Content="Next" Click="BtnCanNextPage_Click" Padding="12,4"/>
+                    <TextBox x:Name="TxtCanPageJump" Grid.Column="2" Width="50" Padding="4,2" Margin="0,0,6,0"
+                             VerticalAlignment="Center" HorizontalContentAlignment="Center"
+                             KeyDown="TxtCanPageJump_KeyDown"/>
+                    <Button x:Name="BtnCanPrevPage" Grid.Column="3" Content="Previous" Click="BtnCanPrevPage_Click" Padding="12,4" Margin="0,0,6,0"/>
+                    <Button x:Name="BtnCanNextPage" Grid.Column="4" Content="Next" Click="BtnCanNextPage_Click" Padding="12,4"/>
                 </Grid>
             </Grid>
         </GroupBox>

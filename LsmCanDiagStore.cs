@@ -22,6 +22,15 @@ public sealed class LsmCanDiagStore
         }
     }
 
+    public bool IsFull
+    {
+        get
+        {
+            lock (_gate)
+                return _records.Count >= _capacity;
+        }
+    }
+
     public void Append(LsmCanDiagRecord record)
     {
         lock (_gate)

@@ -1193,6 +1193,14 @@ namespace VilsSharpX
             _canDiagStore.Append(record);
             AppendRawCanLine(record);
 
+            // Auto-stop recording when store is full to prevent
+            // oldest records from being silently discarded.
+            if (_canDiagStore.IsFull)
+            {
+                _canDiagRecording = false;
+                UpdateCanDiagRecordingButtons();
+            }
+
             /* Throttle UI refresh to avoid freezing under high packet rate.
              * Records are still stored; only the visual update is deferred. */
             var now = DateTime.UtcNow;
@@ -1400,6 +1408,21 @@ namespace VilsSharpX
 
             _canDiagCurrentPage++;
             RefreshCanDiagView();
+        }
+
+        private void TxtCanPageJump_KeyDown(object sender, System.Windows.Input.KeyEventArgs e)
+        {
+            if (e.Key != System.Windows.Input.Key.Enter)
+                return;
+
+            if (int.TryParse(TxtCanPageJump?.Text, out int page) && page >= 1 && page <= _canDiagTotalPages)
+            {
+                _canDiagCurrentPage = page;
+                RefreshCanDiagView();
+            }
+
+            TxtCanPageJump?.SelectAll();
+            e.Handled = true;
         }
 
         // ── CAN Monitor: tab switching ──────────────────────────────────────────
