@@ -41,6 +41,7 @@
 /* ======================== Module state ======================== */
 
 DiagUartStats g_diagUartStats;
+volatile uint8 g_diagSniffEnabled;  /* 0 = idle (default), 1 = sniffing active */
 
 /* Dual ping-pong buffers for diagnostic UART DMA */
 IFX_ALIGN(32) static uint8 s_diagBufA[DIAG_DMA_BUFFER_SIZE];

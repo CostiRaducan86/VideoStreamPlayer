@@ -69,6 +69,10 @@ typedef struct
 
 extern DiagUartStats g_diagUartStats;
 
+/** Global flag: 1 = diagnostic sniffing active, 0 = idle.
+ *  Controlled by PC command FE_CMD_DIAG_SNIFF via Ethernet. */
+extern volatile uint8 g_diagSniffEnabled;
+
 /* ── API ── */
 
 /** Initialise ASCLIN9 + DMA for diagnostic UART sniffer. */

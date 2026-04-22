@@ -33,6 +33,17 @@ public sealed class LsmCanDiagCapture : IDisposable
     public string LastParserError => _lastParserError;
     public bool IsCapturing { get; private set; }
 
+    public void ResetCounters()
+    {
+        Interlocked.Exchange(ref _totalPackets, 0);
+        Interlocked.Exchange(ref _parserErrors, 0);
+        Interlocked.Exchange(ref _diagMagicMatches, 0);
+        Interlocked.Exchange(ref _niMagicMatches, 0);
+        Interlocked.Exchange(ref _osMagicMatches, 0);
+        Interlocked.Exchange(ref _other88b5Matches, 0);
+        _lastParserError = string.Empty;
+    }
+
     private LsmCanDiagCapture(ICaptureDevice device, Action<string>? log)
     {
         _device = device;
