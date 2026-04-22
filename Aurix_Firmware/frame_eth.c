@@ -724,7 +724,11 @@ void frame_eth_poll_rx(void)
                     /* 0 = stop sniffing, 1 = start sniffing */
                     g_diagSniffEnabled = (cmdPayload != 0u) ? 1u : 0u;
                     if (cmdPayload != 0u)
-                        can_diag_reset();  /* clear queue on start */
+                    {
+                        s_diagSeq = 0u;               /* restart Nr from 0     */
+                        diag_uart_reset_state();      /* zero counters + flush parser */
+                        can_diag_reset();             /* clear send queue + stats     */
+                    }
                 }
             }
         }
