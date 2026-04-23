@@ -78,19 +78,37 @@ static uint16 s_parseLen;           /* valid bytes in parse accumulator   */
 static const uint8 *s_dmaSrc;       /* current read position in DMA buf   */
 static uint16       s_dmaSrcRemain; /* remaining bytes in claimed DMA buf */
 
-/* ======================== Byte-position timing ======================== */
-/* At 2 Mbaud, 8O2: 12 bits/byte → 6 µs/byte.  STM ticks per byte =
- * stmFreq / baudrate * bitsPerByte.  We compute this once at init.     */
-static uint32 s_stmTicksPerByte;          /* STM ticks for 1 UART byte      */
-static volatile uint32 s_diagCompletedStm; /* STM snapshot at DMA completion */
-static uint32 s_dmaBufBaseStm;            /* STM time of byte[0] in current DMA buf */
-static uint16 s_dmaBufBytesConsumed;      /* how many bytes consumed from current buf */
+/* ======================== Idle-gap detection (DMA position polling) =========== */
+/* The main loop polls the DMA destination address at very high frequency.
+ * When the address doesn't change for > IDLE_THRESHOLD_US the line is idle
+ * (inter-frame gap).  Detected gaps are pushed to a FIFO; the frame parser
+ * pops one gap per emitted frame → per-frame InterFrameDelay.
+ *
+ * ResponseDelay (read request → response) is ~6 µs ≈ 1 byte time.
+ * Gaps shorter than the threshold are invisible to the poller, so
+ * ResponseDelay uses a constant estimate.                                    */
+#define RD_ESTIMATE_US       6u      /* ResponseDelay constant (≈1 byte time) */
+#define IDLE_THRESHOLD_US    50u     /* Minimum gap to register (filters RD)  */
+#define GAP_FIFO_SIZE        64u     /* Must be power of 2 for mask trick     */
+#define GAP_FIFO_MASK        (GAP_FIFO_SIZE - 1u)
 
-/* Inter-frame timing state (all in STM ticks, not µs, for precision) */
-static uint32 s_lastReqEndStm;     /* wire-time of last 4-byte read request end */
-static uint8  s_awaitingResponse;  /* 1 = read request consumed, waiting for response */
-static uint32 s_lastFrameEndStm;   /* wire-time of last emitted response end   */
-static uint8  s_hasLastFrameEnd;   /* 1 = s_lastFrameEndStm is valid           */
+static volatile uint32 s_diagCompletedStm; /* STM snapshot at DMA completion    */
+static uint8  s_awaitingResponse;          /* 1 = read request skipped, next is response */
+
+/* Gap FIFO — written by diag_uart_poll_idle(), read by frame extraction */
+static uint16 s_gapFifo[GAP_FIFO_SIZE];
+static uint8  s_gapHead;              /* write index (next push position)  */
+static uint8  s_gapTail;              /* read  index (next pop  position)  */
+
+/* DMA-position polling state (updated every main-loop iteration) */
+static uint32 s_pollPrevDadr;          /* last observed DMA.CH[0].DADR      */
+static uint32 s_pollPrevStm;           /* STM when DADR last changed        */
+static uint8  s_pollInIdle;            /* 1 = line has been idle > threshold */
+static volatile uint8 s_diagBufSwapped;/* set by ISR on ping-pong swap      */
+
+/* Debug counters (visible in DiagUartStats or watch window) */
+static uint32 s_requestsDetected;      /* read-request 4-byte skips         */
+static uint32 s_gapsDetected;          /* idle gaps pushed to FIFO          */
 
 /* ======================== Debug snapshot (Watch window) ======================== */
 /* First 64 bytes of first DMA buffer + byte occurrence counters */
@@ -141,7 +159,8 @@ IFX_INTERRUPT(DIAG_DMA_ISR, 0, DIAG_DMA_ISR_PRIO)
         s_diagMissedBuffers++;
     s_diagCompletedBuf = completed;
     s_diagCompletionCount++;
-    s_diagCompletedStm = IfxStm_getLower(&MODULE_STM0);
+    s_diagCompletedStm   = IfxStm_getLower(&MODULE_STM0);
+    s_diagBufSwapped     = 1u;  /* Tell poller that DADR just jumped */
 
     /* Debug: capture first 64 bytes of first DMA buffer.
      * The O(2560) byte-scan loop that used to count 0x80/0xA5 bytes
@@ -309,19 +328,17 @@ void diag_uart_init(void)
     s_dmaSrc       = NULL_PTR;
     s_dmaSrcRemain = 0u;
 
-    /* Byte-position timing init */
-    /* 2 Mbaud 8O2 = 12 bits/byte. ticks_per_byte = stmFreq * 12 / 2000000 */
-    {
-        uint32 stmHz = (uint32)IfxStm_getFrequency(&MODULE_STM0);
-        s_stmTicksPerByte = (stmHz / 2000000u) * 12u;
-    }
+    /* Idle-gap detection init */
     s_diagCompletedStm   = 0u;
-    s_dmaBufBaseStm      = 0u;
-    s_dmaBufBytesConsumed = 0u;
     s_awaitingResponse   = 0u;
-    s_hasLastFrameEnd    = 0u;
-    s_lastReqEndStm      = 0u;
-    s_lastFrameEndStm    = 0u;
+    s_gapHead            = 0u;
+    s_gapTail            = 0u;
+    s_pollPrevDadr       = 0u;
+    s_pollPrevStm        = 0u;
+    s_pollInIdle         = 0u;
+    s_diagBufSwapped     = 0u;
+    s_requestsDetected   = 0u;
+    s_gapsDetected       = 0u;
 
     g_diagUartStats.baudrate   = 2000000u;
     g_diagUartStats.initOk     = 1u;
@@ -358,13 +375,16 @@ void diag_uart_reset_state(void)
     s_dmaSrc       = NULL_PTR;
     s_dmaSrcRemain = 0u;
 
-    /* Reset byte-position timing state */
-    s_dmaBufBaseStm       = 0u;
-    s_dmaBufBytesConsumed = 0u;
-    s_awaitingResponse    = 0u;
-    s_hasLastFrameEnd     = 0u;
-    s_lastReqEndStm       = 0u;
-    s_lastFrameEndStm     = 0u;
+    /* Reset idle-gap detection state */
+    s_awaitingResponse   = 0u;
+    s_gapHead            = 0u;
+    s_gapTail            = 0u;
+    s_pollPrevDadr       = 0u;
+    s_pollPrevStm        = 0u;
+    s_pollInIdle         = 0u;
+    s_diagBufSwapped     = 0u;
+    s_requestsDetected   = 0u;
+    s_gapsDetected       = 0u;
 
     /* Reset debug snapshot counters */
     g_diagDebugReady = 0u;
@@ -464,19 +484,10 @@ static void diag_fill_parse_buf(void)
     if (take > 0u)
     {
         memcpy(&s_parseBuf[s_parseLen], s_dmaSrc, take);
-        s_parseLen            += take;
-        s_dmaSrc              += take;
-        s_dmaSrcRemain        -= take;
-        s_dmaBufBytesConsumed += take;
+        s_parseLen     += take;
+        s_dmaSrc       += take;
+        s_dmaSrcRemain -= take;
     }
-}
-
-/* Estimate STM tick when byte at parseBuf[parseOffset] was on the wire.
- * Uses byte position within the DMA buffer and the known baud rate. */
-static uint32 diag_wire_stm(uint16 parseOffset)
-{
-    uint16 dmaBufIdx = (uint16)(s_dmaBufBytesConsumed - s_parseLen + parseOffset);
-    return s_dmaBufBaseStm + (uint32)(dmaBufIdx) * s_stmTicksPerByte;
 }
 
 /* Try to get more data into the parse buffer.
@@ -497,7 +508,6 @@ static boolean diag_refill(void)
     {
         IfxCpu_disableInterrupts();
         volatile uint8 *buf  = s_diagCompletedBuf;
-        uint32 completedStm  = s_diagCompletedStm;
         s_diagCompletedBuf   = NULL_PTR;
         IfxCpu_enableInterrupts();
 
@@ -505,11 +515,6 @@ static boolean diag_refill(void)
         {
             s_dmaSrc       = (const uint8 *)buf;
             s_dmaSrcRemain = DIAG_DMA_BUFFER_SIZE;
-            /* Wire time of byte[0] = completion_time - (bufSize * ticks_per_byte).
-             * The last byte in the buffer arrived at ~completion_time. */
-            s_dmaBufBaseStm       = completedStm
-                                  - (uint32)(DIAG_DMA_BUFFER_SIZE * s_stmTicksPerByte);
-            s_dmaBufBytesConsumed = 0u;
             diag_fill_parse_buf();
         }
     }
@@ -555,14 +560,80 @@ static uint8 diag_full_frame_length(uint8 hctrl)
     return (uint8)(DIAG_FRAME_HEADER_LEN + nRegs * 2u + DIAG_FRAME_CRC_LEN);
 }
 
-/* Convert STM tick delta to microseconds, clamped to uint16 */
-static uint16 diag_stm_delta_us(uint32 startStm, uint32 endStm)
+/* ======================== Idle-gap polling ================================= */
+/* Called every main-loop iteration.  Reads the DMA channel 0 destination
+ * address to detect when the UART line goes idle (no new bytes arriving).
+ * When the idle period exceeds IDLE_THRESHOLD_US, the measured gap duration
+ * is pushed to s_gapFifo for the frame parser to consume.
+ *
+ * A ping-pong buffer swap (ISR) causes DADR to jump; we handle that via
+ * s_diagBufSwapped so it doesn't produce a false gap-end event.            */
+void diag_uart_poll_idle(void)
 {
-    uint32 delta = endStm - startStm;  /* unsigned subtraction handles wrap */
-    uint32 usDiv = g_diagUartStats.stmFreqHz / 1000000u;
-    if (usDiv == 0u) return 0u;
-    uint32 us = delta / usDiv;
-    return (us > 0xFFFFu) ? 0xFFFFu : (uint16)us;
+    uint32 currDadr;
+    uint32 currStm;
+    uint32 gapTicks;
+    uint32 usDiv;
+    uint32 gapUs;
+    uint8  next;
+
+    if (!g_diagSniffEnabled)
+        return;
+
+    /* Handle DMA buffer swap — DADR jumped to new buffer, not real data */
+    if (s_diagBufSwapped)
+    {
+        s_diagBufSwapped = 0u;
+        s_pollPrevDadr   = MODULE_DMA.CH[DIAG_DMA_CHANNEL_ID].DADR.U;
+        /* Keep s_pollPrevStm and s_pollInIdle unchanged — idle continues
+         * seamlessly across buffer boundaries.                          */
+        return;
+    }
+
+    currDadr = MODULE_DMA.CH[DIAG_DMA_CHANNEL_ID].DADR.U;
+    currStm  = IfxStm_getLower(&MODULE_STM0);
+
+    if (currDadr != s_pollPrevDadr)
+    {
+        /* Byte(s) arrived since last poll */
+        if (s_pollInIdle)
+        {
+            /* Was idle → gap ended.  Measure gap from last-byte-time
+             * (s_pollPrevStm) to now.  Slightly over-estimates by up
+             * to one main-loop period — acceptable for 300 µs gaps.  */
+            gapTicks = currStm - s_pollPrevStm;
+            usDiv    = g_diagUartStats.stmFreqHz / 1000000u;
+            gapUs    = (usDiv > 0u) ? (gapTicks / usDiv) : 0u;
+
+            if (gapUs >= IDLE_THRESHOLD_US)
+            {
+                next = (uint8)((s_gapHead + 1u) & GAP_FIFO_MASK);
+                if (next != s_gapTail)  /* FIFO not full */
+                {
+                    s_gapFifo[s_gapHead] = (gapUs > 0xFFFFu) ? 0xFFFFu : (uint16)gapUs;
+                    s_gapHead = next;
+                    s_gapsDetected++;
+                }
+            }
+            s_pollInIdle = 0u;
+        }
+        s_pollPrevDadr = currDadr;
+        s_pollPrevStm  = currStm;
+    }
+    else
+    {
+        /* No new bytes — check if idle threshold exceeded */
+        if (!s_pollInIdle)
+        {
+            gapTicks = currStm - s_pollPrevStm;
+            usDiv    = g_diagUartStats.stmFreqHz / 1000000u;
+            gapUs    = (usDiv > 0u) ? (gapTicks / usDiv) : 0u;
+            if (gapUs >= IDLE_THRESHOLD_US)
+            {
+                s_pollInIdle = 1u;
+            }
+        }
+    }
 }
 
 /* ================================================================ */
@@ -640,9 +711,9 @@ boolean diag_uart_try_receive(DiagUartFrame *out)
                     s_parseBuf[4] == DIAG_SYNC0_BYTE &&
                     s_parseBuf[5] == DIAG_SYNC1_BYTE)
                 {
-                    /* 4-byte read request (ECU query) — record timing, then skip */
-                    s_lastReqEndStm    = diag_wire_stm(3u); /* wire time of last byte */
+                    /* 4-byte read request (ECU query) — mark for ResponseDelay, skip */
                     s_awaitingResponse = 1u;
+                    s_requestsDetected++;
                     diag_compact_parse_buf(DIAG_FRAME_HEADER_LEN);
                     continue;
                 }
@@ -667,26 +738,26 @@ boolean diag_uart_try_receive(DiagUartFrame *out)
 
             /* Full frame available — extract it */
             {
-                uint8 copyLen = (fullLen <= (uint8)sizeof(out->data))
-                              ? fullLen : (uint8)sizeof(out->data);
+                uint8 copyLen;
+                uint32 usDiv;
+                uint16 gapUs;
+
+                copyLen = (fullLen <= (uint8)sizeof(out->data))
+                        ? fullLen : (uint8)sizeof(out->data);
                 memcpy(out->data, s_parseBuf, copyLen);
                 out->len = copyLen;
 
-                /* Wire-time of first byte (SYNC0) of this frame */
-                uint32 frameStartStm = diag_wire_stm(0u);
-                /* Wire-time of last byte of this frame */
-                uint32 frameEndStm   = diag_wire_stm((uint16)(fullLen - 1u));
+                /* Timestamp: current STM → microseconds */
+                usDiv = g_diagUartStats.stmFreqHz / 1000000u;
+                out->timestampUs = (usDiv > 0u)
+                    ? (IfxStm_getLower(&MODULE_STM0) / usDiv) : 0u;
 
-                /* Timestamp: STM ticks -> microseconds */
-                {
-                    uint32 usDiv = g_diagUartStats.stmFreqHz / 1000000u;
-                    out->timestampUs = (usDiv > 0u) ? (frameStartStm / usDiv) : 0u;
-                }
-
-                /* ResponseDelay: time from read request end → response start */
+                /* ResponseDelay: constant estimate for read responses.
+                 * The Osram ASIC responds ~1 byte time after the request,
+                 * matching classic VILS measurements (6-7 µs).            */
                 if (s_awaitingResponse)
                 {
-                    out->responseDelayUs = diag_stm_delta_us(s_lastReqEndStm, frameStartStm);
+                    out->responseDelayUs = RD_ESTIMATE_US;
                     s_awaitingResponse   = 0u;
                 }
                 else
@@ -694,18 +765,17 @@ boolean diag_uart_try_receive(DiagUartFrame *out)
                     out->responseDelayUs = 0u;
                 }
 
-                /* InterFrameDelay: time from previous frame end → this frame start */
-                if (s_hasLastFrameEnd)
+                /* InterFrameDelay: pop the next detected idle gap.
+                 * The gap FIFO is filled by diag_uart_poll_idle() in the
+                 * main loop.  Each gap > IDLE_THRESHOLD_US corresponds to
+                 * one inter-frame boundary on the wire.                   */
+                gapUs = 0u;
+                if (s_gapTail != s_gapHead)
                 {
-                    out->interFrameDelayUs = diag_stm_delta_us(s_lastFrameEndStm, frameStartStm);
+                    gapUs = s_gapFifo[s_gapTail];
+                    s_gapTail = (uint8)((s_gapTail + 1u) & GAP_FIFO_MASK);
                 }
-                else
-                {
-                    out->interFrameDelayUs = 0u;
-                }
-
-                s_lastFrameEndStm = frameEndStm;
-                s_hasLastFrameEnd = 1u;
+                out->interFrameDelayUs = gapUs;
 
                 diag_compact_parse_buf(fullLen);
                 g_diagUartStats.framesDecoded++;
