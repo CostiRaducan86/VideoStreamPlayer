@@ -752,23 +752,18 @@ boolean diag_uart_try_receive(DiagUartFrame *out)
                 out->timestampUs = (usDiv > 0u)
                     ? (IfxStm_getLower(&MODULE_STM0) / usDiv) : 0u;
 
-                /* ResponseDelay: constant estimate for read responses.
-                 * The Osram ASIC responds ~1 byte time after the request,
-                 * matching classic VILS measurements (6-7 µs).            */
-                if (s_awaitingResponse)
-                {
-                    out->responseDelayUs = RD_ESTIMATE_US;
-                    s_awaitingResponse   = 0u;
-                }
-                else
-                {
-                    out->responseDelayUs = 0u;
-                }
+                /* ResponseDelay: determined by RW bit in HCTRL.
+                 * Read responses (RW=1) have ~6 µs ASIC latency (classic
+                 * VILS shows 6-7 µs).  Writes (RW=0) have no response.
+                 * This is independent of request detection — the Aurix
+                 * sniffer may not receive the 4-byte ECU read requests.  */
+                out->responseDelayUs = (hctrl & 0x80u) ? RD_ESTIMATE_US : 0u;
+                s_awaitingResponse = 0u;  /* clear for state hygiene */
 
-                /* InterFrameDelay: pop the next detected idle gap.
-                 * The gap FIFO is filled by diag_uart_poll_idle() in the
-                 * main loop.  Each gap > IDLE_THRESHOLD_US corresponds to
-                 * one inter-frame boundary on the wire.                   */
+                /* InterFrameDelay: capture any recent idle gaps that the
+                 * main-loop poller may not have processed yet (ISR buffer
+                 * swap race), then pop from FIFO.                         */
+                diag_uart_poll_idle();
                 gapUs = 0u;
                 if (s_gapTail != s_gapHead)
                 {
