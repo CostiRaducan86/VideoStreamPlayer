@@ -80,6 +80,10 @@ extern volatile uint8 g_diagSniffEnabled;
 /** Initialise ASCLIN9 + DMA for diagnostic UART sniffer. */
 void diag_uart_init(void);
 
+/** Poll DMA position to detect inter-frame idle gaps.
+ *  Call every main-loop iteration (before diag_uart_try_receive). */
+void diag_uart_poll_idle(void);
+
 /** Poll diagnostic counters. Call from main loop.
  *  Returns TRUE when bytes are flowing (synced). */
 boolean diag_uart_tick(void);

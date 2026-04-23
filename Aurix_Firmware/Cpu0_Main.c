@@ -144,6 +144,7 @@ void core0_main(void)
          * Process at most 1 frame per main-loop iteration to keep
          * interrupt-disabled time (diag_refill) short and avoid
          * starving the LVDS DMA buffer drain above.                  */
+        diag_uart_poll_idle();   /* detect inter-frame gaps via DMA position */
         if (g_diagSniffEnabled)
         {
             diag_uart_tick();
