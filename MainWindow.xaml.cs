@@ -136,7 +136,6 @@ namespace VilsSharpX
         private FrameSnapshotSaver _snapshotSaver = null!;
 
         // Live NIC selector
-        private readonly LiveNicSelector _nicSelector = new();
 
         // LVDS capture manager
         private LvdsLiveManager _lvdsManager = null!;
@@ -146,7 +145,7 @@ namespace VilsSharpX
         private OsramEthCapture? _osramEthCapture;
         private LsmCanDiagCapture? _canDiagCapture;
         private readonly LsmCanDiagStore _canDiagStore = new(32768);
-        private readonly ObservableCollection<CanDiagRowView> _canDiagRows = new();
+        private readonly ObservableCollection<CanDiagRowView> _canDiagRows = [];
         private const int CanDiagPageSize = 14;
         private int _canDiagCurrentPage = 1;
         private int _canDiagTotalPages = 1;
@@ -188,9 +187,6 @@ namespace VilsSharpX
         // Zoom/pan manager (replaces individual _zoom/_pan fields)
         private readonly ZoomPanManager _zoomPan = new();
 
-        // Pixel inspector for hover info
-        private PixelInspector _pixelInspector = null!;
-
         // UI settings manager
         private UiSettingsManager _settingsManager = null!;
 
@@ -198,7 +194,7 @@ namespace VilsSharpX
         private readonly DispatcherTimer _overlayTimerB;
         private readonly DispatcherTimer _overlayTimerD;
 
-        private DateTime _statusOverrideUntil = DateTime.MinValue;
+        private readonly DateTime _statusOverrideUntil = DateTime.MinValue;
 
         private bool _overlayPendingA;
         private bool _overlayPendingB;
@@ -290,7 +286,6 @@ namespace VilsSharpX
             _aviPlayer = new AviSourcePlayer(w, h, FpsEstimationWindowSec, FpsEmaAlpha);
             _sourceLoader = new SourceLoaderHelper(w, h, H_LVDS);
             _snapshotSaver = new FrameSnapshotSaver(w, h);
-            _pixelInspector = new PixelInspector(w, h);
             _settingsManager = new UiSettingsManager(w, h);
             _txManager = new AvtpTransmitManager(w, h, AppendDiagLog);
             _lvdsManager = new LvdsLiveManager(_currentDeviceType, LiveSignalLostTimeoutSec, AppendDiagLog);
@@ -552,7 +547,6 @@ namespace VilsSharpX
 
         private (System.Windows.Controls.Image img, System.Windows.Controls.Canvas ovr, ScaleTransform zoom) GetPaneVisuals(Pane pane)
         {
-            int idx = (int)pane;
             return pane switch
             {
                 Pane.A => (ImgA, OvrA, _zoomPan.GetZoom(0)),
@@ -828,13 +822,13 @@ namespace VilsSharpX
             // Compare against that, not the device's active crop height.
             int rvfHeight = RvfProtocol.H;
             int displayHeight = GetCurrentHeight();
-            bool incomplete = meta.linesWritten < rvfHeight;
-            bool gap = meta.seqGaps > 0;
+            bool incomplete = meta.LinesWritten < rvfHeight;
+            bool gap = meta.SeqGaps > 0;
             if (incomplete) _playback.IncrementCountAvtpIncomplete();
             if (gap)
             {
                 _playback.IncrementCountAvtpSeqGapFrames();
-                _playback.AddSeqGaps(meta.seqGaps);
+                _playback.AddSeqGaps(meta.SeqGaps);
             }
             if (incomplete || gap) _playback.IncrementCountAvtpDropped();
 
@@ -851,9 +845,9 @@ namespace VilsSharpX
             _liveCapture.LastRvfSrcLabel = src;
 
             // For display, clamp linesWritten to display height so Nichia shows "64/64" not "80/64".
-            int displayLines = Math.Min(meta.linesWritten, displayHeight);
+            int displayLines = Math.Min(meta.LinesWritten, displayHeight);
             LblStatus.Text = StatusFormatter.FormatAvtpRvfStatus(
-                src, meta.frameId, meta.seq, displayLines, displayHeight, meta.seqGaps,
+                src, meta.FrameId, meta.Seq, displayLines, displayHeight, meta.SeqGaps,
                 _playback.CountAvtpDropped, _playback.CountAvtpSeqGapFrames,
                 _playback.CountAvtpIncomplete, _playback.CountLateFramesSkipped);
         }
@@ -1068,12 +1062,12 @@ namespace VilsSharpX
         private bool TrySetActiveAvtpFeed(LiveCaptureManager.Feed feed) => _liveCapture.TrySetActiveFeed(feed);
         private LiveCaptureManager.Feed GetActiveAvtpFeed() => _liveCapture.ActiveFeed;
 
-        private void RefreshLiveNicList() => _nicSelector.RefreshNicList(CmbLiveNic, _avtpLiveDeviceHint);
+        private void RefreshLiveNicList() => LiveNicSelector.RefreshNicList(CmbLiveNic, _avtpLiveDeviceHint);
 
-        private string? GetTxPcapDeviceNameOrNull() => _nicSelector.GetTxPcapDeviceNameOrNull(CmbLiveNic, _avtpLiveDeviceHint);
+        private string? GetTxPcapDeviceNameOrNull() => LiveNicSelector.GetTxPcapDeviceNameOrNull(CmbLiveNic, _avtpLiveDeviceHint);
 
         private void UpdateLiveUiEnabledState() =>
-            _nicSelector.UpdateLiveUiEnabledState(CmbLiveNic, _modeOfOperation == ModeOfOperation.AvtpLiveMonitor);
+            LiveNicSelector.UpdateLiveUiEnabledState(CmbLiveNic);
 
         private void BtnRefreshNics_Click(object sender, RoutedEventArgs e) => RefreshLiveNicList();
 
@@ -1084,7 +1078,7 @@ namespace VilsSharpX
             try
             {
                 StopNichiaEthCapture();
-                string? nicHint = _nicSelector.GetSelectedDeviceName(CmbLiveNic) ?? _avtpLiveDeviceHint;
+                string? nicHint = LiveNicSelector.GetSelectedDeviceName(CmbLiveNic) ?? _avtpLiveDeviceHint;
                 _nichiaEthCapture = NichiaEthCapture.Start(nicHint, AppendDiagLog);
                 _nichiaEthCapture.OnFrameReady += (frame, meta) =>
                     Dispatcher.BeginInvoke(() => HandleLvdsFrameReady(frame, meta));
@@ -1111,7 +1105,7 @@ namespace VilsSharpX
             try
             {
                 StopOsramEthCapture();
-                string? nicHint = _nicSelector.GetSelectedDeviceName(CmbLiveNic) ?? _avtpLiveDeviceHint;
+                string? nicHint = LiveNicSelector.GetSelectedDeviceName(CmbLiveNic) ?? _avtpLiveDeviceHint;
                 _osramEthCapture = OsramEthCapture.Start(nicHint, AppendDiagLog);
                 _osramEthCapture.OnFrameReady += (frame, meta) =>
                     Dispatcher.BeginInvoke(() => HandleLvdsFrameReady(frame, meta));
@@ -1157,7 +1151,7 @@ namespace VilsSharpX
             try
             {
                 StopCanDiagCapture();
-                string? nicHint = _nicSelector.GetSelectedDeviceName(CmbLiveNic) ?? _avtpLiveDeviceHint;
+                string? nicHint = LiveNicSelector.GetSelectedDeviceName(CmbLiveNic) ?? _avtpLiveDeviceHint;
                 _canDiagCapture = LsmCanDiagCapture.Start(nicHint, AppendDiagLog);
                 _canDiagCapture.OnRecordReady += record => Dispatcher.BeginInvoke(() => HandleCanDiagRecord(record));
                 AppendDiagLog("[can] diagnostic capture started");
@@ -1320,7 +1314,6 @@ namespace VilsSharpX
             if (LblCanMonitorStatus == null)
                 return;
 
-            int visible = _canDiagRows.Count;
             int stored = _canDiagStore.Count;
             long packets = _canDiagCapture?.TotalPackets ?? 0;
             long parserErrors = _canDiagCapture?.ParserErrors ?? 0;
@@ -1459,7 +1452,7 @@ namespace VilsSharpX
 
         private enum CanTab { Monitor, RawCan, UartTransaction }
         private CanTab _activeCanTab = CanTab.Monitor;
-        private readonly System.Collections.Generic.List<string> _rawCanLines = new();
+        private readonly System.Collections.Generic.List<string> _rawCanLines = [];
         private const int RawCanMaxLines = 500;
 
         private void BtnCanTabMonitor_Click(object sender, RoutedEventArgs e)  => SetCanTab(CanTab.Monitor);
@@ -1539,8 +1532,7 @@ namespace VilsSharpX
             if (TblRawCan == null) return;
             TblRawCan.Text = string.Join("\n", _rawCanLines);
             // Scroll to end
-            if (ScvRawCan != null)
-                ScvRawCan.ScrollToEnd();
+            ScvRawCan?.ScrollToEnd();
         }
 
         // ── CAN Monitor: row double-click → detail popup ────────────────────────
@@ -1681,7 +1673,7 @@ namespace VilsSharpX
             // render LVDS frame directly on pane B (standalone LVDS capture mode).
             if (_playback.Cts == null)
             {
-                RenderLvdsOnly(frame, meta);
+                RenderLvdsOnly(frame);
             }
         }
 
@@ -1690,7 +1682,7 @@ namespace VilsSharpX
         /// AVTP playback loop is not active. This allows standalone LVDS capture
         /// without needing to hit the Start button.
         /// </summary>
-        private void RenderLvdsOnly(byte[] frame, LvdsFrameMeta meta)
+        private void RenderLvdsOnly(byte[] frame)
         {
             int w = _currentWidth;
             int h = _currentHeight;
@@ -1716,8 +1708,8 @@ namespace VilsSharpX
             // Pane D: |A − B| diff
             DiffRenderer.RenderCompareToBgr(_diffBgr, aData, frame.Length == w * h ? frame : _noSignalGrayFrame,
                 w, h, _diffThreshold, _zeroZeroIsWhite,
-                out var minDiff, out var maxDiff, out var meanDiff,
-                out var maxAbsDiff, out var meanAbsDiff, out var aboveDeadband,
+                out var minDiff, out var maxDiff, out _,
+                out _, out var meanAbsDiff, out var aboveDeadband,
                 out var totalDarkPixels);
             BitmapUtils.Blit(_wbD, _diffBgr, w * 3);
 
@@ -1773,7 +1765,7 @@ namespace VilsSharpX
         private void CmbLiveNic_SelectionChanged(object sender, System.Windows.Controls.SelectionChangedEventArgs e)
         {
             if (_settingsManager.IsLoading) return;
-            _avtpLiveDeviceHint = _nicSelector.GetSelectedDeviceName(CmbLiveNic);
+            _avtpLiveDeviceHint = LiveNicSelector.GetSelectedDeviceName(CmbLiveNic);
             SaveUiSettings();
         }
 
@@ -1936,8 +1928,7 @@ namespace VilsSharpX
                 return;
             }
 
-            int fps = 100;
-            _ = int.TryParse(TxtFps.Text, out fps);
+            _ = int.TryParse(TxtFps.Text, out int fps);
 
             // Stop UI/loops
             StopAll();
@@ -1948,7 +1939,7 @@ namespace VilsSharpX
             {
                 ushort ethType = ParseHexUshort(_avtpEtherType, 0x22F0);
                 byte stIdByte = ParseHexByte(_streamIdLastByte, 0x50);
-                string? deviceHint = _nicSelector.GetSelectedDeviceName(CmbLiveNic) ?? _avtpLiveDeviceHint;
+                string? deviceHint = LiveNicSelector.GetSelectedDeviceName(CmbLiveNic) ?? _avtpLiveDeviceHint;
                 _txManager.Initialize(deviceHint, _srcMac, _dstMac,
                     _vlanId, _vlanPriority, ethType, stIdByte);
             }
@@ -2013,7 +2004,7 @@ namespace VilsSharpX
             int frameNr = GetCurrentFrameNumberHint();
 
             await _snapshotSaver.SaveAsync(a, bPost, _diffThreshold, _zeroZeroIsWhite, frameNr,
-                LblSaveFeedback, LblStatus, ShowSaveFeedback, HideSaveFeedback);
+                LblStatus, ShowSaveFeedback, HideSaveFeedback);
         }
 
         private void BtnOpenSnapshots_Click(object sender, RoutedEventArgs e)
@@ -2404,7 +2395,7 @@ namespace VilsSharpX
                 // Reason: at app startup, the NIC selection / device hint may change after settings load,
                 // and keeping an old capture instance can leave the UI stuck on the fallback image until Stop->Start.
                 // Ensure we use the NIC currently selected in the UI (avoids slow/incorrect auto-pick).
-                string? deviceHint = _nicSelector.GetSelectedDeviceName(CmbLiveNic) ?? _avtpLiveDeviceHint;
+                string? deviceHint = LiveNicSelector.GetSelectedDeviceName(CmbLiveNic) ?? _avtpLiveDeviceHint;
 
                 // Persist the final hint so next Start uses the same interface.
                 _avtpLiveDeviceHint = deviceHint;
@@ -3005,8 +2996,8 @@ namespace VilsSharpX
             BitmapUtils.Blit(_wbB, b.Data, b.Stride);
             DiffRenderer.RenderCompareToBgr(_diffBgr, diffARef, b.Data, _currentWidth, _currentHeight, _diffThreshold,
                 _zeroZeroIsWhite,
-                out var minDiff, out var maxDiff, out var meanDiff,
-                out var maxAbsDiff, out var meanAbsDiff, out var aboveDeadband,
+                out var minDiff, out var maxDiff, out _,
+                out _, out var meanAbsDiff, out var aboveDeadband,
                 out var totalDarkPixels);
             BitmapUtils.Blit(_wbD, _diffBgr, _currentWidth * 3);
 
@@ -3038,7 +3029,7 @@ namespace VilsSharpX
 
         private void UpdateFpsLabels()
         {
-            if (!_playback.TryUpdateFpsEstimates(out double fpsA, out double fpsB, out double fpsIn))
+            if (!_playback.TryUpdateFpsEstimates(out _, out _, out _))
                 return;
 
             bool noSignal = ShouldShowNoSignalWhileRunning();
@@ -3358,12 +3349,11 @@ namespace VilsSharpX
             if (_playback.Cts == null || ShouldShowNoSignalWhileRunning()) { lbl.Text = ""; return; }
             if (f == null) { lbl.Text = ""; return; }
 
-            var img = e.Source as System.Windows.Controls.Image;
-            if (img == null) { lbl.Text = ""; return; }
+            if (e.Source is not System.Windows.Controls.Image img) { lbl.Text = ""; return; }
             var pane = PaneFromSender(img);
             var (_, ovr, _) = GetPaneVisuals(pane);
 
-            if (!_pixelInspector.TryGetPixelXY(e, f, img, ovr, out int x, out int y)) { lbl.Text = ""; return; }
+            if (!PixelInspector.TryGetPixelXY(e, f, img, ovr, out int x, out int y)) { lbl.Text = ""; return; }
 
             byte v = f.Data[y * f.Stride + x];
             lbl.Text = PixelInspector.FormatGrayscaleInfo(x, y, v, f.Width);
@@ -3378,12 +3368,11 @@ namespace VilsSharpX
             var refFrame = a ?? b;
             if (refFrame == null) { lbl.Text = ""; return; }
 
-            var img = e.Source as System.Windows.Controls.Image;
-            if (img == null) { lbl.Text = ""; return; }
+            if (e.Source is not System.Windows.Controls.Image img) { lbl.Text = ""; return; }
             var pane = PaneFromSender(img);
             var (_, ovr, _) = GetPaneVisuals(pane);
 
-            if (!_pixelInspector.TryGetPixelXY(e, refFrame, img, ovr, out int x, out int y)) { lbl.Text = ""; return; }
+            if (!PixelInspector.TryGetPixelXY(e, refFrame, img, ovr, out int x, out int y)) { lbl.Text = ""; return; }
 
             int idx = (y * refFrame.Stride) + x;
             byte av = (a != null && idx < a.Data.Length) ? a.Data[idx] : (byte)0;
@@ -3399,7 +3388,7 @@ namespace VilsSharpX
             if (string.IsNullOrWhiteSpace(text)) return fallback;
             text = text.Trim();
             if (text.StartsWith("0x", StringComparison.OrdinalIgnoreCase))
-                text = text.Substring(2);
+                text = text[2..];
             return ushort.TryParse(text, System.Globalization.NumberStyles.HexNumber, null, out var v) ? v : fallback;
         }
 
@@ -3411,7 +3400,7 @@ namespace VilsSharpX
             if (string.IsNullOrWhiteSpace(text)) return fallback;
             text = text.Trim();
             if (text.StartsWith("0x", StringComparison.OrdinalIgnoreCase))
-                text = text.Substring(2);
+                text = text[2..];
             return byte.TryParse(text, System.Globalization.NumberStyles.HexNumber, null, out var v) ? v : fallback;
         }
     }

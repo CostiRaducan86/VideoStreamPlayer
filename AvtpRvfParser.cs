@@ -18,7 +18,7 @@ public static class AvtpRvfParser
     {
         line1 = 0;
         endFrame = false;
-        payload = Array.Empty<byte>();
+        payload = [];
 
         if (frame.Length < 14) return false;
         int o = 12;
@@ -39,7 +39,7 @@ public static class AvtpRvfParser
         if (etherType != EtherTypeAvtp) return false;
 
         // At this point, o is start of AVTP payload (myStream.byte(0) in CAPL)
-        var avtp = frame.Slice(o);
+        var avtp = frame[o..];
         if (avtp.Length < AvtpPayloadOffset + PayloadBytes) return false;
 
         // CAPL mapping (from docs/canoe/Avtp_new.can):

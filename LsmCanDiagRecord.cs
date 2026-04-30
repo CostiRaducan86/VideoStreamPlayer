@@ -41,7 +41,7 @@ public sealed class LsmCanDiagRecord
     public LsmCanDiagOperation Operation { get; init; }
     public LsmCanDiagStatus Status { get; init; }
     public byte RawLength { get; init; }
-    public byte[] RawPayload { get; init; } = Array.Empty<byte>();
+    public byte[] RawPayload { get; init; } = [];
     public DateTime ReceivedUtc { get; init; }
 
     public string DeviceName => DeviceId switch
@@ -71,17 +71,17 @@ public sealed class LsmCanDiagRecord
         {
             // CAN raw frames have CAN data bytes, not UART register payload
             if (IsCanRawFrame)
-                return Array.Empty<(ushort, ushort)>();
+                return [];
 
             if (RawLength < 4 || RawPayload.Length < 4)
-                return Array.Empty<(ushort, ushort)>();
+                return [];
 
             // UART frame: [SYNC0][SYNC1][HCTRL][HADR][data pairs...][CRC16(2B)]
             // Data starts at byte 4; each register is 2 bytes MSB first; CRC-16 is 2 bytes at end
             int dataStart = 4;
             int dataEnd = RawLength - 2; // exclude CRC-16 (2 bytes)
             if (dataEnd <= dataStart)
-                return Array.Empty<(ushort, ushort)>();
+                return [];
 
             int count = (dataEnd - dataStart) / 2;
             var result = new (ushort, ushort)[count];

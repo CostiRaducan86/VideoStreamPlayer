@@ -101,7 +101,7 @@ public sealed class LvdsLiveManager : IDisposable
         }
         _statusCallback = onResponse;
         _interceptStatus = true;
-        _capture.Send(new byte[] { (byte)'S' });
+        _capture.Send("S"u8);
         _log("[lvds] sent firmware status query 'S' over active capture");
     }
 
@@ -112,7 +112,7 @@ public sealed class LvdsLiveManager : IDisposable
     public (uint FrameCount, int SyncLosses, int CrcErrors, int ParityErrors, long TotalBytes) GetReassemblerStats()
     {
         var r = _receiver;
-        return (r.FrameCount, r.SyncLossCount, r.CrcErrorCount, r.ParityErrorCount, r.TotalBytesReceived);
+        return (r.FrameCount, r.SyncLossCount, LvdsCookedFrameReceiver.CrcErrorCount, LvdsCookedFrameReceiver.ParityErrorCount, r.TotalBytesReceived);
     }
 
     // ── Construction ────────────────────────────────────────────────────
@@ -256,8 +256,8 @@ public sealed class LvdsLiveManager : IDisposable
     {
         var r = _receiver;
         return $"LVDS: port={ActivePort ?? "none"}, frames={r.FrameCount}, " +
-               $"syncLoss={r.SyncLossCount}, crcErr={r.CrcErrorCount}, " +
-               $"parityErr={r.ParityErrorCount}, fps={_fpsEma:F1}, " +
+               $"syncLoss={r.SyncLossCount}, crcErr={LvdsCookedFrameReceiver.CrcErrorCount}, " +
+               $"parityErr={LvdsCookedFrameReceiver.ParityErrorCount}, fps={_fpsEma:F1}, " +
                $"bytes={r.TotalBytesReceived:N0}";
     }
 

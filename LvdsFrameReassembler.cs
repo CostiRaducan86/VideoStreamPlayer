@@ -22,14 +22,15 @@ namespace VilsSharpX;
 /// State machine (per-line):
 ///   WaitSync → ReadRowByte → ReadPixels → ReadCrc → PlaceLine → (repeat)
 /// </summary>
-public sealed class LvdsFrameReassembler
+public sealed class LvdsFrameReassembler(int width, int lvdsHeight, int activeHeight, int crcLen, bool isNichia,
+                                         Action<string>? log = null)
 {
     // ── Configuration ───────────────────────────────────────────────────
-    private readonly int _frameWidth;
-    private readonly int _frameHeightLvds;   // total lines (incl. metadata)
-    private readonly int _activeHeight;       // cropped active height
-    private readonly int _crcLen;
-    private readonly bool _isNichia;
+    private readonly int _frameWidth = width;
+    private readonly int _frameHeightLvds = lvdsHeight;   // total lines (incl. metadata)
+    private readonly int _activeHeight = activeHeight;    // cropped active height
+    private readonly int _crcLen = crcLen;
+    private readonly bool _isNichia = isNichia;
 
     // ── State machine ───────────────────────────────────────────────────
     private enum State { WaitSync, ReadRowByte, ReadPixels, ReadCrc }
@@ -38,15 +39,15 @@ public sealed class LvdsFrameReassembler
 
     // Current line being parsed
     private byte _currentRowByte;
-    private readonly byte[] _linePixels;      // pixel buffer for one line (W bytes)
+    private readonly byte[] _linePixels = new byte[width];      // pixel buffer for one line (W bytes)
     private int _pixelPos;
-    private readonly byte[] _crcBuf;          // CRC buffer for one line
+    private readonly byte[] _crcBuf = new byte[Math.Max(crcLen, 4)];          // CRC buffer for one line
     private int _crcPos;
 
     // ── Frame accumulation ──────────────────────────────────────────────
-    private readonly byte[] _frameBuf;        // W × H_LVDS pixel buffer
-    private readonly bool[] _lineReceived;    // which lines have been placed
-    private readonly bool[] _lineCrcOk;       // which lines passed CRC
+    private readonly byte[] _frameBuf = new byte[width * lvdsHeight];        // W × H_LVDS pixel buffer
+    private readonly bool[] _lineReceived = new bool[lvdsHeight];            // which lines have been placed
+    private readonly bool[] _lineCrcOk = new bool[lvdsHeight];               // which lines passed CRC
     private int _linesReceived;
 
     // Frame counter
@@ -59,8 +60,8 @@ public sealed class LvdsFrameReassembler
     private long _totalBytesReceived;
 
     // Diagnostic logging — logs first N lines for debug
-    private Action<string>? _log;
-    private int _diagLogLinesRemaining;
+    private readonly Action<string>? _log = log;
+    private int _diagLogLinesRemaining = DiagLogLinesMax;
     private const int DiagLogLinesMax = 10; // log first N lines of capture session
 
     // ── Events ──────────────────────────────────────────────────────────
@@ -69,27 +70,6 @@ public sealed class LvdsFrameReassembler
     /// The byte[] is a NEW buffer containing only the active area (W × ActiveHeight).
     /// </summary>
     public event Action<byte[], LvdsFrameMeta>? OnFrameReady;
-
-    /// <summary>
-    /// Creates a new LVDS frame reassembler for line-based protocol parsing.
-    /// </summary>
-    public LvdsFrameReassembler(int width, int lvdsHeight, int activeHeight, int crcLen, bool isNichia,
-                                 Action<string>? log = null)
-    {
-        _frameWidth = width;
-        _frameHeightLvds = lvdsHeight;
-        _activeHeight = activeHeight;
-        _crcLen = crcLen;
-        _isNichia = isNichia;
-        _log = log;
-        _diagLogLinesRemaining = DiagLogLinesMax;
-
-        _linePixels = new byte[width];
-        _crcBuf = new byte[Math.Max(crcLen, 4)]; // at least 4 for CRC32
-        _frameBuf = new byte[width * lvdsHeight];
-        _lineReceived = new bool[lvdsHeight];
-        _lineCrcOk = new bool[lvdsHeight];
-    }
 
     // ── Public API ──────────────────────────────────────────────────────
 
@@ -346,7 +326,7 @@ public sealed record LvdsFrameMeta
     public int LinesExpected { get; init; }
     /// <summary>Per-line received mask (length = ActiveHeight).
     /// true = line was received and placed at correct row position.</summary>
-    public bool[] LineValidityMask { get; init; } = Array.Empty<bool>();
+    public bool[] LineValidityMask { get; init; } = [];
     public int SyncLosses { get; init; }
     public int CrcErrors { get; init; }
     public int ParityErrors { get; init; }

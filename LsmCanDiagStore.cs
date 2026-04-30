@@ -2,16 +2,11 @@ using System.Collections.Generic;
 
 namespace VilsSharpX;
 
-public sealed class LsmCanDiagStore
+public sealed class LsmCanDiagStore(int capacity)
 {
     private readonly object _gate = new();
     private readonly LinkedList<LsmCanDiagRecord> _records = new();
-    private readonly int _capacity;
-
-    public LsmCanDiagStore(int capacity)
-    {
-        _capacity = capacity > 0 ? capacity : 256;
-    }
+    private readonly int _capacity = capacity > 0 ? capacity : 256;
 
     public int Count
     {

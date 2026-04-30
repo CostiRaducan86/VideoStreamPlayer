@@ -37,7 +37,7 @@ public sealed class LvdsCookedFrameReceiver : IDisposable
     private State _state = State.ScanMagic0;
     private readonly byte[] _hdrBuf = new byte[HDR_PAYLOAD_SIZE];
     private int _hdrPos;
-    private byte[] _pixelBuf = Array.Empty<byte>();
+    private byte[] _pixelBuf = [];
     private int _pixelPos;
     private int _frameWidth;
     private int _frameHeight;
@@ -59,8 +59,8 @@ public sealed class LvdsCookedFrameReceiver : IDisposable
 
     // These are tracked by firmware, not by this receiver.
     // Return 0 for API compatibility with GetReassemblerStats().
-    public int CrcErrorCount => 0;
-    public int ParityErrorCount => 0;
+    public static int CrcErrorCount => 0;
+    public static int ParityErrorCount => 0;
 
     /// <summary>
     /// Fired when a complete cooked frame is received.

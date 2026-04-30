@@ -33,7 +33,7 @@ public static class LsmCanDiagParser
             return false;
 
         var header = frame.Slice(offset, LsmCanDiagRecord.HeaderLength);
-        ushort magic = BinaryPrimitives.ReadUInt16BigEndian(header.Slice(0, 2));
+        ushort magic = BinaryPrimitives.ReadUInt16BigEndian(header[..2]);
         if (magic != LsmCanDiagRecord.Magic)
             return false;
 
@@ -67,9 +67,10 @@ public static class LsmCanDiagParser
         {
             // v1 or no raw: synthesise from value field
             uint v32 = BinaryPrimitives.ReadUInt32BigEndian(payload.Slice(10, 4));
-            rawPayload = new byte[] {
+            rawPayload =
+            [
                 (byte)(v32 >> 24), (byte)(v32 >> 16), (byte)(v32 >> 8), (byte)v32
-            };
+            ];
             if (rawLen == 0) rawLen = 4;
         }
 
@@ -77,7 +78,7 @@ public static class LsmCanDiagParser
         {
             Sequence = sequence,
             RecordType = recordType,
-            SourceTimestamp = BinaryPrimitives.ReadUInt32BigEndian(payload.Slice(0, 4)),
+            SourceTimestamp = BinaryPrimitives.ReadUInt32BigEndian(payload[..4]),
             Address = BinaryPrimitives.ReadUInt16BigEndian(payload.Slice(4, 2)),
             ResponseDelayUs = BinaryPrimitives.ReadUInt16BigEndian(payload.Slice(6, 2)),
             InterFrameDelayUs = BinaryPrimitives.ReadUInt16BigEndian(payload.Slice(8, 2)),

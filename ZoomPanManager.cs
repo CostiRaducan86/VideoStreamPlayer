@@ -69,7 +69,7 @@ public sealed class ZoomPanManager
     {
         return new TransformGroup
         {
-            Children = new TransformCollection { _zooms[paneIndex], _pans[paneIndex] }
+            Children = [_zooms[paneIndex], _pans[paneIndex]]
         };
     }
 

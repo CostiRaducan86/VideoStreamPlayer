@@ -9,6 +9,8 @@ namespace VilsSharpX;
 /// </summary>
 public static class PgmLoader
 {
+    private static readonly char[] s_tokenSeparators = [' ', '\t'];
+
     /// <summary>
     /// Loads a PGM file and returns the image data.
     /// </summary>
@@ -75,11 +77,11 @@ public static class PgmLoader
         while ((line = sr.ReadLine()) != null)
         {
             line = line.Trim();
-            if (line.Length == 0 || line.StartsWith("#"))
+            if (line.Length == 0 || line.StartsWith('#'))
                 continue;
 
             tokens.AddRange(line.Split(
-                new[] { ' ', '\t' },
+                s_tokenSeparators,
                 StringSplitOptions.RemoveEmptyEntries));
         }
         return tokens;

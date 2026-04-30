@@ -152,7 +152,7 @@ public static class LvdsCrc
     /// </summary>
     public static List<(string Name, bool Passed, string Detail)> RunSelfTest()
     {
-        var results = new List<(string Name, bool Passed, string Detail)>();
+        List<(string Name, bool Passed, string Detail)> results = [];
 
         // ── CRC-16/CCITT-FALSE standard check value ─────────────────
         // "123456789" → 0x29B1  (per CRC catalogue)
@@ -166,7 +166,7 @@ public static class LvdsCrc
 
         // ── CRC-16 empty data ───────────────────────────────────────
         {
-            ushort computed = ComputeCrc16(ReadOnlySpan<byte>.Empty);
+            ushort computed = ComputeCrc16([]);
             const ushort expected = 0xFFFF; // init value, no data processed
             results.Add(("CRC16 empty", computed == expected,
                 $"computed=0x{computed:X4}, expected=0x{expected:X4}"));

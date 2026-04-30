@@ -5,22 +5,13 @@ namespace VilsSharpX;
 /// <summary>
 /// Represents a single video frame with grayscale pixel data.
 /// </summary>
-public sealed class Frame
+public sealed class Frame(int w, int h, byte[] data, DateTime tsUtc)
 {
-    public int Width { get; }
-    public int Height { get; }
-    public int Stride { get; }
-    public byte[] Data { get; }
-    public DateTime TimestampUtc { get; }
-
-    public Frame(int w, int h, byte[] data, DateTime tsUtc)
-    {
-        Width = w;
-        Height = h;
-        Stride = w;
-        Data = (byte[])data.Clone(); // safe copy; later we can optimize with pooling
-        TimestampUtc = tsUtc;
-    }
+    public int Width { get; } = w;
+    public int Height { get; } = h;
+    public int Stride { get; } = w;
+    public byte[] Data { get; } = (byte[])data.Clone(); // safe copy; later we can optimize with pooling
+    public DateTime TimestampUtc { get; } = tsUtc;
 }
 
 /// <summary>
@@ -30,5 +21,5 @@ public sealed class PgmImage
 {
     public int Width { get; init; }
     public int Height { get; init; }
-    public byte[] Data { get; init; } = Array.Empty<byte>();
+    public byte[] Data { get; init; } = [];
 }

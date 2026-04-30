@@ -178,8 +178,8 @@ public sealed class AviTripletRecorder : IDisposable
         byte deviationThreshold)
     {
         if (string.IsNullOrWhiteSpace(path)) throw new ArgumentException("Path is required", nameof(path));
-        if (aGrayTopDown == null) throw new ArgumentNullException(nameof(aGrayTopDown));
-        if (bGrayTopDown == null) throw new ArgumentNullException(nameof(bGrayTopDown));
+        ArgumentNullException.ThrowIfNull(aGrayTopDown);
+        ArgumentNullException.ThrowIfNull(bGrayTopDown);
         if (w <= 0 || h <= 0) throw new ArgumentOutOfRangeException(nameof(w));
         if (aGrayTopDown.Length < w * h) throw new ArgumentException("A buffer too small", nameof(aGrayTopDown));
         if (bGrayTopDown.Length < w * h) throw new ArgumentException("B buffer too small", nameof(bGrayTopDown));
@@ -287,7 +287,7 @@ public sealed class AviTripletRecorder : IDisposable
     /// </summary>
     private static void Gray8ToGray8BottomUp(byte[] grayTopDown, byte[] dstGrayBottomUp, int w, int h, int dstStride)
     {
-        if (dstStride < w) throw new ArgumentOutOfRangeException(nameof(dstStride));
+        ArgumentOutOfRangeException.ThrowIfLessThan(dstStride, w);
 
         for (int y = 0; y < h; y++)
         {

@@ -23,7 +23,7 @@ namespace VilsSharpX
         /// <summary>
         /// Refreshes the NIC combo box with available capture devices.
         /// </summary>
-        public void RefreshNicList(ComboBox? cmbLiveNic, string? currentDeviceHint)
+        public static void RefreshNicList(ComboBox? cmbLiveNic, string? currentDeviceHint)
         {
             if (cmbLiveNic == null) return;
 
@@ -31,10 +31,10 @@ namespace VilsSharpX
             cmbLiveNic.Items.Add(new LiveNicItem { Display = "<Auto>", DeviceName = null });
 
             var devs = AvtpLiveCapture.ListDevicesSafe();
-            foreach (var d in devs)
+            foreach (var (devName, devDescription) in devs)
             {
-                string name = d.Name ?? string.Empty;
-                string desc = d.Description ?? string.Empty;
+                string name = devName ?? string.Empty;
+                string desc = devDescription ?? string.Empty;
                 string display = NetworkInterfaceUtils.DescribeCaptureDeviceForUi(name, desc);
                 cmbLiveNic.Items.Add(new LiveNicItem { Display = display, DeviceName = name });
             }
@@ -58,7 +58,7 @@ namespace VilsSharpX
         /// <summary>
         /// Gets the selected device name from combo box, or null for Auto.
         /// </summary>
-        public string? GetSelectedDeviceName(ComboBox? cmbLiveNic)
+        public static string? GetSelectedDeviceName(ComboBox? cmbLiveNic)
         {
             if (cmbLiveNic?.SelectedItem is LiveNicItem item && !string.IsNullOrWhiteSpace(item.DeviceName))
                 return item.DeviceName;
@@ -68,7 +68,7 @@ namespace VilsSharpX
         /// <summary>
         /// Resolves the pcap device name for TX, trying combo selection first, then hint, then first non-loopback.
         /// </summary>
-        public string? GetTxPcapDeviceNameOrNull(ComboBox? cmbLiveNic, string? deviceHint)
+        public static string? GetTxPcapDeviceNameOrNull(ComboBox? cmbLiveNic, string? deviceHint)
         {
             // 1) If user explicitly selected from the combo, use that NPF name
             try
@@ -111,7 +111,7 @@ namespace VilsSharpX
         /// Updates the enabled state of the NIC combo.
         /// NIC selection is always enabled regardless of mode (needed for TX device selection in Player mode too).
         /// </summary>
-        public void UpdateLiveUiEnabledState(ComboBox? cmbLiveNic, bool isLiveMode)
+        public static void UpdateLiveUiEnabledState(ComboBox? cmbLiveNic)
         {
             if (cmbLiveNic != null)
                 cmbLiveNic.IsEnabled = true;

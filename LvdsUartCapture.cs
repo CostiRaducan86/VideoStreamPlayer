@@ -107,7 +107,7 @@ public sealed class LvdsUartCapture : IDisposable
         }
         catch
         {
-            return Array.Empty<string>();
+            return [];
         }
     }
 
@@ -163,12 +163,12 @@ public sealed class LvdsUartCapture : IDisposable
     /// <summary>
     /// Sends raw bytes to the Pico 2 (e.g. configuration commands).
     /// </summary>
-    public void Send(byte[] data)
+    public void Send(ReadOnlySpan<byte> data)
     {
         if (_disposed || _port == null || !_port.IsOpen) return;
         try
         {
-            _port.Write(data, 0, data.Length);
+            _port.BaseStream.Write(data);
         }
         catch (Exception ex)
         {
@@ -182,9 +182,12 @@ public sealed class LvdsUartCapture : IDisposable
     /// </summary>
     public void SendModeCommand(bool isNichia)
     {
-        byte cmd = (byte)(isNichia ? 'N' : 'O');
-        Send(new[] { cmd });
-        _log?.Invoke($"[lvds-uart] sent mode command: {(char)cmd}");
+        char cmd = isNichia ? 'N' : 'O';
+        if (isNichia)
+            Send("N"u8);
+        else
+            Send("O"u8);
+        _log?.Invoke($"[lvds-uart] sent mode command: {cmd}");
     }
 
     /// <summary>
@@ -194,7 +197,7 @@ public sealed class LvdsUartCapture : IDisposable
     /// </summary>
     public void SendBootloaderCommand()
     {
-        Send(new[] { (byte)'B' });
+        Send("B"u8);
         _log?.Invoke("[lvds-uart] sent bootloader command 'B' — Pico 2 will reboot into BOOTSEL mode");
     }
 
@@ -217,7 +220,7 @@ public sealed class LvdsUartCapture : IDisposable
             DtrEnable = true,
         };
         port.Open();
-        port.Write(new byte[] { (byte)'B' }, 0, 1);
+        port.BaseStream.Write("B"u8);
         log?.Invoke($"[lvds-uart] sent bootloader command 'B' to {portName}");
         System.Threading.Thread.Sleep(100); // let the byte go out
         port.Close();
@@ -250,7 +253,7 @@ public sealed class LvdsUartCapture : IDisposable
             Thread.Sleep(100);
             port.DiscardInBuffer();
 
-            port.Write(new byte[] { (byte)'S' }, 0, 1);
+            port.BaseStream.Write("S"u8);
             log?.Invoke($"[lvds-uart] sent status query 'S' to {portName}");
 
             // Wait for firmware to respond

@@ -34,11 +34,11 @@ public static class PcapAvtpRvfReplay
 
         if (first == 0x0A0D0D0Au)
         {
-            await ReplayPcapNgAsync(fs, onChunk, log, ct, speed, pauseGate).ConfigureAwait(false);
+            await ReplayPcapNgAsync(fs, onChunk, log, speed, pauseGate, ct).ConfigureAwait(false);
         }
         else
         {
-            await ReplayPcapAsync(fs, onChunk, log, ct, speed, pauseGate).ConfigureAwait(false);
+            await ReplayPcapAsync(fs, onChunk, log, speed, pauseGate, ct).ConfigureAwait(false);
         }
     }
 
@@ -46,9 +46,9 @@ public static class PcapAvtpRvfReplay
         Stream fs,
         Action<RvfChunk> onChunk,
         Action<string>? log,
-        CancellationToken ct,
         double speed,
-        ManualResetEventSlim? pauseGate)
+        ManualResetEventSlim? pauseGate,
+        CancellationToken ct)
     {
         // PCAP global header (24 bytes)
         uint magic = ReadU32LE(fs);
@@ -139,10 +139,10 @@ public static class PcapAvtpRvfReplay
         if (r == 0) return false;
         if (r != hdr.Length) throw new EndOfStreamException();
 
-        tsSec = ReadU32(hdr.Slice(0, 4), swap);
-        tsSub = ReadU32(hdr.Slice(4, 4), swap);
-        inclLen = ReadU32(hdr.Slice(8, 4), swap);
-        _ = ReadU32(hdr.Slice(12, 4), swap); // origLen
+        tsSec = ReadU32(hdr[..4], swap);
+        tsSub = ReadU32(hdr[4..8], swap);
+        inclLen = ReadU32(hdr[8..12], swap);
+        _ = ReadU32(hdr[12..16], swap); // origLen
         return true;
     }
 
@@ -150,9 +150,9 @@ public static class PcapAvtpRvfReplay
         Stream fs,
         Action<RvfChunk> onChunk,
         Action<string>? log,
-        CancellationToken ct,
         double speed,
-        ManualResetEventSlim? pauseGate)
+        ManualResetEventSlim? pauseGate,
+        CancellationToken ct)
     {
         // Minimal PCAPNG support: SHB + IDB + EPB/SPB.
         // Endianness is per-section; we support little endian sections.
@@ -480,7 +480,7 @@ public static class PcapAvtpRvfReplay
         int read = 0;
         while (read < buf.Length)
         {
-            int r = s.Read(buf.Slice(read));
+            int r = s.Read(buf[read..]);
             if (r <= 0) throw new EndOfStreamException();
             read += r;
         }

@@ -9,22 +9,13 @@ namespace VilsSharpX;
 /// <summary>
 /// Provides pixel coordinate mapping and info display for image panes.
 /// </summary>
-public sealed class PixelInspector
+public static class PixelInspector
 {
-    private readonly int _width;
-    private readonly int _height;
-
-    public PixelInspector(int width, int height)
-    {
-        _width = width;
-        _height = height;
-    }
-
     /// <summary>
     /// Tries to get the pixel X/Y coordinates from a mouse event.
     /// Uses visual transforms so hover mapping matches overlay mapping exactly.
     /// </summary>
-    public bool TryGetPixelXY(MouseEventArgs e, Frame frame, Image img, Canvas overlay, out int x, out int y)
+    public static bool TryGetPixelXY(MouseEventArgs e, Frame frame, Image img, Canvas overlay, out int x, out int y)
     {
         x = 0;
         y = 0;
@@ -87,7 +78,7 @@ public sealed class PixelInspector
     /// <summary>
     /// Shows pixel info on a TextBlock for a grayscale frame.
     /// </summary>
-    public void ShowGrayscaleInfo(MouseEventArgs e, Frame? frame, Image img, Canvas overlay, TextBlock label)
+    public static void ShowGrayscaleInfo(MouseEventArgs e, Frame? frame, Image img, Canvas overlay, TextBlock label)
     {
         if (frame == null)
         {
@@ -108,7 +99,7 @@ public sealed class PixelInspector
     /// <summary>
     /// Shows pixel info on a TextBlock for the diff pane.
     /// </summary>
-    public void ShowDiffInfo(MouseEventArgs e, Frame? frameA, Frame? frameB, Image img, Canvas overlay, TextBlock label)
+    public static void ShowDiffInfo(MouseEventArgs e, Frame? frameA, Frame? frameB, Image img, Canvas overlay, TextBlock label)
     {
         var refFrame = frameA ?? frameB;
         if (refFrame == null)

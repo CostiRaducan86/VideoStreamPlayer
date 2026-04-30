@@ -10,10 +10,10 @@ namespace VilsSharpX
     public static class BitmapUtils
     {
         public static WriteableBitmap MakeGray8(int w, int h) =>
-            new WriteableBitmap(w, h, 96, 96, PixelFormats.Gray8, null);
+            new(w, h, 96, 96, PixelFormats.Gray8, null);
 
         public static WriteableBitmap MakeBgr24(int w, int h) =>
-            new WriteableBitmap(w, h, 96, 96, PixelFormats.Bgr24, null);
+            new(w, h, 96, 96, PixelFormats.Bgr24, null);
 
         /// <summary>
         /// Writes pixel data to a WriteableBitmap.

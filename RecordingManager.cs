@@ -7,10 +7,10 @@ namespace VilsSharpX
     /// <summary>
     /// Manages video recording and frame snapshot saving operations.
     /// </summary>
-    public class RecordingManager
+    public class RecordingManager(int width, int height)
     {
-        private readonly int _width;
-        private readonly int _height;
+        private readonly int _width = width;
+        private readonly int _height = height;
 
         private AviTripletRecorder? _recorder;
         private bool _isRecording;
@@ -19,12 +19,6 @@ namespace VilsSharpX
         public bool IsRecording => _isRecording;
         public int DroppedFrames => _recordDropped;
         public AviTripletRecorder? Recorder => _recorder;
-
-        public RecordingManager(int width, int height)
-        {
-            _width = width;
-            _height = height;
-        }
 
         /// <summary>
         /// Starts recording to AVI files.

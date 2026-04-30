@@ -40,7 +40,7 @@ public sealed class AvtpLiveCapture : IDisposable
         }
         catch
         {
-            return Array.Empty<(string, string)>();
+            return [];
         }
     }
 
@@ -131,14 +131,11 @@ public sealed class AvtpLiveCapture : IDisposable
                 || (!string.IsNullOrEmpty(d.Description) && d.Description.Contains(hint, StringComparison.OrdinalIgnoreCase)));
         }
 
-        if (dev == null)
-        {
-            // Auto-pick: try to select a "real" Ethernet adapter and avoid WAN miniports.
-            dev = devices
-                .OrderByDescending(ScoreForAutoPick)
-                .FirstOrDefault(d => !LooksLikeLoopback(d))
-                ?? devices[0];
-        }
+        // Auto-pick: try to select a "real" Ethernet adapter and avoid WAN miniports.
+        dev ??= devices
+            .OrderByDescending(ScoreForAutoPick)
+            .FirstOrDefault(d => !LooksLikeLoopback(d))
+            ?? devices[0];
 
         log?.Invoke($"[avtp-live] using device: name='{dev.Name}' desc='{dev.Description}'");
         if (LooksLikeWanMiniport(dev))

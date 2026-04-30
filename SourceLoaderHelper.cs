@@ -6,18 +6,11 @@ namespace VilsSharpX;
 /// Helper for loading various source files (Image, PCAP, AVI, Scene).
 /// Reduces MainWindow complexity by centralizing source loading logic.
 /// </summary>
-public sealed class SourceLoaderHelper
+public sealed class SourceLoaderHelper(int width, int height, int lvdsHeight)
 {
-    private readonly int _width;
-    private readonly int _height;
-    private readonly int _lvdsHeight;
-
-    public SourceLoaderHelper(int width, int height, int lvdsHeight)
-    {
-        _width = width;
-        _height = height;
-        _lvdsHeight = lvdsHeight;
-    }
+    private readonly int _width = width;
+    private readonly int _height = height;
+    private readonly int _lvdsHeight = lvdsHeight;
 
     /// <summary>
     /// Result of loading an image file.

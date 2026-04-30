@@ -9,36 +9,28 @@ namespace VilsSharpX;
 /// AVTP packets always use 320×80 (25,600 bytes) format as per protocol spec.
 /// For Nichia (256×64), frames are zero-padded to match the protocol requirement.
 /// </summary>
-public sealed class AvtpTransmitManager : IDisposable
+public sealed class AvtpTransmitManager(int width, int height, Action<string> log) : IDisposable
 {
     // AVTP protocol always uses 320×80 frame format (like CANoe implementation)
     private const int AVTP_FRAME_SIZE = 320 * 80; // 25,600 bytes
 
-    private readonly Action<string> _log;
-    private readonly int _width;
-    private readonly int _height;
+    private readonly Action<string> _log = log ?? (_ => { });
+    private readonly int _width = width;
+    private readonly int _height = height;
 
     private AvtpRvfTransmitter? _tx;
     private CancellationTokenSource? _blackCts;
     private Task? _blackTask;
-    private readonly byte[] _blackFrame;
-    private readonly byte[] _paddedFrame; // Reusable buffer for padding
 
     private int _txErrOnce;
     private int _txNoDevOnce;
     private long _txLogCounter;
     private const int TxLogInterval = 500; // log every 500 frames (~5 seconds at 100fps)
 
-    public AvtpTransmitManager(int width, int height, Action<string> log)
-    {
-        _width = width;
-        _height = height;
-        _log = log ?? (_ => { });
-        // BLACK frame is always AVTP size (320×80) - already zero-filled by CLR
-        _blackFrame = new byte[AVTP_FRAME_SIZE];
-        // Reusable buffer for padding smaller frames
-        _paddedFrame = new byte[AVTP_FRAME_SIZE];
-    }
+    // BLACK frame is always AVTP size (320×80) - already zero-filled by CLR
+    private readonly byte[] _blackFrame = new byte[AVTP_FRAME_SIZE];
+    // Reusable buffer for padding smaller frames
+    private readonly byte[] _paddedFrame = new byte[AVTP_FRAME_SIZE];
 
     /// <summary>
     /// Whether transmitter is initialized and ready.

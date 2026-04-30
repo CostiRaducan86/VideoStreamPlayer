@@ -62,10 +62,8 @@ namespace VilsSharpX
             // IMPORTANT: we need an injection-capable device => LibPcapLiveDevice
             var dev = CaptureDeviceList.Instance
                 .OfType<LibPcapLiveDevice>()
-                .FirstOrDefault(d => string.Equals(d.Name, npfDeviceName, StringComparison.OrdinalIgnoreCase));
-
-            if (dev == null)
-                throw new InvalidOperationException($"LibPcapLiveDevice not found for: {npfDeviceName}");
+                .FirstOrDefault(d => string.Equals(d.Name, npfDeviceName, StringComparison.OrdinalIgnoreCase))
+                ?? throw new InvalidOperationException($"LibPcapLiveDevice not found for: {npfDeviceName}");
 
             _dev = dev;
 
@@ -102,7 +100,7 @@ namespace VilsSharpX
 
         public Task SendFrame320x80Async(byte[] gray8_320x80, CancellationToken ct = default)
         {
-            if (gray8_320x80 == null) throw new ArgumentNullException(nameof(gray8_320x80));
+            ArgumentNullException.ThrowIfNull(gray8_320x80);
             if (gray8_320x80.Length != W * H)
                 throw new ArgumentException($"Expected {W * H} bytes (320x80 Gray8). Got {gray8_320x80.Length}.");
 
@@ -212,7 +210,7 @@ namespace VilsSharpX
         {
             var parts = mac.Split(':', '-', StringSplitOptions.RemoveEmptyEntries);
             if (parts.Length != 6) throw new FormatException($"Invalid MAC: {mac}");
-            return parts.Select(p => Convert.ToByte(p, 16)).ToArray();
+            return [.. parts.Select(p => Convert.ToByte(p, 16))];
         }
     }
 }

@@ -15,7 +15,7 @@ public static class LsmRegisterMap
     // ── Register map: names matched to classic VILS Monitor screenshots ──
     // All addresses seen in classic VILS are ASIC-space (even NVM/EEPROM block addresses).
     private static readonly RegEntry[] s_regs =
-    {
+    [
         // Standard ASIC registers 0x00..0x33
         new(0x0000, "CR",              "Control Register"),
         new(0x0001, "SR",              "Status Register"),
@@ -91,7 +91,7 @@ public static class LsmRegisterMap
         new(0x0150, "NVMDAT80",        "NVM Data block 80"),
         new(0x0160, "NVMDAT96",        "NVM Data block 96"),
         new(0x0170, "NVMDAT112",       "NVM Data block 112"),
-    };
+    ];
 
     // ── Lookup dictionary (built once) ──
     private static readonly Dictionary<ushort, RegEntry> s_dict;
@@ -121,7 +121,7 @@ public static class LsmRegisterMap
     /// <summary>
     /// Return description for a known register address.
     /// </summary>
-    public static string GetDescription(ushort address, string memType)
+    public static string GetDescription(ushort address)
     {
         if (s_dict.TryGetValue(address, out var entry))
             return entry.Description;

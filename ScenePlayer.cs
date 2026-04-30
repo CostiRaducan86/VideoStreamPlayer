@@ -6,10 +6,10 @@ namespace VilsSharpX
     /// <summary>
     /// Manages scene playback state and frame retrieval.
     /// </summary>
-    public class ScenePlayer
+    public class ScenePlayer(int targetWidth, int targetHeight)
     {
-        private readonly int _targetWidth;
-        private readonly int _targetHeight;
+        private readonly int _targetWidth = targetWidth;
+        private readonly int _targetHeight = targetHeight;
         private readonly object _lock = new();
 
         private List<SceneItem>? _items;
@@ -17,12 +17,6 @@ namespace VilsSharpX
         private int _sceneIndex;
         private DateTime _sceneNextSwitchUtc;
         private bool _sceneLoopEnabled = true;
-
-        public ScenePlayer(int targetWidth, int targetHeight)
-        {
-            _targetWidth = targetWidth;
-            _targetHeight = targetHeight;
-        }
 
         public bool IsLoaded => _items != null && _items.Count > 0;
         public string? Path => _scenePath;

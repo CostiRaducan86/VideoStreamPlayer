@@ -315,6 +315,7 @@ namespace VilsSharpX
         {
             StopAll();
             _rvf.OnFrameReady -= OnRvfFrameReady;
+            GC.SuppressFinalize(this);
         }
     }
 }

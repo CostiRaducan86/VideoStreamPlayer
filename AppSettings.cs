@@ -53,6 +53,7 @@ public sealed class AppSettings
 public static class AppSettingsStore
 {
     private const string FileName = "settings.json";
+    private static readonly JsonSerializerOptions s_writeIndentedJsonOptions = new() { WriteIndented = true };
 
     public static string GetSettingsPath()
     {
@@ -161,7 +162,7 @@ public static class AppSettingsStore
     public static void Save(AppSettings settings, string? path = null)
     {
         path ??= GetSettingsPath();
-        var json = JsonSerializer.Serialize(settings, new JsonSerializerOptions { WriteIndented = true });
+        var json = JsonSerializer.Serialize(settings, s_writeIndentedJsonOptions);
         File.WriteAllText(path, json);
     }
 }

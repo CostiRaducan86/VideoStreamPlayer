@@ -18,8 +18,23 @@ public sealed class SceneItem
 /// <summary>
 /// Loads and parses scene files (.scene) that define sequences of images with timing.
 /// </summary>
-public static class SceneLoader
+public static partial class SceneLoader
 {
+    [GeneratedRegex(@"\bloop\s*=\s*(true|false)", RegexOptions.IgnoreCase)]
+    private static partial Regex LegacyLoopRegex();
+
+    [GeneratedRegex(@"\bdelayMs\s*=\s*(\d+)", RegexOptions.IgnoreCase)]
+    private static partial Regex DelayMsRegex();
+
+    [GeneratedRegex(@"\bfilename\s*=\s*""([^""]+)""", RegexOptions.IgnoreCase)]
+    private static partial Regex FilenameRegex();
+
+    [GeneratedRegex(@"^delayMs(\d+)$", RegexOptions.IgnoreCase)]
+    private static partial Regex IndexedDelayMsRegex();
+
+    [GeneratedRegex(@"^(img|image|step|frame)(\d+)$", RegexOptions.IgnoreCase)]
+    private static partial Regex IndexedStepRegex();
+
     /// <summary>
     /// Loads a scene file and returns the list of scene items.
     /// </summary>
@@ -44,11 +59,11 @@ public static class SceneLoader
                 if (!Path.IsPathRooted(resolved))
                     resolved = Path.Combine(Path.GetDirectoryName(scenePath) ?? string.Empty, resolved);
 
-                var img = ImageUtils.LoadImageAsGray8(resolved);
-                if (img.width < cropWidth || img.height < cropHeight)
-                    throw new InvalidOperationException($"Scene item '{resolved}' expected at least {cropWidth}x{cropHeight}, got {img.width}x{img.height}.");
+                var (width, height, data) = ImageUtils.LoadImageAsGray8(resolved);
+                if (width < cropWidth || height < cropHeight)
+                    throw new InvalidOperationException($"Scene item '{resolved}' expected at least {cropWidth}x{cropHeight}, got {width}x{height}.");
 
-                var cropped = ImageUtils.CropTopLeftGray8(img.data, img.width, img.height, cropWidth, cropHeight);
+                var cropped = ImageUtils.CropTopLeftGray8(data, width, height, cropWidth, cropHeight);
                 items.Add(new SceneItem { Path = resolved, Data = cropped, DelayMs = stepDelayMs });
             }
         }
@@ -59,19 +74,19 @@ public static class SceneLoader
 
             // Optional global loop flag (default true)
             bool loop = true;
-            var mLoop = Regex.Match(text, @"\bloop\s*=\s*(true|false)", RegexOptions.IgnoreCase);
+            var mLoop = LegacyLoopRegex().Match(text);
             if (mLoop.Success)
                 loop = string.Equals(mLoop.Groups[1].Value, "true", StringComparison.OrdinalIgnoreCase);
 
             // Optional global delayMs (first match wins)
-            var mDelay = Regex.Match(text, @"\bdelayMs\s*=\s*(\d+)", RegexOptions.IgnoreCase);
+            var mDelay = DelayMsRegex().Match(text);
             if (mDelay.Success && int.TryParse(mDelay.Groups[1].Value, out var parsedDelay) && parsedDelay > 0)
                 defaultDelayMs = parsedDelay;
 
             var blocks = SplitTopLevelObjects(text);
             foreach (var block in blocks)
             {
-                var mFile = Regex.Match(block, @"\bfilename\s*=\s*""([^""]+)""", RegexOptions.IgnoreCase);
+                var mFile = FilenameRegex().Match(block);
                 if (!mFile.Success) continue;
 
                 string rawPath = mFile.Groups[1].Value.Trim();
@@ -80,15 +95,15 @@ public static class SceneLoader
                     resolved = Path.Combine(Path.GetDirectoryName(scenePath) ?? "", resolved);
 
                 int delayMs = defaultDelayMs;
-                var mItemDelay = Regex.Match(block, @"\bdelayMs\s*=\s*(\d+)", RegexOptions.IgnoreCase);
+                var mItemDelay = DelayMsRegex().Match(block);
                 if (mItemDelay.Success && int.TryParse(mItemDelay.Groups[1].Value, out var itemDelay) && itemDelay > 0)
                     delayMs = itemDelay;
 
-                var img = ImageUtils.LoadImageAsGray8(resolved);
-                if (img.width < cropWidth || img.height < cropHeight)
-                    throw new InvalidOperationException($"Scene item '{resolved}' expected at least {cropWidth}x{cropHeight}, got {img.width}x{img.height}.");
+                var (width, height, data) = ImageUtils.LoadImageAsGray8(resolved);
+                if (width < cropWidth || height < cropHeight)
+                    throw new InvalidOperationException($"Scene item '{resolved}' expected at least {cropWidth}x{cropHeight}, got {width}x{height}.");
 
-                var cropped = ImageUtils.CropTopLeftGray8(img.data, img.width, img.height, cropWidth, cropHeight);
+                var cropped = ImageUtils.CropTopLeftGray8(data, width, height, cropWidth, cropHeight);
                 items.Add(new SceneItem { Path = resolved, Data = cropped, DelayMs = delayMs });
             }
 
@@ -122,16 +137,16 @@ public static class SceneLoader
                 continue;
 
             int commentIdx = line.IndexOf("//", StringComparison.Ordinal);
-            if (commentIdx >= 0) line = line.Substring(0, commentIdx).Trim();
+            if (commentIdx >= 0) line = line[..commentIdx].Trim();
             if (line.Length == 0) continue;
 
             int eq = line.IndexOf('=');
             if (eq > 0)
             {
-                string key = line.Substring(0, eq).Trim();
-                string value = line.Substring(eq + 1).Trim();
+                string key = line[..eq].Trim();
+                string value = line[(eq + 1)..].Trim();
                 if (value.StartsWith('"') && value.EndsWith('"') && value.Length >= 2)
-                    value = value.Substring(1, value.Length - 2);
+                    value = value[1..^1];
 
                 if (key.Equals("delayMs", StringComparison.OrdinalIgnoreCase))
                 {
@@ -145,7 +160,7 @@ public static class SceneLoader
                 }
 
                 // delayMsN (per-step)
-                var mDelayN = Regex.Match(key, @"^delayMs(\d+)$", RegexOptions.IgnoreCase);
+                var mDelayN = IndexedDelayMsRegex().Match(key);
                 if (mDelayN.Success && int.TryParse(mDelayN.Groups[1].Value, out var delayIndex))
                 {
                     if (int.TryParse(value, out var dN) && dN > 0)
@@ -154,7 +169,7 @@ public static class SceneLoader
                 }
 
                 // step/img indices (img1/img2/step1/step2/...)
-                var mStep = Regex.Match(key, @"^(img|image|step|frame)(\d+)$", RegexOptions.IgnoreCase);
+                var mStep = IndexedStepRegex().Match(key);
                 if (mStep.Success && int.TryParse(mStep.Groups[2].Value, out var stepIndex))
                 {
                     if (!string.IsNullOrWhiteSpace(value))
@@ -175,7 +190,7 @@ public static class SceneLoader
 
             // Treat remaining non-empty lines as image paths.
             if (line.StartsWith('"') && line.EndsWith('"') && line.Length >= 2)
-                line = line.Substring(1, line.Length - 2);
+                line = line[1..^1];
 
             loosePaths.Add(line);
         }
@@ -232,7 +247,7 @@ public static class SceneLoader
                 depth--;
                 if (depth == 0 && start >= 0)
                 {
-                    blocks.Add(text.Substring(start, i - start + 1));
+                    blocks.Add(text[start..(i + 1)]);
                     start = -1;
                 }
             }

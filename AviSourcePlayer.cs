@@ -5,12 +5,12 @@ namespace VilsSharpX
     /// <summary>
     /// Manages AVI file playback state and frame retrieval.
     /// </summary>
-    public class AviSourcePlayer : IDisposable
+    public class AviSourcePlayer(int targetWidth, int targetHeight, double fpsEstimationWindowSec = 0.25, double fpsEmaAlpha = 0.30) : IDisposable
     {
-        private readonly int _targetWidth;
-        private readonly int _targetHeight;
-        private readonly double _fpsEstimationWindowSec;
-        private readonly double _fpsEmaAlpha;
+        private readonly int _targetWidth = targetWidth;
+        private readonly int _targetHeight = targetHeight;
+        private readonly double _fpsEstimationWindowSec = fpsEstimationWindowSec;
+        private readonly double _fpsEmaAlpha = fpsEmaAlpha;
 
         private AviUncompressedVideoReader? _avi;
         private string? _aviPath;
@@ -25,14 +25,6 @@ namespace VilsSharpX
         private int _aviChangesInWindow;
         private double _aviSourceFps;
         private double _aviSourceFpsEma;
-
-        public AviSourcePlayer(int targetWidth, int targetHeight, double fpsEstimationWindowSec = 0.25, double fpsEmaAlpha = 0.30)
-        {
-            _targetWidth = targetWidth;
-            _targetHeight = targetHeight;
-            _fpsEstimationWindowSec = fpsEstimationWindowSec;
-            _fpsEmaAlpha = fpsEmaAlpha;
-        }
 
         public bool IsLoaded => _avi != null;
         public string? Path => _aviPath;
@@ -213,6 +205,7 @@ namespace VilsSharpX
         public void Dispose()
         {
             Close();
+            GC.SuppressFinalize(this);
         }
     }
 }

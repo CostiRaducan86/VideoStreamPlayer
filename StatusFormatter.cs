@@ -73,9 +73,8 @@ public static class StatusFormatter
             int start = idx + tag.Length;
             int end = start;
             while (end < s.Length && char.IsDigit(s[end])) end++;
-            return s.Substring(0, start)
-                   + lateSkip.ToString(CultureInfo.InvariantCulture)
-                   + s.Substring(end);
+            string lateText = lateSkip.ToString(CultureInfo.InvariantCulture);
+            return string.Concat(s.AsSpan(0, start), lateText.AsSpan(), s.AsSpan(end));
         }
 
         return string.IsNullOrWhiteSpace(s)

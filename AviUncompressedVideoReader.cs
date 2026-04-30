@@ -225,8 +225,7 @@ internal sealed class AviUncompressedVideoReader : IDisposable
                 }
                 else if (id == "idx1")
                 {
-                    if (selectedStreamIndex == null)
-                        selectedStreamIndex = 0;
+                    selectedStreamIndex ??= 0;
 
                     int entries = (int)(size / 16);
                     for (int i = 0; i < entries; i++)
@@ -311,7 +310,6 @@ internal sealed class AviUncompressedVideoReader : IDisposable
         if (!string.Equals(ckid, entry.ChunkId, StringComparison.OrdinalIgnoreCase))
             throw new InvalidDataException("AVI: index offset mismatch.");
 
-        long dataPos = _fs.Position;
         int dataSize = checked((int)size);
         var raw = _br.ReadBytes(dataSize);
 

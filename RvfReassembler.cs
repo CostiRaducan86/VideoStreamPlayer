@@ -113,10 +113,10 @@ public sealed class RvfReassembler
             Buffer.BlockCopy(_frame, 0, outFrame, 0, outFrame.Length);
 
             var meta = new FrameMeta(
-                frameId: c.FrameId,
-                seq: c.Seq,
-                linesWritten: _linesWrittenThisFrame,
-                seqGaps: _seqGapsThisFrame);
+                FrameId: c.FrameId,
+                Seq: c.Seq,
+                LinesWritten: _linesWrittenThisFrame,
+                SeqGaps: _seqGapsThisFrame);
 
             OnFrameReady?.Invoke(outFrame, meta);
 
@@ -125,4 +125,4 @@ public sealed class RvfReassembler
     }
 }
 
-public sealed record FrameMeta(uint frameId, uint seq, int linesWritten, int seqGaps);
+public sealed record FrameMeta(uint FrameId, uint Seq, int LinesWritten, int SeqGaps);

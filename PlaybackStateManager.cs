@@ -7,10 +7,10 @@ namespace VilsSharpX
     /// <summary>
     /// Manages playback state (running, paused, stopped) and runtime statistics.
     /// </summary>
-    public class PlaybackStateManager
+    public class PlaybackStateManager(double fpsEstimationWindowSec, double fpsEmaAlpha)
     {
-        private readonly double _fpsEstimationWindowSec;
-        private readonly double _fpsEmaAlpha;
+        private readonly double _fpsEstimationWindowSec = fpsEstimationWindowSec;
+        private readonly double _fpsEmaAlpha = fpsEmaAlpha;
 
         private CancellationTokenSource? _cts;
         private readonly ManualResetEventSlim _pauseGate = new(true);
@@ -32,16 +32,10 @@ namespace VilsSharpX
         private int _countLateFramesSkipped;
 
         // FPS estimation
-        private Stopwatch _statSw = Stopwatch.StartNew();
+        private readonly Stopwatch _statSw = Stopwatch.StartNew();
         private double _avtpInFpsEma;
         private double _bFpsEma;
         private bool _wasWaitingForSignal;
-
-        public PlaybackStateManager(double fpsEstimationWindowSec, double fpsEmaAlpha)
-        {
-            _fpsEstimationWindowSec = fpsEstimationWindowSec;
-            _fpsEmaAlpha = fpsEmaAlpha;
-        }
 
         // Properties
         public bool IsRunning => _isRunning;

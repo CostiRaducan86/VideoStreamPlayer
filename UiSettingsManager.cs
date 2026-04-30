@@ -5,17 +5,11 @@ namespace VilsSharpX;
 /// <summary>
 /// Manages UI settings load/save operations.
 /// </summary>
-public sealed class UiSettingsManager
+public sealed class UiSettingsManager(int width, int height)
 {
-    private readonly string _settingsPath;
-    private readonly int _maxPixelCount;
+    private readonly string _settingsPath = AppSettingsStore.GetSettingsPath();
+    private readonly int _maxPixelCount = width * height;
     private bool _isLoading;
-
-    public UiSettingsManager(int width, int height)
-    {
-        _settingsPath = AppSettingsStore.GetSettingsPath();
-        _maxPixelCount = width * height;
-    }
 
     /// <summary>
     /// Whether settings are currently being loaded (to prevent save during load).

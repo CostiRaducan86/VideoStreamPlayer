@@ -3,22 +3,16 @@
     /// <summary>
     /// Manages sequence (A/B toggle) playback state.
     /// </summary>
-    public class SequencePlayer
+    public class SequencePlayer(int targetWidth, int targetHeight)
     {
-        private readonly int _targetWidth;
-        private readonly int _targetHeight;
+        private readonly int _targetWidth = targetWidth;
+        private readonly int _targetHeight = targetHeight;
 
         private byte[]? _seqA;
         private byte[]? _seqB;
         private int _seqIndex; // 0 => A, 1 => B
         private string? _seqPathA;
         private string? _seqPathB;
-
-        public SequencePlayer(int targetWidth, int targetHeight)
-        {
-            _targetWidth = targetWidth;
-            _targetHeight = targetHeight;
-        }
 
         public bool IsLoaded => _seqA != null || _seqB != null;
         public bool HasAny => _seqA != null || _seqB != null;
@@ -28,11 +22,11 @@
 
         public void LoadA(string path)
         {
-            var img = ImageUtils.LoadImageAsGray8(path);
-            if (img.width < _targetWidth || img.height < _targetHeight)
-                throw new System.InvalidOperationException($"Expected at least {_targetWidth}x{_targetHeight}, got {img.width}x{img.height}.");
+            var (width, height, data) = ImageUtils.LoadImageAsGray8(path);
+            if (width < _targetWidth || height < _targetHeight)
+                throw new System.InvalidOperationException($"Expected at least {_targetWidth}x{_targetHeight}, got {width}x{height}.");
 
-            _seqA = ImageUtils.CropTopLeftGray8(img.data, img.width, img.height, _targetWidth, _targetHeight);
+            _seqA = ImageUtils.CropTopLeftGray8(data, width, height, _targetWidth, _targetHeight);
             _seqPathA = path;
             _seqIndex = 0;
         }
@@ -49,11 +43,11 @@
 
         public void LoadB(string path)
         {
-            var img = ImageUtils.LoadImageAsGray8(path);
-            if (img.width < _targetWidth || img.height < _targetHeight)
-                throw new System.InvalidOperationException($"Expected at least {_targetWidth}x{_targetHeight}, got {img.width}x{img.height}.");
+            var (width, height, data) = ImageUtils.LoadImageAsGray8(path);
+            if (width < _targetWidth || height < _targetHeight)
+                throw new System.InvalidOperationException($"Expected at least {_targetWidth}x{_targetHeight}, got {width}x{height}.");
 
-            _seqB = ImageUtils.CropTopLeftGray8(img.data, img.width, img.height, _targetWidth, _targetHeight);
+            _seqB = ImageUtils.CropTopLeftGray8(data, width, height, _targetWidth, _targetHeight);
             _seqPathB = path;
             _seqIndex = 1;
         }

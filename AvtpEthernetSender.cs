@@ -18,10 +18,10 @@ namespace VilsSharpX
                 if (desc.Contains(descOrMac, StringComparison.OrdinalIgnoreCase))
                     return dev;
                 // Try match by MAC address in device name (e.g. NPF_{GUID} or MAC)
-                if (!string.IsNullOrWhiteSpace(macTarget) && name.ToLowerInvariant().Contains(macTarget))
+                if (!string.IsNullOrWhiteSpace(macTarget) && name.Contains(macTarget, StringComparison.OrdinalIgnoreCase))
                     return dev;
                 // Try to extract MAC from description (if present)
-                if (!string.IsNullOrWhiteSpace(macTarget) && desc.ToLowerInvariant().Contains(macTarget))
+                if (!string.IsNullOrWhiteSpace(macTarget) && desc.Contains(macTarget, StringComparison.OrdinalIgnoreCase))
                     return dev;
             }
             return null;

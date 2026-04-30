@@ -109,7 +109,6 @@ public static class LvdsProtocol
     /// </summary>
     public static LvdsUartConfig GetUartConfig(LsmDeviceType deviceType)
     {
-        bool isNichia = deviceType == LsmDeviceType.Nichia;
         return deviceType switch
         {
             LsmDeviceType.Nichia => new LvdsUartConfig

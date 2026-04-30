@@ -22,7 +22,7 @@ public partial class CanDetailWindow : Window
         }
 
         var (name, memType) = LsmRegisterMap.Resolve(record.Address);
-        string description = LsmRegisterMap.GetDescription(record.Address, memType);
+        string description = LsmRegisterMap.GetDescription(record.Address);
 
         TxtTitle.Text = name == "/" ? $"0x{record.Address:X4}" : name;
 

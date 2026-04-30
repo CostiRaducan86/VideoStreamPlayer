@@ -11,17 +11,11 @@ namespace VilsSharpX
     /// <summary>
     /// Handles saving frame snapshots (A/B/D PNGs + XLSX report) with UI feedback.
     /// </summary>
-    public sealed class FrameSnapshotSaver
+    public sealed class FrameSnapshotSaver(int width, int height)
     {
-        private readonly int _width;
-        private readonly int _height;
+        private readonly int _width = width;
+        private readonly int _height = height;
         private CancellationTokenSource? _feedbackCts;
-
-        public FrameSnapshotSaver(int width, int height)
-        {
-            _width = width;
-            _height = height;
-        }
 
         /// <summary>
         /// Saves A, B, D frames as PNG and generates an XLSX compare report.
@@ -32,7 +26,6 @@ namespace VilsSharpX
             byte diffThreshold,
             bool zeroZeroIsWhite,
             int frameNumber,
-            TextBlock? lblFeedback,
             TextBlock? lblStatus,
             Action<string, Brush>? showFeedback,
             Action? hideFeedback)
@@ -47,12 +40,12 @@ namespace VilsSharpX
 
             string ts = DateTime.Now.ToString("yyyyMMdd_HHmmss", CultureInfo.InvariantCulture);
             string outDir = RecordingManager.GetFrameSnapshotsOutputDirectory();
-            var paths = RecordingManager.MakeUniqueSaveSetPaths(outDir, ts);
+            var (aPath, bPath, dPath, xlsxPath) = RecordingManager.MakeUniqueSaveSetPaths(outDir, ts);
 
             try
             {
                 if (lblStatus != null)
-                    lblStatus.Text = $"Saving report + images… ({Path.GetFileName(paths.XlsxPath)})";
+                    lblStatus.Text = $"Saving report + images… ({Path.GetFileName(xlsxPath)})";
 
                 var aBytes = (byte[])a.Data.Clone();
                 var bBytes = (byte[])b.Data.Clone();
@@ -67,12 +60,12 @@ namespace VilsSharpX
 
                 await Task.Run(() =>
                 {
-                    AviTripletRecorder.SaveSingleFrameCompareXlsx(paths.XlsxPath, frameNumber, aBytes, bBytes, _width, _height, deviationThreshold: thr);
+                    AviTripletRecorder.SaveSingleFrameCompareXlsx(xlsxPath, frameNumber, aBytes, bBytes, _width, _height, deviationThreshold: thr);
 
                     // Save 1:1 snapshots for all panes.
-                    ImageUtils.SaveGray8Png(paths.APath, aBytes, _width, _height);
-                    ImageUtils.SaveGray8Png(paths.BPath, bBytes, _width, _height);
-                    ImageUtils.SaveBgr24Png(paths.DPath, dBgr, _width, _height);
+                    ImageUtils.SaveGray8Png(aPath, aBytes, _width, _height);
+                    ImageUtils.SaveGray8Png(bPath, bBytes, _width, _height);
+                    ImageUtils.SaveBgr24Png(dPath, dBgr, _width, _height);
                 });
 
                 // Brief delay before showing success
@@ -87,7 +80,7 @@ namespace VilsSharpX
                     hideFeedback?.Invoke();
 
                 if (lblStatus != null)
-                    lblStatus.Text = $"Saved: {paths.XlsxPath} (+ A/B/D PNG)";
+                    lblStatus.Text = $"Saved: {xlsxPath} (+ A/B/D PNG)";
             }
             catch (Exception ex)
             {
