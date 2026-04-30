@@ -47,16 +47,20 @@
 - [x] Osram hardware validation completed in prior sessions
 - [ ] Nichia fresh validation with camera connected
 
-## Next Milestone: Nichia Diagnostic UART
+## Milestone 3: Nichia Diagnostic UART
 
-- [ ] Collect or document Nichia diagnostic UART frame format
-- [ ] Define Nichia sync/header/length/address/data/CRC semantics
-- [ ] Decide how Nichia fields map into `DiagUartFrame` and `CanDiagRecord`
-- [ ] Implement parser selection by active device mode
-- [ ] Preserve existing Osram parser behavior
-- [ ] Validate against real Nichia hardware/captures
+- [x] Collect and document Nichia diagnostic UART frame format
+- [x] Define Nichia sync/header/length/address/data/CRC semantics
+- [x] Decide how Nichia fields map into `DiagUartFrame` and `CanDiagRecord`
+- [x] Implement parser selection by active device mode
+- [x] Preserve existing Osram parser behavior
+- [x] Revalidate Osram after the parser split
+- [x] Validate first end-to-end Nichia hardware smoke run
+- [ ] Validate Nichia message semantic correctness against captures
+- [ ] Investigate response delay and inter-frame delay accuracy
+- [ ] Check for missing request/response pairs
 - [ ] Update `LsmRegisterMap` or add a Nichia-specific map if needed
 
 ## Final Status
 
-The Osram diagnostic UART path is code-complete enough for real-frame validation. The next major functional gap is Nichia protocol support.
+The Osram diagnostic UART path remains validated. The Nichia diagnostic UART path is implemented and alive end-to-end, with semantic message validation and delay analysis left for the next session.

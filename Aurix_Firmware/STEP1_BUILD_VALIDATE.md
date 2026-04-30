@@ -69,9 +69,18 @@ Recommended watch variables:
 | LVDS CRC errors | Low/zero for good signal integrity |
 | `g_diagSniffEnabled` | `1` while PC Record is active |
 | `dmaCompletions` | Increases when diagnostic bus has traffic |
-| `framesDecoded` | Increases for valid Osram diagnostic traffic |
+| `framesDecoded` | Increases for valid diagnostic traffic matching the active Osram or Nichia device mode |
 | `uartFramesBridged` | Tracks decoded diagnostic frames entering the queue |
 | PC Monitor/RawCan | Receives `CD` records with no sustained parser errors |
+
+## 2026-04-30 Validation Snapshot
+
+- Osram regression was rebuilt, flashed, run, and checked from the C# application before switching hardware; behavior stayed correct.
+- Nichia was tested after temporarily selecting `FE_DEVICE_NICHIA` as default, rebuilding, flashing, running, and connecting a physical Nichia LSM.
+- PC CAN/UART Monitor received Nichia records while Record was active.
+- WinIDEA watch showed the diagnostic path active with `initOk=1`, `synced=1`, `baudrate=2000000`, `badDlc=0`, and `framesDecoded` increasing.
+- PC-side parser errors stayed at `0` during the observed run.
+- Follow-up still required: message interpretation, missing-response checks, and response/inter-frame delay validation.
 
 ## Troubleshooting
 
@@ -84,7 +93,7 @@ Recommended watch variables:
 ### DMA increments but `framesDecoded` stays zero
 
 - Verify UART baud/parity/stop-bit assumptions.
-- Confirm the traffic matches the current Osram parser format.
+- Confirm the traffic matches the active device mode parser format.
 - Inspect `syncSkips` and `badDlc`.
 
 ### LVDS flicker or frame loss appears while sniffing
@@ -113,10 +122,10 @@ Recommended watch variables:
 
 - Build/link failure.
 - DMA never completes with valid wiring/traffic.
-- Parser never decodes known-good Osram traffic.
+- Parser never decodes known-good traffic for the active device mode.
 - LVDS path is visibly disrupted by diagnostic sniffing.
 - Persistent PC parser failures on valid packets.
 
 ## Next Step
 
-After the Osram path is validated, proceed with Nichia diagnostic UART protocol documentation and parser implementation.
+Continue with Nichia correctness validation against captures and ECU expectations.

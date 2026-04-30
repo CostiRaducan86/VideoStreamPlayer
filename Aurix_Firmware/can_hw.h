@@ -4,9 +4,13 @@
 /******************************************************************************
  * can_hw.h — Diagnostic UART sniffer on ASCLIN9 / P20.7
  *
- * The "CAN" diagnostic bus between ECU and LSM is UART at 1 Mbaud, 8-Odd-2,
- * sent through CAN transceivers (TLE9251V on Aurix kit, TJA1057 on ECU,
- * TCAN1057 on LSM).  The transceivers only provide differential signaling.
+ * The "CAN" diagnostic bus between ECU and LSM is UART sent through CAN
+ * transceivers (TLE9251V on Aurix kit, TJA1057 on ECU, TCAN1057 on LSM).
+ * The transceivers only provide differential signaling.
+ *
+ * Device-specific UART framing:
+ *   Osram  KEWGBXXD1U: 2 Mbaud, 8 data, odd parity, 2 stop bits
+ *   Nichia TLD816K:    2 Mbaud, 8 data, no parity, 1 stop bit
  *
  * v7: ASCLIN9 is dedicated to diagnostic UART on P20.7 (DMA channel 0).
  *     LVDS pixel data runs on ASCLIN1/P14.8 (DMA channel 1).
@@ -44,7 +48,7 @@ typedef struct
     /* Status */
     volatile uint32 synced;          /* 1 = bytes flowing on diagnostic bus    */
     volatile uint32 initOk;          /* 1 = ASCLIN9 + DMA initialised OK      */
-    volatile uint32 baudrate;        /* configured baudrate (1000000)          */
+    volatile uint32 baudrate;        /* configured diagnostic UART baudrate    */
     volatile uint32 stmFreqHz;       /* STM0 clock frequency for timestamps   */
 
     /* ASCLIN9 register snapshots (updated each tick, for debugger) */
@@ -65,7 +69,7 @@ typedef struct
 
     /* Frame parser counters */
     volatile uint32 framesDecoded;   /* complete UART frames extracted        */
-    volatile uint32 syncSkips;       /* bytes skipped hunting for 0x80 SYNC   */
+    volatile uint32 syncSkips;       /* bytes skipped while hunting for SYNC   */
     volatile uint32 badDlc;          /* unrecognised DLC/FUN at valid SYNC    */
 } DiagUartStats;
 
@@ -79,6 +83,10 @@ extern volatile uint8 g_diagSniffEnabled;
 
 /** Initialise ASCLIN9 + DMA for diagnostic UART sniffer. */
 void diag_uart_init(void);
+
+/** Initialise ASCLIN9 + DMA for the selected LSM diagnostic UART variant.
+ *  deviceId: 0 = Nichia/TLD816K, 1 = Osram/KEWGBXXD1U. */
+void diag_uart_init_for_device(uint8 deviceId);
 
 /** Poll DMA position to detect inter-frame idle gaps.
  *  Call every main-loop iteration (before diag_uart_try_receive). */

@@ -50,7 +50,7 @@ void device_mode_init(FrameEthDevice device)
     can_diag_init();
 
     /* Initialise diagnostic UART sniffer on ASCLIN9 / P20.7 */
-    diag_uart_init();
+    diag_uart_init_for_device((uint8)device);
 }
 
 void device_mode_set(FrameEthDevice device)
@@ -84,6 +84,10 @@ void device_mode_set(FrameEthDevice device)
     frame_eth_set_device(device);
     frame_eth_reset_frame_state();
     can_diag_reset();
+
+    /* 5. Reconfigure diagnostic UART framing/parser for the selected LSM.
+     *    Osram stays on 8O2; Nichia/TLD816K uses 8N1. */
+    diag_uart_init_for_device((uint8)device);
 
     s_currentDevice = device;
 }

@@ -73,30 +73,94 @@ public sealed class LsmCanDiagRecord
             if (IsCanRawFrame)
                 return [];
 
-            if (RawLength < 4 || RawPayload.Length < 4)
-                return [];
+            if (DeviceId == 0)
+                return DecodeNichiaRegisters();
 
-            // UART frame: [SYNC0][SYNC1][HCTRL][HADR][data pairs...][CRC16(2B)]
-            // Data starts at byte 4; each register is 2 bytes MSB first; CRC-16 is 2 bytes at end
-            int dataStart = 4;
-            int dataEnd = RawLength - 2; // exclude CRC-16 (2 bytes)
-            if (dataEnd <= dataStart)
-                return [];
-
-            int count = (dataEnd - dataStart) / 2;
-            var result = new (ushort, ushort)[count];
-            ushort baseAddr = Address;
-            for (int i = 0; i < count; i++)
-            {
-                int idx = dataStart + i * 2;
-                if (idx + 1 >= RawPayload.Length)
-                    break;
-                ushort val = (ushort)((RawPayload[idx] << 8) | RawPayload[idx + 1]);
-                result[i] = ((ushort)(baseAddr + i), val);
-            }
-            return result;
+            return DecodeOsramRegisters();
         }
     }
+
+    private (ushort Address, ushort Value)[] DecodeOsramRegisters()
+    {
+        if (RawLength < 4 || RawPayload.Length < 4)
+            return [];
+
+        // UART frame: [SYNC0][SYNC1][HCTRL][HADR][data pairs...][CRC16(2B)]
+        // Data starts at byte 4; each register is 2 bytes MSB first; CRC-16 is 2 bytes at end
+        int dataStart = 4;
+        int dataEnd = RawLength - 2; // exclude CRC-16 (2 bytes)
+        if (dataEnd <= dataStart)
+            return [];
+
+        int count = (dataEnd - dataStart) / 2;
+        var result = new (ushort, ushort)[count];
+        ushort baseAddr = Address;
+        for (int i = 0; i < count; i++)
+        {
+            int idx = dataStart + i * 2;
+            if (idx + 1 >= RawPayload.Length)
+                break;
+            ushort val = (ushort)((RawPayload[idx] << 8) | RawPayload[idx + 1]);
+            result[i] = ((ushort)(baseAddr + i), val);
+        }
+        return result;
+    }
+
+    private (ushort Address, ushort Value)[] DecodeNichiaRegisters()
+    {
+        if (RawLength < 4 || RawPayload.Length < 4 || RawPayload[0] != 0x55)
+            return [];
+
+        byte dlcFun = RawPayload[2];
+        byte fun = (byte)(dlcFun & 0x07);
+        byte dlc = (byte)((dlcFun >> 3) & 0x07);
+
+        if ((dlcFun & 0xC0) != 0 || fun < 4 || fun > 7)
+            return [];
+
+        int addrLen = (fun == 6 || fun == 7) ? 2 : 1;
+        int dataLen = NichiaDataLength(dlc);
+        int dataStart = 3 + addrLen;
+        bool hasCrc = fun != 7; // TLD816K READ_EEPROM responses carry data without CRC8.
+        int minLength = dataStart + dataLen + (hasCrc ? 1 : 0);
+
+        // Read requests are header+address only; emitted records should have data
+        // and, except for READ_EEPROM responses, CRC8.
+        if (RawLength < minLength || RawPayload.Length < minLength)
+            return [];
+
+        ushort baseAddr = addrLen == 2
+            ? (ushort)((RawPayload[3] << 8) | RawPayload[4])
+            : RawPayload[3];
+
+        if (dataLen == 1)
+            return [(baseAddr, RawPayload[dataStart])];
+
+        int count = dataLen / 2;
+        var result = new (ushort, ushort)[count];
+        for (int i = 0; i < count; i++)
+        {
+            int idx = dataStart + i * 2;
+            if (idx + 1 >= RawPayload.Length)
+                break;
+
+            ushort val = (ushort)((RawPayload[idx] << 8) | RawPayload[idx + 1]);
+            result[i] = ((ushort)(baseAddr + i), val);
+        }
+        return result;
+    }
+
+    private static int NichiaDataLength(byte dlc) => dlc switch
+    {
+        0 => 1,
+        1 => 2,
+        2 => 4,
+        3 => 8,
+        4 => 16,
+        5 => 24,
+        6 => 32,
+        _ => 64,
+    };
 
     /// <summary>Raw payload as uppercase hex string.</summary>
     public string RawHex

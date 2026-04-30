@@ -23,10 +23,11 @@ The active embedded platform is AURIX TC397. LVDS pixel capture and diagnostic U
 | `can_hw.c/h` diagnostic UART API | Implemented |
 | ASCLIN9/P20.7 through TLE9251V/X202 | Active diagnostic path |
 | DMA channel 0, ISR priority 13 | Implemented |
-| Current Osram UART config | 2 Mbaud, 8 data, odd parity, 2 stop bits |
+| Device-specific UART config | Osram: 2 Mbaud 8O2; Nichia/TLD816K: 2 Mbaud 8N1 |
 | `diag_uart_poll_idle()` | Implemented, measures inter-frame gaps from DMA destination movement |
-| `diag_uart_try_receive()` | Implemented for Osram-style frames |
-| Parser format | `[0x80][0xA5][HCTRL][HADR] + data + CRC16` |
+| `diag_uart_try_receive()` | Implemented dispatcher for Osram and Nichia/TLD816K frames |
+| Osram parser format | `[0x80][0xA5][HCTRL][HADR] + data + CRC16` |
+| Nichia parser format | `[0x55][MasterRequest][DLC/FUN][address][data][CRC8/ACK]` |
 | `can_diag_bridge_uart_frame()` | Implemented, converts `DiagUartFrame` to `CanDiagRecord` |
 | Ethernet bridge (`0x4344`) | Implemented, protocol v2, 94-byte payload |
 | PC start/stop command | Implemented through `FE_CMD_DIAG_SNIFF` |
@@ -42,10 +43,11 @@ The active embedded platform is AURIX TC397. LVDS pixel capture and diagnostic U
 
 ## Known Gaps
 
-1. Nichia diagnostic UART protocol is not implemented yet.
-2. Nichia LVDS path needs a fresh hardware validation pass.
-3. Diagnostic monitor export/recording is handled on the PC side and remains pending.
-4. CRC is carried and displayed; additional validation policy can be added later if needed.
+1. Nichia diagnostic UART has initial parser/config support and passed a first hardware smoke validation on 2026-04-30.
+2. Nichia message semantic correctness, missing-response behavior, and timing values still need capture-based validation.
+3. Nichia LVDS path has a fresh live run with healthy PC-side counters, but longer validation with camera connected is still useful.
+4. Diagnostic monitor export/recording is handled on the PC side and remains pending.
+5. CRC is carried and displayed; additional host-side validation policy can be added later if needed.
 
 ## Build
 
@@ -55,7 +57,7 @@ The active embedded platform is AURIX TC397. LVDS pixel capture and diagnostic U
 
 ## Recommended Next Steps
 
-1. Document the Nichia diagnostic UART frame format from captures or reference material.
-2. Add a protocol-specific Nichia parser path without changing the protocol v2 Ethernet payload shape.
-3. Validate the Osram parser and new Nichia parser against real captures.
-4. Re-run LVDS coexistence checks after parser changes.
+1. Compare Nichia decoded records against Saleae captures and ECU expectations.
+2. Investigate response delays, inter-frame delays, and possible missing response frames.
+3. Update or split the register map if Nichia needs different names or memory-type rules.
+4. Re-run longer LVDS coexistence checks after Nichia semantic validation.

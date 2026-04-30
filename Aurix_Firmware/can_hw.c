@@ -1,10 +1,13 @@
 /******************************************************************************
  * can_hw.c — Diagnostic UART sniffer v7
  *
- * The "CAN" diagnostic bus between ECU (Hella PLU-HD) and LSM (Osram
- * KEWGBXXD1U) is UART at 2 Mbaud, 8-Odd-2 (8 data, odd parity, 2 stop),
- * sent through CAN transceivers (TJA1057 on ECU, TCAN1057 on LSM) that
- * only provide differential physical signaling.
+ * The "CAN" diagnostic bus between ECU (Hella PLU-HD) and LSM is UART sent
+ * through CAN transceivers (TJA1057 on ECU, TCAN1057 on LSM) that only provide
+ * differential physical signaling.
+ *
+ * Supported diagnostic UART variants:
+ *   Osram  KEWGBXXD1U: 2 Mbaud, 8 data, odd parity, 2 stop bits
+ *   Nichia TLD816K:    2 Mbaud, 8 data, no parity, 1 stop bit
  *
  * v7 architecture (parallel LVDS + diagnostic):
  *  - ASCLIN9 is DEDICATED to diagnostic UART on P20.7 (TLE9251V CAN xcvr).
@@ -62,16 +65,40 @@ static IfxAsclin_Asc s_ascDiag;
 static uint32 s_prevCompletionCount;
 static uint32 s_prevRxBytes;
 static uint32 s_prevDmaCountForErrors;  /* gate FE/PE counting to DMA events */
+static uint8  s_diagDeviceId = 1u;      /* 0 = Nichia/TLD816K, 1 = Osram */
 
 /* ======================== Frame parser state ======================== */
 
 #define DIAG_PARSE_BUF_SIZE   256u
+
+#define DIAG_DEVICE_NICHIA    0u
+#define DIAG_DEVICE_OSRAM     1u
+
+/* Osram KEWGBXXD1U framing */
 #define DIAG_SYNC0_BYTE       0x80u  /* First sync byte                         */
 #define DIAG_SYNC1_BYTE       0xA5u  /* Second sync byte (master address)       */
 #define DIAG_FRAME_HEADER_LEN 4u     /* SYNC0 + SYNC1 + HCTRL + HADR           */
 #define DIAG_FRAME_CRC_LEN    2u     /* CRC-16 (2 bytes, MSB first)            */
 #define DIAG_MIN_FRAME_LEN    4u     /* Read request: header only, no data/CRC */
 #define DIAG_MAX_FRAME_LEN    38u    /* 16-reg response: 4 + 32 + 2            */
+
+/* Nichia TLD816K framing */
+#define NICHIA_SYNC_BYTE          0x55u
+#define NICHIA_FRAME_HEADER_LEN   3u     /* SYNC + MasterRequest + DLC/FUN       */
+#define NICHIA_FRAME_CRC_LEN      1u     /* CRC-8 over address + payload         */
+#define NICHIA_FRAME_ACK_LEN      2u     /* Write ACK bytes after CRC            */
+#define NICHIA_FRAME_REG_ADDR_LEN 1u
+#define NICHIA_FRAME_EEP_ADDR_LEN 2u
+#define NICHIA_DLC_FUN_RES_MASK   0xC0u
+#define NICHIA_FUN_MASK           0x07u
+#define NICHIA_DLC_MASK           0x38u
+#define NICHIA_FUN_WRITE_REG      4u
+#define NICHIA_FUN_READ_REG       5u
+#define NICHIA_FUN_WRITE_EEP      6u
+#define NICHIA_FUN_READ_EEP       7u
+#define NICHIA_CRC8_POLY          0x1Du
+#define NICHIA_CRC8_INIT          0xFFu
+#define NICHIA_CRC8_XOROUT        0xFFu
 
 static uint8  s_parseBuf[DIAG_PARSE_BUF_SIZE];
 static uint16 s_parseLen;           /* valid bytes in parse accumulator   */
@@ -178,7 +205,7 @@ IFX_INTERRUPT(DIAG_DMA_ISR, 0, DIAG_DMA_ISR_PRIO)
 
 /* ======================== ASCLIN9 diagnostic config ======================== */
 
-static void diag_asclin9_configure(void)
+static void diag_asclin9_configure(uint8 deviceId)
 {
     IfxAsclin_Asc_Config cfg;
     IfxAsclin_Asc_initModuleConfig(&cfg, &MODULE_ASCLIN9);
@@ -196,17 +223,27 @@ static void diag_asclin9_configure(void)
     cfg.bitTiming.samplePointPosition = IfxAsclin_SamplePointPosition_8;
     cfg.bitTiming.medianFilter        = IfxAsclin_SamplesPerBit_three;
 
-    /* 8 data, Odd parity, 2 stop bits (8O2)
-     * Confirmed by:
-     *  - WinIDEA runtime: StopBits=2, Parity.Enabled=1, Parity.Type=1(Odd)
-     *  - Saleae capture:  2 Mbaud, 8 bits, Odd parity, 2 stop bits
-     *  - XML config:      UartParity=0x03, UartStopBits=0x02            */
     cfg.frame.dataLength = IfxAsclin_DataLength_8;
-    cfg.frame.stopBit    = IfxAsclin_StopBit_2;
     cfg.frame.frameMode  = IfxAsclin_FrameMode_asc;
     cfg.frame.shiftDir   = IfxAsclin_ShiftDirection_lsbFirst;
-    cfg.frame.parityBit  = TRUE;
-    cfg.frame.parityType = IfxAsclin_ParityType_odd;
+
+    if (deviceId == DIAG_DEVICE_NICHIA)
+    {
+        /* Nichia/TLD816K CAN-UART: 2 Mbaud, 8N1, LSB first, non-inverted.
+         * ECU params from Saleae/WinIDEA: StopBits=1, Parity.Enabled=0,
+         * Den=500, Num=80, OVS=15(16x), SamplePoint=8. */
+        cfg.frame.stopBit    = IfxAsclin_StopBit_1;
+        cfg.frame.parityBit  = FALSE;
+        cfg.frame.parityType = IfxAsclin_ParityType_even;
+    }
+    else
+    {
+        /* Osram KEWGBXXD1U CAN-UART: 2 Mbaud, 8O2.
+         * Confirmed by Saleae capture and WinIDEA runtime watch. */
+        cfg.frame.stopBit    = IfxAsclin_StopBit_2;
+        cfg.frame.parityBit  = TRUE;
+        cfg.frame.parityType = IfxAsclin_ParityType_odd;
+    }
 
     cfg.fifo.inWidth              = IfxAsclin_TxFifoInletWidth_1;
     cfg.fifo.outWidth             = IfxAsclin_RxFifoOutletWidth_1;
@@ -294,8 +331,11 @@ static void diag_dma_configure_channel(void)
 }
 
 /* ================================================================ */
-void diag_uart_init(void)
+void diag_uart_init_for_device(uint8 deviceId)
 {
+    s_diagDeviceId = (deviceId == DIAG_DEVICE_NICHIA)
+                   ? DIAG_DEVICE_NICHIA : DIAG_DEVICE_OSRAM;
+
     memset((void *)&g_diagUartStats, 0, sizeof(g_diagUartStats));
 
     IfxCpu_disableInterrupts();
@@ -303,7 +343,7 @@ void diag_uart_init(void)
     IfxAsclin_enableModule(&MODULE_ASCLIN9);
     IfxAsclin_setSuspendMode(&MODULE_ASCLIN9, IfxAsclin_SuspendMode_none);
 
-    diag_asclin9_configure();
+    diag_asclin9_configure(s_diagDeviceId);
     diag_dma_configure_channel();
 
     s_diagCurrentDest     = s_diagBufA;
@@ -353,6 +393,12 @@ void diag_uart_init(void)
     g_diagUartStats.regRxFifoCon = MODULE_ASCLIN9.RXFIFOCON.U;
     g_diagUartStats.regCsr       = MODULE_ASCLIN9.CSR.U;
     g_diagUartStats.regDatCon    = MODULE_ASCLIN9.DATCON.U;
+}
+
+/* ================================================================ */
+void diag_uart_init(void)
+{
+    diag_uart_init_for_device(DIAG_DEVICE_OSRAM);
 }
 
 /* ================================================================ */
@@ -536,6 +582,38 @@ static void diag_compact_parse_buf(uint16 n)
     }
 }
 
+static void diag_emit_frame(DiagUartFrame *out, uint8 fullLen, uint16 responseDelayUs)
+{
+    uint8 copyLen;
+    uint32 usDiv;
+    uint16 gapUs;
+
+    copyLen = (fullLen <= (uint8)sizeof(out->data))
+            ? fullLen : (uint8)sizeof(out->data);
+    memcpy(out->data, s_parseBuf, copyLen);
+    out->len = copyLen;
+
+    usDiv = g_diagUartStats.stmFreqHz / 1000000u;
+    out->timestampUs = (usDiv > 0u)
+        ? (IfxStm_getLower(&MODULE_STM0) / usDiv) : 0u;
+    out->responseDelayUs = responseDelayUs;
+
+    diag_uart_poll_idle();
+    gapUs = 0u;
+    if (s_gapTail != s_gapHead)
+    {
+        gapUs = s_gapFifo[s_gapTail];
+        s_gapTail = (uint8)((s_gapTail + 1u) & GAP_FIFO_MASK);
+    }
+    out->interFrameDelayUs = gapUs;
+
+    diag_compact_parse_buf(fullLen);
+    g_diagUartStats.framesDecoded++;
+}
+
+static boolean diag_uart_try_receive_osram(DiagUartFrame *out);
+static boolean diag_uart_try_receive_nichia(DiagUartFrame *out);
+
 /* Compute full-frame length from HCTRL byte.
  *
  * Osram KEWGBXXD1U UART protocol (on wire, after ECU byte-swap):
@@ -558,6 +636,79 @@ static uint8 diag_full_frame_length(uint8 hctrl)
 {
     uint8 nRegs = (uint8)(((hctrl >> 1u) & 0x0Fu) + 1u);
     return (uint8)(DIAG_FRAME_HEADER_LEN + nRegs * 2u + DIAG_FRAME_CRC_LEN);
+}
+
+static uint8 diag_nichia_data_length(uint8 dlc)
+{
+    static const uint8 s_len[8] = { 1u, 2u, 4u, 8u, 16u, 24u, 32u, 64u };
+    return s_len[dlc & 0x07u];
+}
+
+static uint8 diag_nichia_addr_length(uint8 fun)
+{
+    return ((fun == NICHIA_FUN_WRITE_EEP) || (fun == NICHIA_FUN_READ_EEP))
+        ? NICHIA_FRAME_EEP_ADDR_LEN : NICHIA_FRAME_REG_ADDR_LEN;
+}
+
+static boolean diag_nichia_fun_valid(uint8 fun)
+{
+    return ((fun >= NICHIA_FUN_WRITE_REG) && (fun <= NICHIA_FUN_READ_EEP))
+        ? TRUE : FALSE;
+}
+
+static uint8 diag_nichia_crc8(const uint8 *data, uint8 len)
+{
+    uint8 crc = NICHIA_CRC8_INIT;
+    uint8 i;
+
+    for (i = 0u; i < len; i++)
+    {
+        uint8 bit;
+        crc ^= data[i];
+        for (bit = 0u; bit < 8u; bit++)
+        {
+            crc = (crc & 0x80u)
+                ? (uint8)((crc << 1u) ^ NICHIA_CRC8_POLY)
+                : (uint8)(crc << 1u);
+        }
+    }
+
+    return (uint8)(crc ^ NICHIA_CRC8_XOROUT);
+}
+
+static boolean diag_nichia_crc_ok(const uint8 *frame, uint8 addrLen, uint8 dataLen)
+{
+    uint8 crcInputLen = (uint8)(addrLen + dataLen);
+    uint8 crcIdx      = (uint8)(NICHIA_FRAME_HEADER_LEN + crcInputLen);
+
+    /* Reference ECU code accepts >64 byte CRC spans for compatibility with
+     * older B/C samples. Mirror that behavior for 64-byte register/EEPROM
+     * transfers so the sniffer does not drop valid traffic. */
+    if (crcInputLen > 64u)
+        return TRUE;
+
+    return (diag_nichia_crc8(&frame[NICHIA_FRAME_HEADER_LEN], crcInputLen) == frame[crcIdx])
+        ? TRUE : FALSE;
+}
+
+static boolean diag_nichia_header_valid_at(uint16 offset)
+{
+    uint8 dlcFun;
+    uint8 fun;
+
+    if ((uint16)(offset + NICHIA_FRAME_HEADER_LEN) > s_parseLen)
+        return FALSE;
+
+    if (s_parseBuf[offset] != NICHIA_SYNC_BYTE)
+        return FALSE;
+
+    dlcFun = s_parseBuf[offset + 2u];
+    fun    = (uint8)(dlcFun & NICHIA_FUN_MASK);
+
+    if ((dlcFun & NICHIA_DLC_FUN_RES_MASK) != 0u)
+        return FALSE;
+
+    return diag_nichia_fun_valid(fun);
 }
 
 /* ======================== Idle-gap polling ================================= */
@@ -638,6 +789,15 @@ void diag_uart_poll_idle(void)
 
 /* ================================================================ */
 boolean diag_uart_try_receive(DiagUartFrame *out)
+{
+    if (s_diagDeviceId == DIAG_DEVICE_NICHIA)
+        return diag_uart_try_receive_nichia(out);
+
+    return diag_uart_try_receive_osram(out);
+}
+
+/* ================================================================ */
+static boolean diag_uart_try_receive_osram(DiagUartFrame *out)
 {
     if (out == NULL_PTR)
         return FALSE;
@@ -774,6 +934,144 @@ boolean diag_uart_try_receive(DiagUartFrame *out)
 
                 diag_compact_parse_buf(fullLen);
                 g_diagUartStats.framesDecoded++;
+                return TRUE;
+            }
+        }
+    }
+}
+
+/* ================================================================ */
+static boolean diag_uart_try_receive_nichia(DiagUartFrame *out)
+{
+    if (out == NULL_PTR)
+        return FALSE;
+
+    diag_refill();
+
+    if (s_parseLen < NICHIA_FRAME_HEADER_LEN)
+        return FALSE;
+
+    /* TLD816K CAN-UART:
+     *   [0] SYNC = 0x55
+     *   [1] MasterRequest: bits 4:0 address, bits 7:5 CRC3
+     *   [2] DLC/FUN: bits 2:0 FUN (4=WrReg,5=RdReg,6=WrEEP,7=RdEEP),
+     *                 bits 5:3 DLC (1,2,4,8,16,24,32,64 bytes)
+     *   [3..] register/EEPROM address, data, CRC8, optional write ACK bytes.
+     *
+     * Read requests are header+address only and are skipped. Read responses
+     * and write transactions are emitted as diagnostic records. */
+    for (;;)
+    {
+        if (s_parseLen > 0u && s_parseBuf[0] != NICHIA_SYNC_BYTE)
+        {
+            uint16 i;
+            for (i = 1u; i < s_parseLen; i++)
+            {
+                if (s_parseBuf[i] == NICHIA_SYNC_BYTE)
+                    break;
+            }
+            g_diagUartStats.syncSkips += i;
+            diag_compact_parse_buf(i);
+            diag_refill();
+        }
+
+        if (s_parseLen < NICHIA_FRAME_HEADER_LEN)
+        {
+            diag_refill();
+            if (s_parseLen < NICHIA_FRAME_HEADER_LEN)
+                return FALSE;
+            continue;
+        }
+
+        if (!diag_nichia_header_valid_at(0u))
+        {
+            g_diagUartStats.badDlc++;
+            g_diagUartStats.syncSkips++;
+            diag_compact_parse_buf(1u);
+            continue;
+        }
+
+        {
+            uint8 dlcFun     = s_parseBuf[2];
+            uint8 fun        = (uint8)(dlcFun & NICHIA_FUN_MASK);
+            uint8 dlc        = (uint8)((dlcFun & NICHIA_DLC_MASK) >> 3u);
+            uint8 dataLen    = diag_nichia_data_length(dlc);
+            uint8 addrLen    = diag_nichia_addr_length(fun);
+            uint8 hasCrc     = (fun == NICHIA_FUN_READ_EEP) ? 0u : 1u;
+            uint8 reqLen     = (uint8)(NICHIA_FRAME_HEADER_LEN + addrLen);
+            uint8 dataFrameLen = (uint8)(reqLen + dataLen
+                                       + (hasCrc ? NICHIA_FRAME_CRC_LEN : 0u));
+
+            if (s_parseLen < reqLen)
+            {
+                diag_refill();
+                if (s_parseLen < reqLen)
+                    return FALSE;
+                continue;
+            }
+
+            if ((fun == NICHIA_FUN_READ_REG) || (fun == NICHIA_FUN_READ_EEP))
+            {
+                /* ECU read request: header+address only, followed by a new
+                 * 0x55 response frame. Skip it and let the next loop emit
+                 * the response. */
+                if (diag_nichia_header_valid_at(reqLen))
+                {
+                    s_awaitingResponse = 1u;
+                    s_requestsDetected++;
+                    diag_compact_parse_buf(reqLen);
+                    continue;
+                }
+
+                if (s_parseLen < dataFrameLen)
+                {
+                    diag_refill();
+                    if (diag_nichia_header_valid_at(reqLen))
+                    {
+                        s_awaitingResponse = 1u;
+                        s_requestsDetected++;
+                        diag_compact_parse_buf(reqLen);
+                        continue;
+                    }
+                    if (s_parseLen < dataFrameLen)
+                        return FALSE;
+                }
+
+                /* Read response. Prefer CRC-valid frames, but still emit
+                 * CRC-bad frames so can_diag can mark them for the PC UI. */
+                if ((hasCrc != 0u) && !diag_nichia_crc_ok(s_parseBuf, addrLen, dataLen))
+                    g_diagUartStats.badDlc++;
+
+                diag_emit_frame(out, dataFrameLen, RD_ESTIMATE_US);
+                s_awaitingResponse = 0u;
+                return TRUE;
+            }
+            else
+            {
+                uint8 fullLen = dataFrameLen;
+
+                if (s_parseLen < dataFrameLen)
+                {
+                    diag_refill();
+                    if (s_parseLen < dataFrameLen)
+                        return FALSE;
+                }
+
+                if (!diag_nichia_crc_ok(s_parseBuf, addrLen, dataLen))
+                    g_diagUartStats.badDlc++;
+
+                /* Normal writes carry two ACK bytes after CRC. A no-response
+                 * write or a following frame starts directly at dataFrameLen. */
+                if (s_parseLen < (uint16)(dataFrameLen + NICHIA_FRAME_ACK_LEN + 1u))
+                    diag_refill();
+
+                if ((s_parseLen >= (uint16)(dataFrameLen + NICHIA_FRAME_ACK_LEN)) &&
+                    !diag_nichia_header_valid_at(dataFrameLen))
+                {
+                    fullLen = (uint8)(dataFrameLen + NICHIA_FRAME_ACK_LEN);
+                }
+
+                diag_emit_frame(out, fullLen, 0u);
                 return TRUE;
             }
         }

@@ -5,8 +5,8 @@
 ## Status
 
 - Milestone 1 synthetic diagnostic transport: complete.
-- Milestone 2 real diagnostic UART transport: implemented for the current Osram-style protocol.
-- Next planned work: Nichia diagnostic UART protocol variant, `UartTransaction` view, and monitor export/recording.
+- Milestone 2 real diagnostic UART transport: implemented for the Osram-style protocol and initial Nichia/TLD816K protocol variant.
+- Next planned work: Nichia message-correctness and timing validation, `UartTransaction` view, and monitor export/recording.
 
 ## 1. Firmware-Side Architecture
 
@@ -15,7 +15,7 @@
 | File | Role | Current status |
 | --- | --- | --- |
 | `can_hw.h` | `DiagUartStats`, `DiagUartFrame`, diagnostic UART sniffer API | Implemented |
-| `can_hw.c` | ASCLIN9/P20.7, DMA ch0, ping-pong buffers, idle-gap polling, Osram UART frame parser | Implemented for Osram |
+| `can_hw.c` | ASCLIN9/P20.7, DMA ch0, ping-pong buffers, idle-gap polling, device-specific UART config, Osram and Nichia UART frame parsers | Implemented |
 | `can_diag.h` | Protocol v2 constants, `CanDiagRecord`, queue API, UART bridge API | Implemented |
 | `can_diag.c` | 32-entry queue, overrun counters, `can_diag_bridge_uart_frame()` | Implemented |
 | `frame_eth.h` | Diagnostic Ethernet constants and `frame_eth_send_can_diag_pending()` declaration | Implemented |
@@ -44,7 +44,9 @@ The diagnostic path is explicitly gated by `g_diagSniffEnabled`, which is contro
 
 ### 1.3 Diagnostic UART Parser
 
-Current parser assumptions are Osram-specific:
+`diag_uart_try_receive()` dispatches by active LSM device mode. The Osram path is kept as the stable baseline; the Nichia/TLD816K path is isolated as a separate parser and UART configuration.
+
+#### Osram parser
 
 ```text
 [0] SYNC0 = 0x80
@@ -60,6 +62,32 @@ Current parser assumptions are Osram-specific:
 ```
 
 Read requests are 4-byte header-only frames and are skipped. Full read responses and write/data frames are emitted as `DiagUartFrame`.
+
+#### Nichia / TLD816K parser
+
+Nichia/TLD816K uses the same ASCLIN9/P20.7 sniffer path, but `diag_uart_init_for_device()` reconfigures ASCLIN9 to the Nichia CAN-UART format:
+
+```text
+2 Mbaud, 8 data bits, no parity, 1 stop bit, LSB first, non-inverted
+```
+
+The implemented frame shape follows the reference ECU code and the captured bus setup:
+
+```text
+[0] SYNC = 0x55
+[1] MasterRequest
+    bits 4:0 = request address
+    bits 7:5 = request CRC3
+[2] DLC/FUN
+    bits 2:0 = FUN (4=WriteReg, 5=ReadReg, 6=WriteEEP, 7=ReadEEP)
+    bits 5:3 = DLC index
+    bits 7:6 = reserved, must be 0
+[3..] address, data, CRC8, optional write ACK bytes
+```
+
+The DLC index maps to payload sizes `{1, 2, 4, 8, 16, 24, 32, 64}` bytes. Register access uses a 1-byte address; EEPROM access uses a 2-byte address. CRC8 uses polynomial `0x1D`, init `0xFF`, xorout `0xFF`, calculated over address and payload for register read/write and EEPROM write. `ReadEEP` responses are accepted without CRC, matching the reference implementation.
+
+The parser skips read requests, emits read responses and write transactions, and preserves CRC-bad frames so `can_diag.c` can mark them as `CrcMismatch` for the PC monitor. Normal write transactions may include two ACK bytes after CRC; no-response writes are not forwarded.
 
 ### 1.4 Timing
 
@@ -156,12 +184,13 @@ The capture thread does not directly mutate WPF controls.
 Implemented:
 
 - Real Osram UART diagnostic parsing and Ethernet forwarding.
+- Initial Nichia/TLD816K UART diagnostic parsing, Ethernet forwarding, and PC-side nested register decode.
 - PC monitor, RawCan, detail popup, filters, counters, and sniff start/stop.
 - Coexistence with LVDS path through separate DMA channels and short diagnostic TX bursts.
 
 Pending:
 
-- Nichia UART diagnostic protocol.
+- Nichia message semantic validation, missing-response analysis, and delay validation against captures.
 - UartTransaction view content.
 - Monitor export/recording.
 - Host-side CRC verification beyond display/field extraction.

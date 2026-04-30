@@ -8,6 +8,21 @@
 
 #define CAN_DIAG_QUEUE_CAPACITY        32u
 
+#define NICHIA_SYNC_BYTE               0x55u
+#define NICHIA_FRAME_HEADER_LEN        3u
+#define NICHIA_FRAME_REG_ADDR_LEN      1u
+#define NICHIA_FRAME_EEP_ADDR_LEN      2u
+#define NICHIA_DLC_FUN_RES_MASK        0xC0u
+#define NICHIA_FUN_MASK                0x07u
+#define NICHIA_DLC_MASK                0x38u
+#define NICHIA_FUN_WRITE_REG           4u
+#define NICHIA_FUN_READ_REG            5u
+#define NICHIA_FUN_WRITE_EEP           6u
+#define NICHIA_FUN_READ_EEP            7u
+#define NICHIA_CRC8_POLY               0x1Du
+#define NICHIA_CRC8_INIT               0xFFu
+#define NICHIA_CRC8_XOROUT             0xFFu
+
 static CanDiagRecord s_queue[CAN_DIAG_QUEUE_CAPACITY];
 static uint8  s_head;
 static uint8  s_tail;
@@ -80,6 +95,130 @@ boolean can_diag_pop_record(CanDiagRecord *record)
 
 /* ======================== UART frame → CanDiagRecord bridge ======================== */
 
+static uint8 can_diag_nichia_data_length(uint8 dlc)
+{
+    static const uint8 s_len[8] = { 1u, 2u, 4u, 8u, 16u, 24u, 32u, 64u };
+    return s_len[dlc & 0x07u];
+}
+
+static uint8 can_diag_nichia_crc8(const uint8 *data, uint8 len)
+{
+    uint8 crc = NICHIA_CRC8_INIT;
+    uint8 i;
+
+    for (i = 0u; i < len; i++)
+    {
+        uint8 bit;
+        crc ^= data[i];
+        for (bit = 0u; bit < 8u; bit++)
+        {
+            crc = (crc & 0x80u)
+                ? (uint8)((crc << 1u) ^ NICHIA_CRC8_POLY)
+                : (uint8)(crc << 1u);
+        }
+    }
+
+    return (uint8)(crc ^ NICHIA_CRC8_XOROUT);
+}
+
+static void can_diag_decode_nichia(CanDiagRecord *rec, const DiagUartFrame *frame)
+{
+    uint8 dlcFun;
+    uint8 fun;
+    uint8 dlc;
+    uint8 addrLen;
+    uint8 dataLen;
+    uint8 dataPos;
+    uint8 crcIdx;
+    uint8 hasCrc;
+
+    if (frame->len < (NICHIA_FRAME_HEADER_LEN + NICHIA_FRAME_REG_ADDR_LEN) ||
+        frame->data[0] != NICHIA_SYNC_BYTE)
+    {
+        rec->operation = CAN_DIAG_OP_READ;
+        rec->status    = CAN_DIAG_STATUS_MALFORMED;
+        return;
+    }
+
+    dlcFun = frame->data[2];
+    fun    = (uint8)(dlcFun & NICHIA_FUN_MASK);
+    dlc    = (uint8)((dlcFun & NICHIA_DLC_MASK) >> 3u);
+
+    if (((dlcFun & NICHIA_DLC_FUN_RES_MASK) != 0u) ||
+        (fun < NICHIA_FUN_WRITE_REG) || (fun > NICHIA_FUN_READ_EEP))
+    {
+        rec->operation = CAN_DIAG_OP_READ;
+        rec->status    = CAN_DIAG_STATUS_MALFORMED;
+        return;
+    }
+
+    addrLen = ((fun == NICHIA_FUN_WRITE_EEP) || (fun == NICHIA_FUN_READ_EEP))
+            ? NICHIA_FRAME_EEP_ADDR_LEN : NICHIA_FRAME_REG_ADDR_LEN;
+    dataLen = can_diag_nichia_data_length(dlc);
+
+    if (frame->len < (uint8)(NICHIA_FRAME_HEADER_LEN + addrLen))
+    {
+        rec->operation = CAN_DIAG_OP_READ;
+        rec->status    = CAN_DIAG_STATUS_MALFORMED;
+        return;
+    }
+
+    if (addrLen == NICHIA_FRAME_EEP_ADDR_LEN)
+    {
+        rec->address = (uint16)(((uint16)frame->data[3] << 8u)
+                              | (uint16)frame->data[4]);
+    }
+    else
+    {
+        rec->address = (uint16)frame->data[3];
+    }
+
+    rec->operation = ((fun == NICHIA_FUN_WRITE_REG) || (fun == NICHIA_FUN_WRITE_EEP))
+                   ? CAN_DIAG_OP_WRITE : CAN_DIAG_OP_READ;
+
+    dataPos = (uint8)(NICHIA_FRAME_HEADER_LEN + addrLen);
+    crcIdx  = (uint8)(dataPos + dataLen);
+    hasCrc  = (fun == NICHIA_FUN_READ_EEP) ? 0u : 1u;
+
+    if (frame->len < (uint8)(dataPos + dataLen + (hasCrc ? 1u : 0u)))
+    {
+        rec->status = CAN_DIAG_STATUS_MALFORMED;
+        return;
+    }
+
+    if (dataLen >= 4u)
+    {
+        rec->value = ((uint32)frame->data[dataPos] << 24u)
+                   | ((uint32)frame->data[dataPos + 1u] << 16u)
+                   | ((uint32)frame->data[dataPos + 2u] << 8u)
+                   |  (uint32)frame->data[dataPos + 3u];
+    }
+    else if (dataLen >= 2u)
+    {
+        rec->value = ((uint32)frame->data[dataPos] << 8u)
+                   |  (uint32)frame->data[dataPos + 1u];
+    }
+    else
+    {
+        rec->value = (uint32)frame->data[dataPos];
+    }
+
+    if (hasCrc == 0u)
+        return;
+
+    rec->checksum = (uint32)frame->data[crcIdx];
+
+    /* Reference ECU code accepts >64 byte CRC spans for compatibility with
+     * older B/C samples. Mirror that behavior for 64-byte transfers. */
+    if ((uint8)(addrLen + dataLen) <= 64u)
+    {
+        uint8 calc = can_diag_nichia_crc8(&frame->data[NICHIA_FRAME_HEADER_LEN],
+                                          (uint8)(addrLen + dataLen));
+        if (calc != frame->data[crcIdx])
+            rec->status = CAN_DIAG_STATUS_CRC_MISMATCH;
+    }
+}
+
 boolean can_diag_bridge_uart_frame(const DiagUartFrame *frame, uint8 deviceId)
 {
     CanDiagRecord rec;
@@ -99,6 +238,12 @@ boolean can_diag_bridge_uart_frame(const DiagUartFrame *frame, uint8 deviceId)
                  ? frame->len : (uint8)CAN_DIAG_RAW_MAX;
     memcpy(rec.rawPayload, frame->data, rec.valueLen);
 
+    if (deviceId == CAN_DIAG_DEVICE_NICHIA)
+    {
+        can_diag_decode_nichia(&rec, frame);
+    }
+    else
+    {
     /* Decode UART data frame (Osram KEWGBXXD1U protocol):
      *
      *   [0] = SYNC0 (0x80)
@@ -139,6 +284,7 @@ boolean can_diag_bridge_uart_frame(const DiagUartFrame *frame, uint8 deviceId)
         /* Frame too short to decode — mark as malformed */
         rec.operation = CAN_DIAG_OP_READ;
         rec.status    = CAN_DIAG_STATUS_MALFORMED;
+    }
     }
 
     if (can_diag_push_record(&rec))

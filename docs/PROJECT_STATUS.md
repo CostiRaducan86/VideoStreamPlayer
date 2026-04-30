@@ -27,14 +27,15 @@ This section is the current source of truth for session recovery. Some older sec
 - The current embedded platform is AURIX TC397. Pico/RP2040 is no longer the active hardware direction.
 - LVDS pixel capture runs on ASCLIN1/P14.8 with DMA channel 1.
 - Diagnostic "CAN" traffic is treated as UART through CAN transceivers used as differential PHY only; MCMCAN is not used for this path.
-- Current Osram diagnostic sniffing code uses ASCLIN9/P20.7, DMA channel 0, 2 Mbaud, 8 data bits, odd parity, 2 stop bits.
-- `diag_uart_try_receive()` currently parses Osram-style frames with `[0x80][0xA5][HCTRL][HADR] + data + CRC16`, estimates response delay, measures inter-frame gaps through DMA-position polling, and produces `DiagUartFrame`.
+- Current diagnostic sniffing code uses ASCLIN9/P20.7 and DMA channel 0. Osram uses 2 Mbaud 8O2; Nichia/TLD816K uses 2 Mbaud 8N1.
+- `diag_uart_try_receive()` dispatches by active LSM device mode. The Osram path parses `[0x80][0xA5][HCTRL][HADR] + data + CRC16`; the Nichia path parses `[0x55][MasterRequest][DLC/FUN][address][data][CRC8/ACK]`.
+- The Nichia/TLD816K variant is implemented as an isolated parser/config path and has passed a first hardware smoke validation with live monitor records.
 - `can_diag_bridge_uart_frame()` converts parsed UART frames into protocol v2 `CanDiagRecord` values; `frame_eth_send_can_diag_pending()` forwards them over Ethernet with magic `0x4344` and ethertype `0x88B5`.
 - Diagnostic sniffing is controlled from the PC app using the `DIAG_SNIFF` command (`DiagSniffCommand.cs`, magic `0x434D`, command `0x02`).
 
 ### Known Gaps / Next Work
 
-- Nichia diagnostic UART support is not implemented yet. It should be treated as a new protocol variant, not as a small tweak to the Osram parser.
+- Nichia message semantic correctness, missing-response behavior, and response/inter-frame delay accuracy still need capture-based validation.
 - The `UartTransaction` tab is still a placeholder.
 - CAN/UART monitor export/recording is still pending.
 - Some older documents still mention synthetic-only M1 or 1 Mbaud; the updated LSM/AURIX docs should be preferred for current implementation details.
@@ -672,7 +673,7 @@ delayMs2 = 200
 
 - **`asclin1_dma.h/.c`** – LVDS pixel DMA (ASCLIN1, P14.8, DMA ch1)
 - **`lvds_frame_mode.h`** – LvdsFrameMode enum (8N1/8O1)
-- **`can_hw.h/.c`** – diagnostic UART sniffer (ASCLIN9, P20.7, DMA ch0, current Osram config 2M 8O2) with idle-gap timing and Osram frame parser
+- **`can_hw.h/.c`** – diagnostic UART sniffer (ASCLIN9, P20.7, DMA ch0) with device-specific UART config, idle-gap timing, and Osram/Nichia frame parsers
 - **`can_diag.h/.c`** – protocol v2, ring queue, UART frame bridge
 - **`frame_eth.h/.c`** – pixel + diagnostic Ethernet TX
 - **`device_mode.c`** – ASCLIN1 reconfiguration, parser selection
@@ -701,9 +702,10 @@ delayMs2 = 200
    - Current code-behind pattern mixes UI logic with business logic
    - **Recommendation:** Migrate to MVVM with ViewModels for testability + separation
 
-4. **CAN/UART Monitor — M1 Complete, M2 Pending**
+4. **CAN/UART Monitor — M1/M2 Complete, Nichia Follow-up Pending**
    - Milestone 1 (synthetic data, GUI, protocol v2) fully implemented
-   - **Next:** Milestone 2 — real CAN bus traffic from TLD816K ASIC
+   - Milestone 2 real diagnostic UART path implemented for Osram and initial Nichia/TLD816K
+   - **Next:** Nichia semantic validation, missing-response analysis, and delay verification
 
 5. **Error Handling Gaps**
    - Some paths (file I/O, network) lack try/catch
@@ -723,7 +725,7 @@ delayMs2 = 200
 
 **Medium-Term (1-2 months):**
 
-- Implement CAN Milestone 2 (real CAN bus traffic from TLD816K)
+- Validate Nichia/TLD816K CAN-UART message correctness and timing against captures
 - Migrate core logic to ViewModels (MVVM)
 - Add performance metrics (FPS actual vs. target, frame drop %)
 
@@ -873,7 +875,7 @@ Three GUI views matching classic VILS layout:
 - **Magic**: 0x4344 ("CD" for CAN Diagnostic)
 - **Payload**: 94 bytes (22 fixed + 72 raw UART)
 - **Fixed fields**: sourceTimestamp(4) + address(2) + responseDelayUs(2) + interFrameDelayUs(2) + value(4) + checksum(4) + deviceId(1) + operation(1) + status(1) + rawLen(1)
-- **Raw UART**: up to 72 bytes of actual UART frame `[SYNC][SlaveResp][DLC/FUN][Addr][Data...][CRC]`
+- **Raw UART**: up to 72 bytes of actual UART frame, either Osram `[0x80][0xA5][HCTRL][HADR][Data...][CRC16]` or Nichia `[0x55][MasterRequest][DLC/FUN][Addr][Data...][CRC8/ACK]`
 
 ### 17.3 New files
 
@@ -902,17 +904,19 @@ Three GUI views matching classic VILS layout:
 ### 17.5 Validated on hardware
 
 - Osram 2.05 LSM: LVDS 48.5 FPS unaffected, synthetic CAN records flowing
+- Osram regression on 2026-04-30: rebuilt, flashed, run, and manually checked from the C# monitor before switching hardware; behavior stayed correct.
+- Nichia smoke validation on 2026-04-30: temporary `FE_DEVICE_NICHIA`, rebuilt/flashed/run with physical Nichia LSM, monitor records visible, `badDlc=0`, PC parser errors `0`, and `framesDecoded` increasing.
 - Monitor: correct register names (CR, HwSTAT, SR, OSHRS, FCR0, NVMDAT*, ELEDER*)
 - Detail popup: all fields correct (timing, CRC 16-bit, nested decoded registers)
 - RawCan: hex packets scrolling in dark console
 - Filters: Device/R-W/Status filtering verified
 - Error highlighting: timeout=red, CRC=yellow (tested via synthetic status injection)
 
-### 17.6 Milestone 2 scope (next)
+### 17.6 Nichia follow-up scope (next)
 
-- Real CAN peripheral init on AURIX (CAN0, TLE9251V, X202 connector)
-- CAN→UART bridge to TLD816K ASIC
-- Real `CanDiagRecord` with measured timing
+- Validate Nichia register interpretation against captures and ECU expectations
+- Check for missing request/response pairs
+- Verify `ResponseDelay` and `InterFrameDelay` against Saleae timing
 - UartTransaction tab content
 - CAN monitor data export/recording
 
