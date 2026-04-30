@@ -367,7 +367,7 @@ The system follows a layered architecture:
 
 **SYS-EXT-001**: The system SHOULD support plugin architecture for custom frame processors.
 
-**SYS-EXT-002**: The system SHOULD support CAN/UART monitoring integration (placeholder currently implemented).
+**SYS-EXT-002**: The system SHOULD support CAN/UART monitoring integration. The current implementation provides Monitor and RawCan views, diagnostic packet parsing, start/stop sniff control, filters, counters, and detail popups; richer transaction view and export remain future enhancements.
 
 **SYS-EXT-003**: The system SHOULD support AVB/TSN protocol extensions for automotive compliance.
 

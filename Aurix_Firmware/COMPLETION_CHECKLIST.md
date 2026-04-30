@@ -1,68 +1,62 @@
-# Completion Checklist — Aurix Firmware
+# Completion Checklist - Aurix Firmware
 
-## Milestone 1: Synthetic CAN Diagnostic (COMPLETE)
+**Last updated:** 2026-04-30
 
-- [x] `can_diag.c/h` — record queue + synthetic producer
-- [x] Ethernet bridge (magic 0x4344) via `frame_eth.c`
-- [x] C# parser (`LsmCanDiagParser.cs`) + capture + GUI
-- [x] Validated end-to-end with synthetic data
+## Milestone 1: Synthetic Diagnostic Transport
 
-## Milestone 2: Real Diagnostic UART Sniffer (IN PROGRESS)
+- [x] `can_diag.c/h` record queue
+- [x] Diagnostic Ethernet bridge via `frame_eth.c`
+- [x] C# parser, capture, store, and monitor UI
+- [x] End-to-end synthetic validation completed previously
 
-### Firmware — ASCLIN9 DMA (COMPLETE)
+## Milestone 2: Real Osram Diagnostic UART Sniffer
 
-- [x] `can_hw.c/h` — ASCLIN9 + DMA ch0, 1M 8O2
-- [x] `diag_uart_init()`, `diag_uart_tick()` working
-- [x] DMA completions incrementing on target
-- [x] `synced=1` confirmed
-- [x] 0 build errors, 0 warnings
+### Firmware
 
-### Firmware — Frame Parser (TODO)
+- [x] `can_hw.c/h` ASCLIN9 + DMA ch0 diagnostic UART path
+- [x] ASCLIN9/P20.7 through TLE9251V/X202
+- [x] Current Osram UART config: 2M 8O2
+- [x] `diag_uart_init()`
+- [x] `diag_uart_tick()`
+- [x] `diag_uart_poll_idle()`
+- [x] `diag_uart_try_receive()` Osram frame parser
+- [x] Frame format handled: `[0x80][0xA5][HCTRL][HADR] + data + CRC16`
+- [x] 4-byte read requests skipped; read responses/write frames emitted
+- [x] `can_diag_bridge_uart_frame()` bridges parsed frames to `CanDiagRecord`
+- [x] `frame_eth_send_can_diag_pending()` sends diagnostic records with burst limiting
+- [x] `FE_CMD_DIAG_SNIFF` starts/stops sniffing and resets parser/queue state
 
-- [ ] Implement `diag_uart_try_receive()` — extract transactions from DMA byte stream
-- [ ] ECU frame format: `[0x80][0xA5][HCTRL][HADR]+data+CRC16`
-- [ ] Feed parsed frames to `can_diag_enqueue()`
-- [ ] Validate against VILS monitor screenshots
+### C# GUI
 
-### C# GUI (TODO)
+- [x] `DiagSniffCommand.cs` sends start/stop command
+- [x] `LsmCanDiagParser.cs` parses protocol v2 packets
+- [x] `LsmCanDiagCapture.cs` captures and classifies diagnostic Ethernet packets
+- [x] Monitor tab with filters, sorting, paging, and error highlighting
+- [x] RawCan tab
+- [x] `CanDetailWindow` detail popup
+- [x] Status counters
+- [ ] UartTransaction tab content
+- [ ] Monitor export/recording
+- [ ] Additional host-side CRC verification policy
 
-- [ ] Wire real Ethernet diagnostic packets to `LsmCanDiagParser`
-- [ ] UartTransaction detail view in CanDetailWindow
-- [ ] File export (CSV/binary)
-- [ ] Validate parsed fields against reference screenshots
+## LVDS Pixel Pipeline
 
-## LVDS Pixel Pipeline (COMPLETE)
+- [x] `asclin1_dma.c/h` ASCLIN1/P14.8/DMA ch1
+- [x] `lvds_frame_mode.h` frame mode enum
+- [x] `device_mode.c` Osram/Nichia switching
+- [x] Osram hardware validation completed in prior sessions
+- [ ] Nichia fresh validation with camera connected
 
-- [x] `asclin1_dma.c/h` — ASCLIN1/P14.8/DMA ch1
-- [x] `lvds_frame_mode.h` — frame mode enum
-- [x] `device_mode.c` — Osram/Nichia switching
-- [x] Osram: 48.7 FPS on target
-- [ ] Nichia: not yet re-validated (camera not connected)
+## Next Milestone: Nichia Diagnostic UART
 
-## TFT Display (COMPLETE)
-
-- [x] `tft_display.c/h` — ILI9341 driver (CPU1)
-- [x] `tft_ui.c/h` — button/touch demo
-- [x] Classic + Modern fonts
-- Ethernet TX implementation
-- Host-side frame ingestion updates
-
----
-
-## Artifacts Produced
-
-- ✅ Working DMA + dual-buffer implementation
-- ✅ Updated boot/main integration for CPU0
-- ✅ Supporting documentation set in `Aurix_Firmware`
-
-## Recommended Next Actions
-
-1. Read `HANDOFF_SUMMARY.md`
-2. Build from ADS using `BUILD_INSTRUCTIONS.md`
-3. Execute runtime checks from `STEP1_BUILD_VALIDATE.md`
-
----
+- [ ] Collect or document Nichia diagnostic UART frame format
+- [ ] Define Nichia sync/header/length/address/data/CRC semantics
+- [ ] Decide how Nichia fields map into `DiagUartFrame` and `CanDiagRecord`
+- [ ] Implement parser selection by active device mode
+- [ ] Preserve existing Osram parser behavior
+- [ ] Validate against real Nichia hardware/captures
+- [ ] Update `LsmRegisterMap` or add a Nichia-specific map if needed
 
 ## Final Status
 
-### Ready for Build and Hardware Test
+The Osram diagnostic UART path is code-complete enough for real-frame validation. The next major functional gap is Nichia protocol support.

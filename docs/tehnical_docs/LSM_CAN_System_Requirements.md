@@ -1,6 +1,6 @@
 # LSM CAN System Requirements
 
-> **Status**: Milestone 1 **COMPLETE** (2026-04-03). All M1-scope system requirements met.
+> **Status**: Milestone 1 complete. Milestone 2 Osram real diagnostic UART path implemented. Nichia diagnostic protocol pending.
 
 ## 1. Introduction
 
@@ -12,13 +12,13 @@ This document defines system-level requirements for CAN-based diagnostic communi
 
 The system shall acquire diagnostic data originating from the LSM diagnostic communication path.
 
-> **M1**: Synthetic data from 32-entry ASIC register table. **M2**: Real UART traffic via ASCLIN9 DMA (1M 8O2 through CAN transceivers).
+> **M1**: Synthetic data from diagnostic record queue. **M2 current**: real Osram UART traffic via ASCLIN9 DMA (2M 8O2 through CAN transceivers used as PHY).
 
 ### SR-002 Device coverage ✅ IMPLEMENTED
 
 The system shall support diagnostics for both LSM device families used in the project (`OSRAM`, `NICHIA`).
 
-> **Implementation**: `deviceId` field in record (0x00=OSRAM, 0x01=NICHIA). GUI filter "Select Device" supports Both/OSRAM/NICHIA.
+> **Implementation**: `deviceId` field in record (0=NICHIA, 1=OSRAM). GUI filter "Select Device" supports Both/OSRAM/NICHIA.
 
 ### SR-003 Device selector support ✅ IMPLEMENTED
 
@@ -73,7 +73,7 @@ The CAN diagnostic feature shall coexist with the existing LVDS/AVTP video flow 
 
 The system shall use a physically valid connection between ECU/LSM and AURIX for diagnostic traffic.
 
-> **Discovery**: Diagnostic bus is UART at 1 Mbaud 8O2 through CAN transceivers (TLE9251V/TJA1057 as differential PHY only). MCMCAN not used.
+> **Discovery**: Diagnostic bus is UART through CAN transceivers (TLE9251V/TJA1057 as differential PHY only). MCMCAN not used. Current Osram implementation uses 2 Mbaud 8O2.
 > **Implementation**: ASCLIN9 on P20.7 → TLE9251V U206 → X202 IDC10. DMA channel 0. Validated on target: dmaCompletions incrementing, synced=1.
 
 ### SR-011 AURIX forwarding interface ✅ IMPLEMENTED

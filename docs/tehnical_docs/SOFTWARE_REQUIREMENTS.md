@@ -311,7 +311,7 @@ VilsSharpX is a standalone WPF application (.NET 8) for Windows that integrates 
 - EtherType
 - VLAN tag
 
-**SW-UI-013**: The MainWindow SHALL display CAN/UART monitor panel (right bottom, placeholder for future).
+**SW-UI-013**: The MainWindow SHALL display CAN/UART monitor panel with Monitor, RawCan, and UartTransaction tabs. Monitor and RawCan SHALL show live diagnostic records when sniffing is active; UartTransaction is reserved for a future detailed transaction view.
 
 **SW-UI-014**: The MainWindow SHALL display status bar at bottom with:
 

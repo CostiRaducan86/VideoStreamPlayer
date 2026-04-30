@@ -1,164 +1,130 @@
-# LSM CAN Functionality Description
+# LSM CAN/UART Functionality Description
+
+**Last updated:** 2026-04-30
 
 ## Purpose
 
-The LSM CAN functionality provides engineering visibility for register-level and timing-level diagnostics, using AURIX as an embedded gateway and the VilsSharpX C# application as live monitor and analysis endpoint.
+The LSM CAN/UART functionality provides engineering visibility for register-level and timing-level diagnostics. AURIX acts as the embedded acquisition and Ethernet forwarding gateway, while the VilsSharpX C# application acts as live monitor and analysis endpoint.
 
-## Scope
+The name "CAN" is kept for project continuity and UI familiarity, but the diagnostic bus currently handled by firmware is UART carried through CAN transceivers used as a differential PHY. The active Osram implementation does not use MCMCAN.
 
-The functionality covers:
+## Current Baseline
 
-- acquisition of CAN-related diagnostic transactions in the embedded side
-- normalization into a transportable diagnostic record format
-- forwarding to PC through project Ethernet path
-- parsing and live visualization in the C# GUI
-- optional persistence of monitor records for offline analysis
+- Milestone 1 synthetic diagnostic transport is complete and remains useful as historical validation.
+- Milestone 2 real diagnostic UART transport is implemented for the current Osram-style protocol.
+- Current AURIX sniffer path: ASCLIN9/P20.7, DMA channel 0, ping-pong buffers, 2 Mbaud, 8 data bits, odd parity, 2 stop bits.
+- LVDS capture remains independent on ASCLIN1/P14.8, DMA channel 1.
+- Sniffing is controlled from the PC through `DiagSniffCommand` using ethertype `0x88B5`, magic `0x434D`, command `0x02`.
+- Parsed diagnostic records are sent back to the PC with ethertype `0x88B5`, magic `0x4344`, protocol version 2.
+- The next protocol task is Nichia diagnostic UART support, which should be implemented as a separate protocol variant.
 
-It does not replace the existing LVDS frame pipeline. It complements it with diagnostic observability.
+## Runtime Behavior
 
-## Inputs and outputs
+### Start / Stop Control
 
-### Input domain (observed in reference traces)
+1. The user starts recording in the CAN/UART monitor.
+2. `DiagSniffCommand.Send()` transmits the `DIAG_SNIFF` command three times for robustness.
+3. AURIX receives the command in `frame_eth_poll_rx()`.
+4. On the 0 -> 1 transition, AURIX resets diagnostic sequence counters, parser state, and the diagnostic queue.
+5. `g_diagSniffEnabled` gates diagnostic parsing and diagnostic Ethernet TX.
 
-Typical fields observed in current reference material:
+### Acquisition and Forwarding
 
-- `Time`, `UnixTs`
-- `ResponseDelay`, `InterFrameDelay`
-- `Address`, `MemoryType`, `Device`, `R/W`
-- `Raw`, `Value`, `Nested`
-- `Crc`
-- `Error` (for timeout or other failures)
+1. ASCLIN9 receives diagnostic UART bytes through the TLE9251V path.
+2. DMA channel 0 writes bytes into 2 x 2560-byte ping-pong buffers.
+3. `diag_uart_poll_idle()` samples DMA destination movement to detect inter-frame gaps.
+4. `diag_uart_try_receive()` extracts Osram-style frames:
+   - `[0x80][0xA5][HCTRL][HADR] + data + CRC16`
+   - 4-byte read requests are skipped.
+   - Read responses and write/data frames are emitted as `DiagUartFrame`.
+5. `can_diag_bridge_uart_frame()` converts each `DiagUartFrame` into a protocol v2 `CanDiagRecord`.
+6. `frame_eth_send_can_diag_pending()` drains the diagnostic queue and sends at most two records per call to avoid starving LVDS frame TX.
+7. The PC app captures the packets with `LsmCanDiagCapture`, parses them with `LsmCanDiagParser`, stores them in `LsmCanDiagStore`, and displays them in the CAN/UART monitor.
 
-### Output domain (to GUI)
+## PC UI Behavior
 
-The PC monitor shall display a normalized record stream with columns such as:
+The CAN/UART monitor currently includes:
 
-- timestamp
-- sequence
-- device
-- operation
-- address
-- value
-- crc/checksum
-- response delay
-- inter-frame delay
-- status/error
+- **Monitor** tab: paginated table with register name, address, memory type, device, R/W, value, status/error.
+- **RawCan** tab: scrollable raw text view for UART diagnostic payloads and raw CAN-frame style records.
+- **Detail popup**: double-click opens `CanDetailWindow` with timing, identity, CRC, raw payload, and decoded registers.
+- **Filters**: order, sort direction, device, R/W selection, status, and clear.
+- **Counters**: stored records, total packets, CD/NI/OS/other magic matches, parser errors.
 
-## Runtime behaviour
+The `UartTransaction` tab is still a placeholder.
 
-### Acquisition and forwarding
+## Diagnostic Record Model
 
-1. Embedded side receives or constructs a diagnostic transaction.
-2. Transaction is normalized into diagnostic record schema.
-3. Record is pushed into bounded queue.
-4. Queue is drained and serialized into Ethernet diagnostic packets.
-5. PC side receives packet and parses records.
-6. GUI monitor updates with latest records.
+Protocol v2 uses an 8-byte diagnostic header followed by a 94-byte payload:
 
-### Error handling
+```text
+Header:
+  magic(2) = 0x4344
+  version(1) = 2
+  recordType(1) = 1
+  sequence(2)
+  payloadLength(2) = 94
 
-- malformed records are rejected and counted
-- queue overflow increments overrun counters and drops oldest/newest according to selected policy
-- parser decode failures are logged without terminating capture loop
+Payload:
+  sourceTimestamp(4)
+  address(2)
+  responseDelayUs(2)
+  interFrameDelayUs(2)
+  value(4)
+  checksum(4)
+  deviceId(1)
+  operation(1)
+  status(1)
+  rawLen(1)
+  rawPayload(72)
+```
 
-## Coexistence constraints
+`rawPayload` carries the original UART frame bytes so the PC can render RawCan text and decode nested register values.
 
-- diagnostics channel must not disrupt image frame transport
-- diagnostics must preserve compatibility with runtime device switching (`OSRAM`/`NICHIA`)
-- monitor processing must remain non-blocking for UI thread
+## Coexistence Constraints
 
-## Milestone 1 implementation target
+- Diagnostic processing must not disrupt LVDS capture or Ethernet frame transport.
+- The firmware parser processes at most one diagnostic frame per main-loop iteration.
+- Diagnostic Ethernet TX is limited to short bursts to avoid GETH TX contention.
+- UI updates are marshaled through the WPF dispatcher and refresh timers; capture callbacks do not directly mutate WPF controls.
 
-Milestone 1 (first incremental delivery) focuses on:
+## Known Gaps
 
-- protocol schema definition (versioned)
-- one diagnostic Ethernet record type
-- firmware encode + queue + send path
-- C# decode + log + minimal live list visualization
+- Nichia diagnostic UART protocol is not implemented yet.
+- `UartTransaction` view is not implemented yet.
+- Monitor export/recording is not implemented yet.
+- CRC is displayed from the UART payload; full host-side CRC verification is still pending.
+- Broader validation with real multi-register transactions is still needed.
 
-## Open technical decisions (to be finalized during implementation)
+## Implementation Files
 
-- exact binary field widths for `UnixTs`, `Address`, and `Value` fragments
-- CRC/checksum handling strategy in monitor (display-only vs verify)
-- record batching strategy (single record per packet vs multiple)
-- ordering policy under packet loss (strict sequence check behavior)
+### Firmware
 
----
+- `Aurix_Firmware/can_hw.h/.c` - ASCLIN9 diagnostic UART sniffer, DMA, parser, timing.
+- `Aurix_Firmware/can_diag.h/.c` - protocol v2 record queue and UART-frame bridge.
+- `Aurix_Firmware/frame_eth.h/.c` - diagnostic Ethernet serialization, TX, RX command handling.
+- `Aurix_Firmware/Cpu0_Main.c` - main-loop integration for poll, parse, bridge, and TX.
 
-## Milestone 1 — Implementation Status (completed 2026-04-03)
+### C# Application
 
-### Firmware (Aurix TC397)
+- `DiagSniffCommand.cs` - PC-to-AURIX start/stop command.
+- `LsmCanDiagCapture.cs` - SharpPcap capture and diagnostic packet classification.
+- `LsmCanDiagParser.cs` - v1/v2 parser, VLAN strip, defensive decode.
+- `LsmCanDiagRecord.cs` - record model, raw hex, decoded registers.
+- `LsmCanDiagStore.cs` - thread-safe record store.
+- `LsmRegisterMap.cs` - TLD816K register name lookup for the current Osram-focused map.
+- `CanDetailWindow.xaml/.cs` - detail popup.
+- `MainWindow.xaml/.cs` - monitor tabs, filters, paging, start/stop, status.
 
-Implemented files: `can_diag.h`, `can_diag.c`, `frame_eth.h`, `frame_eth.c`
+## Next Step: Nichia
 
-- **Protocol v2**: 8-byte header + 94-byte payload (22 fixed + 72 raw UART)
-- **Diagnostic record struct** (`CanDiagRecord`): sourceTimestamp, address, responseDelayUs, interFrameDelayUs, value, checksum, deviceId, operation, status, valueLen, rawPayload[72]
-- **Bounded queue** (32 entries, ring buffer): push/pop/overflow counted
-- **Synthetic producer** (`can_diag_synthetic_cyclic`): 32-entry address table cycling through known ASIC registers (CR, HwSTAT, SR, OSHRS, OTPID0, NVMDAT0..112, TSTDR, FSTXR, FCR0, ELEDER*) with realistic R/W mix and timing (5-15µs response, 200-500µs inter-frame)
-- **Ethernet TX**: magic 0x4344 ("CD"), ethertype 0x88B5, single record per packet
-- **Queue drain**: `frame_eth_send_can_diag_pending()` called after frame transport in main loop
+Nichia support should begin by documenting the wire format before code changes:
 
-### C# WPF Application
-
-Implemented files: `LsmCanDiagRecord.cs`, `LsmCanDiagParser.cs`, `LsmCanDiagCapture.cs`, `LsmCanDiagStore.cs`, `LsmRegisterMap.cs`, `CanDetailWindow.xaml/.cs`
-
-- **Parser**: accepts v1 (24B) and v2 (94B) payloads, VLAN tag stripping, Enum-safe status decode
-- **Register map**: 50+ TLD816K ASIC registers with names matching classic VILS (CR, HwSTAT, SR, OSHRS, FCR0, FCR1, FEC, TSTDR, FSTXR, NVMDAT*, ELEDER*, etc.)
-- **GUI — Monitor view**: paginated table (14 rows/page) with columns Time, Nr, Name, Address, MemoryType, Device, R/W, Value, Error; row highlighting for timeout/CRC errors; double-click opens detail popup
-- **GUI — RawCan view**: dark Consolas scrollable text, format `> cCAN[ UnixTs 0xHEX ]`, max 500 lines
-- **GUI — Detail popup** (`CanDetailWindow`): Timing (Time, UnixTs, ResponseDelay, InterFrameDelay), Identity (Nr, Name, Address, MemoryType, Device, R/W), Diagnostics (Crc 16-bit, Error, Description), Data (Value hex, Raw hex), Nested (JSON array of decoded registers with Address, Value, Name, Index)
-- **Filters**: Order by (Nr/Time), Sort (asc/desc), Select Device (Both/OSRAM/NICHIA), Select to show (All/R/W), Status (All/OK/Error), Clear button
-- **Tab switching**: RawCan / Monitor / UartTransaction (placeholder) with active styling
-- **Status bar**: State, Stored, Rx, CD/NI/OS/OTH counters, ParseErr
-
-### Validated on hardware
-
-- Osram 2.05 LSM: 48.5 FPS LVDS, synthetic CAN diag records flowing (diagRecordsSent matching syntheticSamples), 0 ParseErr, register names + R/W + timing correct in GUI
-- Detail popup verified: HwSTAT shows Name, Description, Nested decoded register, CRC 16-bit
-
-### Known limitations (Milestone 1)
-
-- Data is **synthetic** (firmware statistics → simulated UART frames), not real CAN/UART traffic
-- CAN bus not yet connected to ASIC TLD816K — CAN_H/CAN_L wiring has no effect
-- UartTransaction tab is placeholder
-- No recording/export of CAN monitor data
-- No write-back command from PC to ASIC
-
-## Milestone 2 — Real diagnostic UART transport (IN PROGRESS)
-
-### Goal
-
-Replace synthetic producer with real diagnostic UART traffic capture from ECU↔LSM bus.
-
-> **Critical discovery**: The "CAN" diagnostic bus is actually **UART at 1 Mbaud, 8-Odd-2**
-> through CAN transceivers (TLE9251V/TJA1057/TCAN1057 used as differential PHY only).
-> MCMCAN is NOT used.
-
-### Milestone 2 status
-
-**Firmware — ASCLIN9 DMA sniffer (DONE)**:
-
-1.✅ `can_hw.c/h` — ASCLIN9 on P20.7 (TLE9251V→X202), DMA ch0, 1M 8O2
-2.✅ Parallel with LVDS: ASCLIN1/P14.8 (DMA ch1) + ASCLIN9/P20.7 (DMA ch0)
-3.✅ API: `diag_uart_init()`, `diag_uart_tick()`, `diag_uart_try_receive()`
-4.✅ Stats: `DiagUartStats g_diagUartStats` — dmaCompletions, totalRxBytes, synced, etc.
-5.✅ Validated on target: DMA completions incrementing, 48.7 FPS LVDS unaffected
-
-**Firmware — Frame parser (TODO)**:
-
-6.⬜ Implement `diag_uart_try_receive()` — extract UART transactions from DMA byte stream
-7.⬜ ECU frame format: `[0x80][0xA5][HCTRL][HADR]+data+CRC16`, max TX=40B, max RX=70B
-8.⬜ Feed parsed `DiagUartFrame` → `CanDiagRecord` → existing `can_diag_enqueue()` pipeline
-
-**C# GUI (TODO)**:
-
-9.⬜ Validate existing parser with real Ethernet diagnostic packets
-10.⬜ UartTransaction tab content
-11.⬜ File export (CSV/binary)
-12.⬜ Validate DecodedRegisters with real multi-register reads
-
-### Prerequisites (met)
-
-- ✅ ASCLIN9 wiring: P20.7 via TLE9251V to X202 IDC10
-- ✅ LVDS moved to ASCLIN1/P14.8 (X103 pin 7) — no pin conflict
-- ✅ ECU UART protocol characterized: 1M baud, 8 data, Odd parity, 2 stop bits
+- sync/header bytes
+- frame length rules
+- read/write bit semantics
+- register address width and byte order
+- data payload layout
+- CRC/checksum algorithm
+- timing fields that should map to ResponseDelay and InterFrameDelay
+- expected device ID mapping in `CanDiagRecord`

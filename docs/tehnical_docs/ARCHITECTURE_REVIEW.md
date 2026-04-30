@@ -1,9 +1,9 @@
 # VilsSharpX - Technical Architecture Review
 
-**Date**: February 13, 2026  
+**Date**: April 30, 2026
 **Project**: VilsSharpX - AVTP/LVDS Video Frame Monitoring & Comparison Tool  
 **Platform**: WPF (.NET 8 Windows)  
-**Status**: Stable Baseline (UI Layout Optimized)
+**Status**: Stable Baseline (UI Layout Optimized + CAN/UART Monitor Implemented)
 
 ---
 
@@ -11,7 +11,9 @@
 
 VilsSharpX is a dual-mode **8-bit grayscale frame visualization** application designed for automotive lighting module testing. It seamlessly switches between **live Ethernet AVTP capture** and **file-based playback** (PGM, AVI, PCAP, Scene, Sequence), displaying frame comparison (LVDS vs AVTP) with real-time diff rendering and performance metrics.
 
-**Key Achievement**: Recent UI redesign spatially separates concerns (60% left pane for main video + controls, 40% right pane for monitoring), improving ergonomics and enabling future CAN/UART integration.
+**Key Achievement**: The UI redesign spatially separates concerns (60% left pane for main video + controls, 40% right pane for monitoring). The CAN/UART area is now an implemented diagnostic monitor with live capture, RawCan view, filters, counters, and detail popup support.
+
+**Current Diagnostic Baseline**: The AURIX path uses ASCLIN9/P20.7 with DMA ch0 to sniff the diagnostic bus as UART over CAN transceivers. Current Osram parsing handles `[0x80][0xA5][HCTRL][HADR] + data + CRC16` frames and forwards protocol v2 records to the PC over ethertype `0x88B5`, magic `0x4344`.
 
 ---
 
@@ -215,10 +217,13 @@ VilsSharpX is a dual-mode **8-bit grayscale frame visualization** application de
 
 **Two Monitoring Panels**:
 
-1. **CAN/UART Communication** (Top, spans ~50% of right pane height):
-   - Placeholder ListView with columns: Time, Nr, Name, Address, R/W, Value
-   - Status text: "Visual area prepared for CAN/UART monitoring. Functional implementation will be added later."
-   - Future: Integrate CANdb++, UART HW module data
+1. **CAN/UART Monitor** (Top, spans ~50% of right pane height):
+   - Monitor tab: paginated diagnostic table with Time, Nr, Name, Address, MemoryType, Device, R/W, Value, Error
+   - RawCan tab: scrollable raw diagnostic text for UART diagnostic payloads and raw CAN frames
+   - UartTransaction tab: reserved for a richer transaction-level view
+   - Filters: order, direction, device, R/W, status, clear
+   - Record/Stop buttons send `DIAG_SNIFF` start/stop commands to AURIX
+   - Double-click opens `CanDetailWindow` with timing, identity, CRC, raw payload, and decoded register data
 
 2. **AVTP Status** (Bottom, remaining height):
    - `LblStatus`: Main status text (ready/no signal/loading)
@@ -520,11 +525,11 @@ Ethernet → Receiver (DUT, test bench)
 
 ## 9. Improvement Opportunities
 
-⚠️ **CAN/UART Monitor** (Placeholder)  
+⚠️ **Nichia CAN/UART Protocol Variant**
 
-- Currently: Empty ListView template
-- Next: Integrate CAN database decoder, UART HW module interface
-- Impact: Enable real-time system diagnostics alongside video
+- Current: Osram-style diagnostic UART parser and protocol v2 monitor are implemented
+- Next: implement the Nichia diagnostic protocol variant without breaking the Osram path
+- Impact: enable real diagnostic observability for both supported LSM families
 
 ⚠️ **PGM Loader** (Fragile)  
 
@@ -565,7 +570,7 @@ Ethernet → Receiver (DUT, test bench)
 
 ### Short Term (1–2 weeks)
 
-1. **Document CAN/UART Integration**: Define API/interface for future HW modules
+1. **Document Nichia CAN/UART Protocol**: Capture frame format, sync bytes, timing fields, CRC, and mapping rules before implementation
 2. **Enhance Error Handling**: Add try-catch blocks in DiffRenderer, RvfReassembler
 3. **Performance Profiling**: Measure CPU/memory under sustained 100fps load
 
@@ -577,7 +582,7 @@ Ethernet → Receiver (DUT, test bench)
 
 ### Long Term (3–6 months)
 
-1. **CAN/UART Implementation**: Full monitor integration with CANdb++
+1. **CAN/UART Expansion**: Add Nichia protocol support, export/recording, and richer transaction view
 2. **Plugin Architecture**: Expose transform matrix, frame hooks for custom renderers
 3. **AVB/TSN Support**: Upgrade AVTP TX for automotive networking standards
 
@@ -593,6 +598,6 @@ The system is well-positioned for **near-term feature expansion** (CAN/UART full
 
 ---
 
-**Document Version**: 1.0  
-**Last Updated**: February 13, 2026  
-**Next Review**: Recommended Q1 2026 (post CAN/UART MVP)
+**Document Version**: 1.1
+**Last Updated**: April 30, 2026
+**Next Review**: After Nichia diagnostic UART MVP

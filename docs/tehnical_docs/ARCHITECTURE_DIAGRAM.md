@@ -38,7 +38,7 @@ graph TB
     end
 
     subgraph "UI Layer - Right Pane 40%"
-        CAN["CAN/UART Monitor<br/>Placeholder<br/>ListView<br/>Future impl"]
+        CAN["CAN/UART Monitor<br/>Monitor + RawCan tabs<br/>Filters + Detail popup<br/>Diag sniff control"]
         STATUS["AVTP Status Panel<br/>LblStatus<br/>LblDiffStats<br/>Frame info"]
     end
 
@@ -78,7 +78,7 @@ graph TB
     CTRL -->|"Src/Dst MAC<br/>VLAN ID"| TX
     CTRL -->|"NIC select"| NIC
     
-    FRAME -->|"display data"| CAN
+    ETH -->|"diag packets<br/>ethertype 0x88B5<br/>magic 0x4344"| CAN
     FRAME -->|"stats + frame<br/>info"| STATUS
     
     FRAME -->|"save frame"| SNAP
@@ -148,8 +148,22 @@ UI Controls (MAC/VLAN/EtherType inputs)
   → Ethernet NIC (transmit frames)
 ```
 
+### 4. CAN/UART Diagnostic Path
+
+```text
+PC button Record/Stop
+  -> DiagSniffCommand (0x88B5, magic 0x434D, cmd 0x02)
+  -> AURIX ASCLIN9/P20.7 sniffer
+  -> diag_uart_try_receive()
+  -> can_diag_bridge_uart_frame()
+  -> Ethernet diagnostic packet (0x88B5, magic 0x4344)
+  -> LsmCanDiagCapture / LsmCanDiagParser
+  -> LsmCanDiagStore
+  -> Monitor / RawCan / Detail popup
+```
+
 ---
 
-**Diagram Version**: 1.0  
-**Generated**: February 13, 2026  
+**Diagram Version**: 1.1
+**Last Updated**: April 30, 2026
 **Project**: VilsSharpX (WPF .NET 8)

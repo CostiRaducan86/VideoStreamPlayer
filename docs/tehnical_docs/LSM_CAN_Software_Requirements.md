@@ -1,6 +1,6 @@
 # LSM CAN Software Requirements
 
-> **Status**: Milestone 1 **COMPLETE** (2026-04-03). All M1-scope requirements implemented and validated.
+> **Status**: Milestone 1 complete. Milestone 2 Osram real diagnostic UART path implemented. Nichia diagnostic protocol pending.
 
 ## 1. Module responsibilities
 
@@ -14,7 +14,7 @@ Firmware-side diagnostic capture and packetisation shall be isolated from image 
 
 Firmware shall provide a dedicated diagnostic record producer API that emits normalized records (device, op, address, value, crc, timing, status).
 
-> **Implementation**: `can_diag_push_record()` accepts a `CanDiagRecord` with all required fields. Synthetic producer (`can_diag_synthetic_cyclic`) demonstrates the API.
+> **Implementation**: `can_diag_push_record()` accepts a `CanDiagRecord` with all required fields. Current real-frame path uses `diag_uart_try_receive()` and `can_diag_bridge_uart_frame()` to produce normalized records from Osram diagnostic UART traffic.
 
 ### SWR-003 ✅ IMPLEMENTED
 

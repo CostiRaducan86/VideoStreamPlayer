@@ -1,106 +1,81 @@
-# DMA Dual-Buffer Design — Aurix TC397
+# DMA Dual-Buffer Design - Aurix TC397
+
+**Last updated:** 2026-04-30
 
 ## Overview
 
 Two independent DMA ping-pong pipelines run in parallel on TC397:
 
 | Channel | ASCLIN | Pin | DMA Ch | ISR Prio | Buffer | Baudrate | Purpose |
-|---------|--------|-----|--------|----------|--------|----------|---------|
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| LVDS | ASCLIN1 | P14.8 | 1 | 14 | 2 x 2560 B | 20M/12.5M | Pixel frames |
+| Diagnostic | ASCLIN9 | P20.7 | 0 | 13 | 2 x 2560 B | 2M 8O2 | Osram diagnostic UART |
 
-| LVDS | ASCLIN1 | P14.8 | 1 | 14 | 2×2560B | 20M/12.5M | Pixel frames |
-| Diag | ASCLIN9 | P20.7 | 0 | 13 | 2×2560B | 1M 8O2 | ECU↔LSM register R/W |
+The diagnostic path uses CAN transceivers as a differential PHY, but the bytes are handled as UART.
 
----
-
-## Architecture
-
-### LVDS Pixel Pipeline (asclin1_dma)
+## LVDS Pixel Pipeline
 
 ```text
 ASCLIN1 RX (P14.8, X103 pin 7)
-    ↓ (DMA ch 1, zero-copy)
-Buffer A (2560B) ←→ Buffer B (2560B)   [ping-pong]
-    ↓ (ISR prio 14: atomic swap)
-Main loop: asclin1_dma_get_completed_buffer()
-    ↓
-osram_frame / rxmon parser
-    ↓
-frame_eth TX (0x4F53 / 0x4E49)
+  -> DMA ch1
+  -> Buffer A / Buffer B ping-pong
+  -> ISR priority 14
+  -> main loop drains completed buffers
+  -> osram_frame / rxmon parser
+  -> frame_eth TX (0x4F53 / 0x4E49)
 ```
 
-### Diagnostic UART Pipeline (can_hw / diag_uart)
+## Diagnostic UART Pipeline
 
 ```text
 ASCLIN9 RX (P20.7, via TLE9251V)
-    ↓ (DMA ch 0, zero-copy)
-Buffer A (2560B) ←→ Buffer B (2560B)   [ping-pong]
-    ↓ (ISR prio 13: atomic swap)
-Main loop: diag_uart_tick() → diag_uart_try_receive()
-    ↓
-can_diag_enqueue() → frame_eth TX (0x4344)
+  -> DMA ch0
+  -> Buffer A / Buffer B ping-pong
+  -> ISR priority 13
+  -> diag_uart_poll_idle()
+  -> diag_uart_tick()
+  -> diag_uart_try_receive()
+  -> can_diag_bridge_uart_frame()
+  -> frame_eth TX (0x4344)
 ```
 
----
+`diag_uart_try_receive()` is currently implemented for the Osram diagnostic UART frame format:
+
+```text
+[0x80][0xA5][HCTRL][HADR] + data + CRC16
+```
+
+The next parser extension is Nichia.
 
 ## Key Design Decisions
 
-1. **Separate DMA channels** — no contention, independent ISR priorities
-2. **2560B buffers** — ~10 LVDS lines or ~36 diagnostic frames per fill
-3. **No locks** — ISR atomically swaps pointer; consumer always reads completed buffer
-4. **Pin reassignment** — LVDS moved from P14.7 (ASCLIN9) to P14.8 (ASCLIN1) to free ASCLIN9 for diagnostic
-
-### Latency (single byte → parser)
-
-- **Old:** 0-4 KB polling interval (~2.5 ms)
-- **New:** 0-2.56 KB DMA interval (~1.6 ms) + ISR overhead ~20 µs
-- **Improvement:** ~40-50% lower max latency; more consistent
-
-### Jitter (frame arrival time)
-
-- **Old:** Polling jitter ±1 polling interval
-- **New:** DMA ISR jitter ~±scheduling delay (typically <100 µs on TriCore)
-
----
-
-## Next Steps (Step 2: Ethernet Protocol)
-
-Once Step 1 (DMA validation) is confirmed:
-
-1. **Define cooked frame protocol** (host ← firmware over Ethernet):
-   - Wrapper: frame number, timestamp, status flags, CRC
-   - Payload: 5120 bytes (20 raw lines) or full frame (16,640 bytes)
-
-2. **Implement Ethernet TX** (firmware):
-   - Timer: every N DMA completions (e.g., every 4 = 10 Nichia frames)
-   - UDP/custom packet over Ethernet
-
-3. **Host-side (C# app):**
-   - Listen on Ethernet port
-   - Reconstruct frames from firmware stream
-   - Display in UI (A pane + stats)
-
----
+1. Separate DMA channels avoid contention between LVDS and diagnostics.
+2. 2560-byte buffers keep ISR frequency low while allowing bounded main-loop draining.
+3. Diagnostic parsing is gated by `g_diagSniffEnabled`.
+4. The parser emits at most one diagnostic frame per main-loop iteration to keep work bounded.
+5. Diagnostic Ethernet TX is burst-limited to avoid starving LVDS frame TX.
+6. LVDS was moved from the old ASCLIN9 path to ASCLIN1/P14.8 so ASCLIN9 can be dedicated to diagnostics.
 
 ## Validation Checklist
 
-- [ ] **Build:** `dotnet build` passes without errors
-- [ ] **Flash:** UF2 or picotool upload successful
-- [ ] **Runtime:** `g_rxmon.framesOk` increments (via debugger Watch)
-- [ ] **Timing:** Measure `g_asclin9_dma.completionCount` vs. expected (12.5M bits / 20.8 ms frame ≈ 48 frames)
-- [ ] **CPU Load:** HTM/trace to confirm ~8-12% CPU utilization
-- [ ] **Frame Quality:** Verify no CRC errors (`g_rxmon.framesCrcBad == 0`)
-- [ ] **Diagnostics:** Check `timeoutWarnings == 0` (no consumer lag)
+- [ ] ADS/TASKING firmware build succeeds.
+- [ ] LVDS frame counters increment.
+- [ ] Diagnostic `dmaCompletions` increments while sniffing.
+- [ ] Diagnostic `framesDecoded` increments for valid Osram traffic.
+- [ ] `uartFramesBridged` increments in `g_canDiagStats`.
+- [ ] PC Monitor/RawCan receives diagnostic records with no sustained parser errors.
+- [ ] LVDS/TFT output remains stable while diagnostic sniffing is active.
 
----
+## Next Steps
+
+1. Document Nichia diagnostic UART frame format.
+2. Add a Nichia parser path behind the existing normalized record boundary.
+3. Revalidate coexistence with LVDS under sustained diagnostic traffic.
+4. Add PC-side monitor export/recording after the protocol path is stable.
 
 ## References
 
-- **Aurix TC397 RM:** DMA chapter → IfxDma configuration
-- **iLLD Dma Module:** `IfxDma_Dma.h`, `IfxDma_DmaChannel.h`
-- **ASCLIN RX protocol:** ASCLIN chapter → peripheral request signals, RX FIFO
-
----
-
-**Implementation Date:** 2026-03-02  
-**Module Author:** AI Copilot (TriCore DMA specialist)  
-**Status:** Code-complete awaiting build & hardware validation
+- Aurix TC397 Reference Manual: DMA and ASCLIN chapters.
+- iLLD DMA and ASCLIN modules.
+- `can_hw.c` for the current diagnostic UART parser and timing implementation.
+- `frame_eth.c` for diagnostic Ethernet command and TX integration.

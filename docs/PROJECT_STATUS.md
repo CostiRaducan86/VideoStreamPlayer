@@ -1,8 +1,43 @@
-# VilsSharpX – Comprehensive Project Status (Last Updated: 2026-01-16)
+# VilsSharpX - Comprehensive Project Status (Last Updated: 2026-04-30)
 
 **Read this file first after any VS Code restart or session interruption.**
 
 ---
+
+## 0. Current Baseline (2026-04-30)
+
+This section is the current source of truth for session recovery. Some older sections below are kept for historical context and may describe earlier milestones.
+
+### Application Baseline
+
+- The WPF application builds cleanly on .NET 8 with `dotnet build .\VilsSharpX.csproj` (last confirmed after analyzer cleanup: 0 warnings, 0 errors).
+- The IDE Problems panel was cleaned across the C# codebase by applying analyzer-safe refactors only: collection expressions, primary constructors, `ThrowIf*`, `StringComparison`, generated regexes, range syntax, static helpers, and readonly fields.
+- Runtime behavior was manually revalidated after each analyzer-fix batch; no functional regression was observed by the maintainer.
+- `MainWindow.xaml.cs` remains the main orchestrator, but several supporting classes are now cleaner and easier to extract from later.
+
+### Implemented Data Paths
+
+- AVTP/RVF live capture and PCAP replay are implemented through SharpPcap, `AvtpRvfParser`, and `RvfReassembler`.
+- Scene, sequence, PGM/BMP, and uncompressed AVI playback are implemented as file sources.
+- A/B/D rendering, diff calculation, dark-pixel reporting/compensation, snapshots, AVI recording, and AVTP TX remain active functionality.
+- The CAN/UART monitor is no longer just a placeholder: Monitor, RawCan, filters, paging, detail popup, capture counters, and start/stop sniff commands are implemented.
+
+### AURIX / Diagnostic UART Baseline
+
+- The current embedded platform is AURIX TC397. Pico/RP2040 is no longer the active hardware direction.
+- LVDS pixel capture runs on ASCLIN1/P14.8 with DMA channel 1.
+- Diagnostic "CAN" traffic is treated as UART through CAN transceivers used as differential PHY only; MCMCAN is not used for this path.
+- Current Osram diagnostic sniffing code uses ASCLIN9/P20.7, DMA channel 0, 2 Mbaud, 8 data bits, odd parity, 2 stop bits.
+- `diag_uart_try_receive()` currently parses Osram-style frames with `[0x80][0xA5][HCTRL][HADR] + data + CRC16`, estimates response delay, measures inter-frame gaps through DMA-position polling, and produces `DiagUartFrame`.
+- `can_diag_bridge_uart_frame()` converts parsed UART frames into protocol v2 `CanDiagRecord` values; `frame_eth_send_can_diag_pending()` forwards them over Ethernet with magic `0x4344` and ethertype `0x88B5`.
+- Diagnostic sniffing is controlled from the PC app using the `DIAG_SNIFF` command (`DiagSniffCommand.cs`, magic `0x434D`, command `0x02`).
+
+### Known Gaps / Next Work
+
+- Nichia diagnostic UART support is not implemented yet. It should be treated as a new protocol variant, not as a small tweak to the Osram parser.
+- The `UartTransaction` tab is still a placeholder.
+- CAN/UART monitor export/recording is still pending.
+- Some older documents still mention synthetic-only M1 or 1 Mbaud; the updated LSM/AURIX docs should be preferred for current implementation details.
 
 ## 1. Project Overview & Mission
 
@@ -91,7 +126,7 @@ The application follows a layered, manager-based architecture:
 │ UI LAYER (WPF)                                             │
 │  • MainWindow.xaml – Grid layout (60% left / 40% right)    │
 │  • 3 panes: Cadran A (AVTP), Cadran B (LVDS), Cadran D (DIFF)│
-│  • Right panels: CAN/UART monitor (placeholder), AVTP Status│
+│  • Right panels: CAN/UART monitor, AVTP Status              │
 │  • UiSettingsManager – persist settings to AppData        │
 └─────────────────────────────────────────────────────────────┘
                           ↓
@@ -166,16 +201,17 @@ The application follows a layered, manager-based architecture:
 
 **Result:** Clean visual separation, no overlap, proper alignment
 
-### 4.2 CAN/UART Communication Panel (Right-Top)
+### 4.2 CAN/UART Monitor Panel (Right-Top)
 
-**Purpose:** Placeholder for future CAN/UART message monitoring
+**Purpose:** Live diagnostic monitor for LSM CAN/UART records.
 
 **Implementation:**
 
-- GroupBox with ListView (currently empty)
-- Text translated to English: "CAN/UART Communication"
-- Column headers: "Timestamp", "Message Type", "ID", "Data"
-- Prepared for future population with CAN/UART frames
+- Monitor tab with paginated decoded records and filters
+- RawCan tab with scrollable raw diagnostic payloads
+- UartTransaction tab reserved for the next detailed transaction view
+- Record/Stop buttons controlling AURIX diagnostic sniffing via `DiagSniffCommand`
+- Double-click detail popup (`CanDetailWindow`) with classic VILS fields
 
 ### 4.3 AVTP Status Panel (Right-Bottom)
 
@@ -636,8 +672,8 @@ delayMs2 = 200
 
 - **`asclin1_dma.h/.c`** – LVDS pixel DMA (ASCLIN1, P14.8, DMA ch1)
 - **`lvds_frame_mode.h`** – LvdsFrameMode enum (8N1/8O1)
-- **`can_hw.h/.c`** – diagnostic UART sniffer (ASCLIN9, P20.7, DMA ch0, 1M 8O2)
-- **`can_diag.h/.c`** – protocol v2, ring queue, synthetic producer
+- **`can_hw.h/.c`** – diagnostic UART sniffer (ASCLIN9, P20.7, DMA ch0, current Osram config 2M 8O2) with idle-gap timing and Osram frame parser
+- **`can_diag.h/.c`** – protocol v2, ring queue, UART frame bridge
 - **`frame_eth.h/.c`** – pixel + diagnostic Ethernet TX
 - **`device_mode.c`** – ASCLIN1 reconfiguration, parser selection
 - **`Cpu0_Main.c`** – dual DMA drain + parsers + diag bridge in main loop
@@ -858,8 +894,8 @@ Three GUI views matching classic VILS layout:
 | --- | --- |
 | `Aurix_Firmware/frame_eth.h` | Added `FE_DIAG_PAYLOAD_FIXED=22`, `FE_DIAG_PAYLOAD_LEN=94` |
 | `Aurix_Firmware/frame_eth.c` | Added `send_can_diag_record()`, queue drain function |
-| `Aurix_Firmware/device_mode.c` | Calls `can_diag_synthetic_cyclic()` during active mode |
-| `Aurix_Firmware/Cpu0_Main.c` | Queue drain after frame transport in main loop |
+| `Aurix_Firmware/device_mode.c` | Initializes diagnostic queue/sniffer and resets state on mode changes |
+| `Aurix_Firmware/Cpu0_Main.c` | Polls diagnostic UART, parses frames, bridges records, and drains diagnostic Ethernet queue |
 | `MainWindow.xaml` | Tab buttons, Monitor ListView, RawCan panel, filters/paging |
 | `MainWindow.xaml.cs` | Tab switching, RawCan feed, detail popup, register decode |
 
