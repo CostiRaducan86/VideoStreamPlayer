@@ -27,6 +27,7 @@ static const uint8 s_dstMac[6] = { 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF };  /* bro
 
 /* ==================== GETH handle & buffers ==================== */
 static IfxGeth_Eth s_geth;
+static IfxGeth_Eth_TxChannelConfig s_txChannelConfig;
 
 IFX_ALIGN(32) static uint8 s_txBuf[FE_TX_DESCRIPTORS * FE_TX_BUF_SIZE];
 IFX_ALIGN(32) static uint8 s_rxBuf[FE_RX_DESCRIPTORS * FE_RX_BUF_SIZE];
@@ -62,6 +63,31 @@ static uint16           s_diagSeq    = 0;
 
 /* ==================== Telemetry ==================== */
 FeStats g_feStats;
+
+#define FE_TX_COMPLETE_TIMEOUT_LOOPS 20000u
+#define FE_TX_RECOVERY_INTERVAL_MS   100u
+
+#define PHY_BMSR_LINK_STATUS         0x0004u
+#define PHY_BMSR_AUTONEG_COMPLETE    0x0020u
+#define PHY_AN_10_HALF               0x0020u
+#define PHY_AN_10_FULL               0x0040u
+#define PHY_AN_100_HALF              0x0080u
+#define PHY_AN_100_FULL              0x0100u
+#define PHY_GB_CTRL_1000_HALF        0x0100u
+#define PHY_GB_CTRL_1000_FULL        0x0200u
+#define PHY_GB_STAT_LP_1000_HALF     0x0400u
+#define PHY_GB_STAT_LP_1000_FULL     0x0800u
+
+/* PHY link tracking.
+ * In debugger runs the PHY link is usually already settled by the time CPU0
+ * reaches the main loop. In standalone boot the firmware can start much
+ * earlier, so TX must wait until runtime MDIO polling confirms link-up. */
+static uint8  s_phyFound        = 0u;
+static uint8  s_phyAddrRuntime  = 0u;
+static uint32 s_lastLinkPollStm = 0u;
+static uint32 s_lastTxRecoveryStm = 0u;
+static uint32 s_lastLinkUp = 0u;
+static uint8  s_macSynced = 0u;
 
 /* ==================== RGMII pin configuration ==================== */
 /*
@@ -109,6 +135,220 @@ static void put_be32(uint8 *dst, uint32 val)
     dst[3] = (uint8)(val);
 }
 
+static void frame_eth_snapshot_tx_dma(void)
+{
+    volatile IfxGeth_TxDescr *descr;
+
+    if (s_geth.gethSFR == NULL_PTR)
+        return;
+
+    g_feStats.txDmaStatus = s_geth.gethSFR->DMA_CH[IfxGeth_DmaChannel_0].STATUS.U;
+    descr = IfxGeth_Eth_getActualTxDescriptor(&s_geth, IfxGeth_TxDmaChannel_0);
+    if (descr != NULL_PTR)
+        g_feStats.txDescOwn = descr->TDES3.R.OWN;
+}
+
+static void frame_eth_recover_tx_ring(boolean force)
+{
+    uint32 now = (uint32)IfxStm_getLower(&MODULE_STM0);
+    uint32 minInterval = (uint32)IfxStm_getTicksFromMilliseconds(&MODULE_STM0,
+                                                                 FE_TX_RECOVERY_INTERVAL_MS);
+    uint32 i;
+
+    if (s_txChannelConfig.txDescrList == NULL_PTR || s_geth.gethSFR == NULL_PTR)
+        return;
+
+    if (!force && (uint32)(now - s_lastTxRecoveryStm) < minInterval)
+        return;
+
+    s_lastTxRecoveryStm = now;
+    frame_eth_snapshot_tx_dma();
+
+    IfxGeth_Eth_stopTransmitters(&s_geth, 1u);
+
+    /* iLLD initTransmitDescriptors does not clear TDES3 on a reused ring.
+     * Clear it first so stale OWN/IOC/FD/LD bits cannot survive recovery.
+     */
+    for (i = 0u; i < FE_TX_DESCRIPTORS; i++)
+    {
+        s_txChannelConfig.txDescrList->descr[i].TDES3.U = 0u;
+    }
+
+    IfxGeth_Eth_initTransmitDescriptors(&s_geth, &s_txChannelConfig);
+    IfxGeth_dma_clearInterruptFlag(s_geth.gethSFR, IfxGeth_DmaChannel_0,
+                                   IfxGeth_DmaInterruptFlag_transmitInterrupt);
+    IfxGeth_dma_clearInterruptFlag(s_geth.gethSFR, IfxGeth_DmaChannel_0,
+                                   IfxGeth_DmaInterruptFlag_transmitStopped);
+    IfxGeth_dma_clearInterruptFlag(s_geth.gethSFR, IfxGeth_DmaChannel_0,
+                                   IfxGeth_DmaInterruptFlag_transmitBufferUnavailable);
+
+    IfxGeth_Eth_startTransmitters(&s_geth, 1u);
+    IfxGeth_Eth_wakeupTransmitter(&s_geth, IfxGeth_TxDmaChannel_0);
+    g_feStats.txRecoveries++;
+    g_feStats.txWakeups++;
+    frame_eth_snapshot_tx_dma();
+}
+
+static boolean frame_eth_sync_mac_with_phy(void)
+{
+    uint32 bmsr = 0u;
+    uint32 anar = 0u;
+    uint32 anlpar = 0u;
+    uint32 gbCtrl = 0u;
+    uint32 gbStatus = 0u;
+    uint32 common10_100;
+    IfxGeth_LineSpeed speed = IfxGeth_LineSpeed_1000Mbps;
+    IfxGeth_DuplexMode duplex = IfxGeth_DuplexMode_fullDuplex;
+    uint32 speedMbps = 1000u;
+    uint32 duplexFull = 1u;
+
+    if (s_phyFound == 0u || s_geth.gethSFR == NULL_PTR)
+        return FALSE;
+
+    IfxGeth_phy_Clause22_readMDIORegister(s_phyAddrRuntime, 1u, &bmsr);
+    IfxGeth_phy_Clause22_readMDIORegister(s_phyAddrRuntime, 1u, &bmsr);
+    IfxGeth_phy_Clause22_readMDIORegister(s_phyAddrRuntime, 4u, &anar);
+    IfxGeth_phy_Clause22_readMDIORegister(s_phyAddrRuntime, 5u, &anlpar);
+    IfxGeth_phy_Clause22_readMDIORegister(s_phyAddrRuntime, 9u, &gbCtrl);
+    IfxGeth_phy_Clause22_readMDIORegister(s_phyAddrRuntime, 10u, &gbStatus);
+
+    g_feStats.phyBmsr = bmsr;
+    g_feStats.phyAnar = anar;
+    g_feStats.phyAnlpar = anlpar;
+    g_feStats.phyGbCtrl = gbCtrl;
+    g_feStats.phyGbStatus = gbStatus;
+
+    if ((bmsr & PHY_BMSR_LINK_STATUS) == 0u)
+        return FALSE;
+
+    if ((bmsr & PHY_BMSR_AUTONEG_COMPLETE) == 0u)
+        return FALSE;
+
+    common10_100 = anar & anlpar;
+
+    if (((gbCtrl & PHY_GB_CTRL_1000_FULL) != 0u)
+        && ((gbStatus & PHY_GB_STAT_LP_1000_FULL) != 0u))
+    {
+        speed = IfxGeth_LineSpeed_1000Mbps;
+        duplex = IfxGeth_DuplexMode_fullDuplex;
+        speedMbps = 1000u;
+        duplexFull = 1u;
+    }
+    else if (((gbCtrl & PHY_GB_CTRL_1000_HALF) != 0u)
+             && ((gbStatus & PHY_GB_STAT_LP_1000_HALF) != 0u))
+    {
+        speed = IfxGeth_LineSpeed_1000Mbps;
+        duplex = IfxGeth_DuplexMode_halfDuplex;
+        speedMbps = 1000u;
+        duplexFull = 0u;
+    }
+    else if ((common10_100 & PHY_AN_100_FULL) != 0u)
+    {
+        speed = IfxGeth_LineSpeed_100Mbps;
+        duplex = IfxGeth_DuplexMode_fullDuplex;
+        speedMbps = 100u;
+        duplexFull = 1u;
+    }
+    else if ((common10_100 & PHY_AN_100_HALF) != 0u)
+    {
+        speed = IfxGeth_LineSpeed_100Mbps;
+        duplex = IfxGeth_DuplexMode_halfDuplex;
+        speedMbps = 100u;
+        duplexFull = 0u;
+    }
+    else if ((common10_100 & PHY_AN_10_FULL) != 0u)
+    {
+        speed = IfxGeth_LineSpeed_10Mbps;
+        duplex = IfxGeth_DuplexMode_fullDuplex;
+        speedMbps = 10u;
+        duplexFull = 1u;
+    }
+    else if ((common10_100 & PHY_AN_10_HALF) != 0u)
+    {
+        speed = IfxGeth_LineSpeed_10Mbps;
+        duplex = IfxGeth_DuplexMode_halfDuplex;
+        speedMbps = 10u;
+        duplexFull = 0u;
+    }
+    else
+    {
+        return FALSE;
+    }
+
+    IfxGeth_mac_setLineSpeed(s_geth.gethSFR, speed);
+    IfxGeth_mac_setDuplexMode(s_geth.gethSFR, duplex);
+
+    s_macSynced = 1u;
+    g_feStats.macSynced = 1u;
+    g_feStats.phyLineSpeedMbps = speedMbps;
+    g_feStats.phyDuplexFull = duplexFull;
+    g_feStats.macCfg = s_geth.gethSFR->MAC_CONFIGURATION.U;
+
+    return TRUE;
+}
+
+static void frame_eth_update_link_status(boolean force)
+{
+    uint32 status = 0u;
+    uint32 newLink;
+
+    if (s_phyFound == 0u)
+    {
+        g_feStats.linkUp = 0u;
+        s_lastLinkUp = 0u;
+        s_macSynced = 0u;
+        g_feStats.macSynced = 0u;
+        return;
+    }
+
+    if (!force)
+    {
+        uint32 now      = (uint32)IfxStm_getLower(&MODULE_STM0);
+        uint32 interval = (uint32)IfxStm_getTicksFromMilliseconds(&MODULE_STM0, 100u);
+
+        if ((uint32)(now - s_lastLinkPollStm) < interval)
+            return;
+
+        s_lastLinkPollStm = now;
+    }
+    else
+    {
+        s_lastLinkPollStm = (uint32)IfxStm_getLower(&MODULE_STM0);
+    }
+
+    /* Read BMSR twice; latch-low bits are cleared by the first read. */
+    IfxGeth_phy_Clause22_readMDIORegister(s_phyAddrRuntime, 1u, &status);
+    IfxGeth_phy_Clause22_readMDIORegister(s_phyAddrRuntime, 1u, &status);
+
+    g_feStats.phyBmsr = status;
+
+    newLink = ((status & PHY_BMSR_LINK_STATUS) != 0u) ? 1u : 0u;
+    g_feStats.linkUp = newLink;
+
+    if (newLink != s_lastLinkUp)
+    {
+        g_feStats.linkTransitions++;
+        s_lastLinkUp = newLink;
+
+        if (newLink != 0u)
+        {
+            if (frame_eth_sync_mac_with_phy())
+                frame_eth_recover_tx_ring(TRUE);
+        }
+        else
+        {
+            s_macSynced = 0u;
+            g_feStats.macSynced = 0u;
+        }
+    }
+
+    if (newLink != 0u && s_macSynced == 0u)
+    {
+        if (frame_eth_sync_mac_with_phy())
+            frame_eth_recover_tx_ring(TRUE);
+    }
+}
+
 /* ==================== Update device parameters ==================== */
 
 static void apply_device_params(FrameEthDevice device)
@@ -145,6 +385,12 @@ void frame_eth_init(FrameEthDevice device)
 
     /* Clear stats */
     memset((void *)&g_feStats, 0, sizeof(g_feStats));
+    s_phyFound        = 0u;
+    s_phyAddrRuntime  = 0u;
+    s_lastLinkPollStm = 0u;
+    s_lastTxRecoveryStm = 0u;
+    s_lastLinkUp = 0u;
+    s_macSynced = 0u;
     g_feStats.initStep = 1;
 
     /* Default config */
@@ -183,11 +429,14 @@ void frame_eth_init(FrameEthDevice device)
     {
         IfxGeth_Index gethInst = IfxGeth_getIndex(&MODULE_GETH);
 
-        config.dma.txChannel[0].channelEnable        = TRUE;
-        config.dma.txChannel[0].channelId             = IfxGeth_TxDmaChannel_0;
-        config.dma.txChannel[0].txDescrList           = &IfxGeth_Eth_txDescrList[gethInst][0];
-        config.dma.txChannel[0].txBuffer1StartAddress = (uint32 *)&s_txBuf[0];
-        config.dma.txChannel[0].txBuffer1Size         = FE_TX_BUF_SIZE;
+        memset(&s_txChannelConfig, 0, sizeof(s_txChannelConfig));
+        s_txChannelConfig.channelEnable        = TRUE;
+        s_txChannelConfig.channelId             = IfxGeth_TxDmaChannel_0;
+        s_txChannelConfig.txDescrList           = &IfxGeth_Eth_txDescrList[gethInst][0];
+        s_txChannelConfig.txBuffer1StartAddress = (uint32 *)&s_txBuf[0];
+        s_txChannelConfig.txBuffer1Size         = FE_TX_BUF_SIZE;
+
+        config.dma.txChannel[0] = s_txChannelConfig;
 
         config.dma.rxChannel[0].channelEnable        = TRUE;
         config.dma.rxChannel[0].channelId             = IfxGeth_RxDmaChannel_0;
@@ -264,6 +513,9 @@ void frame_eth_init(FrameEthDevice device)
 
         if (found)
         {
+            s_phyFound       = 1u;
+            s_phyAddrRuntime = phyAddr;
+
             /* Reset PHY (bit 15) */
             IfxGeth_Phy_Clause22_writeMDIORegister(phyAddr, 0u, 0x8000u);
             g_feStats.initStep = 51;
@@ -302,17 +554,12 @@ void frame_eth_init(FrameEthDevice device)
 
             /* Poll link status (reg 1, bit 2) — read twice per IEEE spec */
             {
-                uint32 status  = 0;
                 uint32 timeout = 2000000u;
                 do
                 {
-                    IfxGeth_phy_Clause22_readMDIORegister(phyAddr, 1u, &status);
-                    IfxGeth_phy_Clause22_readMDIORegister(phyAddr, 1u, &status);
-                    if ((status & 0x0004u) != 0u)
-                    {
-                        g_feStats.linkUp = 1u;
+                    frame_eth_update_link_status(TRUE);
+                    if (g_feStats.linkUp != 0u)
                         break;
-                    }
                 } while (--timeout);
             }
             g_feStats.initStep = 55;
@@ -466,6 +713,10 @@ static boolean send_fragment(const uint8 *framePixels, uint16 frameSeq,
     uint32 ethPayload = FE_HDR_LEN + dataLen;
     uint32 ethTotal   = 14u + ethPayload;
 
+    frame_eth_update_link_status(FALSE);
+    if (g_feStats.linkUp == 0u || s_macSynced == 0u)
+        return FALSE;
+
     /* Minimum Ethernet frame = 60 bytes (excl. FCS) */
     if (ethTotal < 60u) ethTotal = 60u;
 
@@ -473,12 +724,16 @@ static boolean send_fragment(const uint8 *framePixels, uint16 frameSeq,
     uint8 *pTxBuf = (uint8 *)IfxGeth_Eth_getTransmitBuffer(&s_geth, IfxGeth_TxDmaChannel_0);
     if (pTxBuf == NULL_PTR)
     {
-        pTxBuf = (uint8 *)IfxGeth_Eth_waitTransmitBuffer(&s_geth, IfxGeth_TxDmaChannel_0);
-        if (pTxBuf == NULL_PTR)
-        {
-            g_feStats.txErrors++;
-            return FALSE;
-        }
+        /* Do not spin here. If the TX ring wedges, CPU0 must keep draining
+         * ASCLIN1/DMA so the local LVDS receiver remains alive.
+         */
+        IfxGeth_Eth_wakeupTransmitter(&s_geth, IfxGeth_TxDmaChannel_0);
+        g_feStats.txWakeups++;
+        frame_eth_snapshot_tx_dma();
+        g_feStats.txNoBuffer++;
+        g_feStats.txErrors++;
+        frame_eth_recover_tx_ring(FALSE);
+        return FALSE;
     }
 
     /* ---- Ethernet header (14 bytes) ---- */
@@ -516,13 +771,18 @@ static boolean send_fragment(const uint8 *framePixels, uint16 frameSeq,
 
     /* Wait for TX complete (polled — acceptable at ~900 pkts/sec max) */
     {
-        uint32 timeout = 100000u;
+        uint32 timeout = FE_TX_COMPLETE_TIMEOUT_LOOPS;
         while (!IfxGeth_dma_isInterruptFlagSet(s_geth.gethSFR, IfxGeth_DmaChannel_0,
                                                 IfxGeth_DmaInterruptFlag_transmitInterrupt))
         {
             if (--timeout == 0u)
             {
+                IfxGeth_Eth_wakeupTransmitter(&s_geth, IfxGeth_TxDmaChannel_0);
+                g_feStats.txWakeups++;
+                frame_eth_snapshot_tx_dma();
+                g_feStats.txTimeouts++;
                 g_feStats.txErrors++;
+                frame_eth_recover_tx_ring(FALSE);
                 return FALSE;
             }
         }
@@ -555,12 +815,13 @@ static boolean send_can_diag_record(const CanDiagRecord *record, uint16 sequence
     pTxBuf = (uint8 *)IfxGeth_Eth_getTransmitBuffer(&s_geth, IfxGeth_TxDmaChannel_0);
     if (pTxBuf == NULL_PTR)
     {
-        pTxBuf = (uint8 *)IfxGeth_Eth_waitTransmitBuffer(&s_geth, IfxGeth_TxDmaChannel_0);
-        if (pTxBuf == NULL_PTR)
-        {
-            g_feStats.diagTxErrors++;
-            return FALSE;
-        }
+        IfxGeth_Eth_wakeupTransmitter(&s_geth, IfxGeth_TxDmaChannel_0);
+        g_feStats.txWakeups++;
+        frame_eth_snapshot_tx_dma();
+        g_feStats.txNoBuffer++;
+        g_feStats.diagTxErrors++;
+        frame_eth_recover_tx_ring(FALSE);
+        return FALSE;
     }
 
     memcpy(&pTxBuf[0], s_dstMac, 6);
@@ -602,13 +863,18 @@ static boolean send_can_diag_record(const CanDiagRecord *record, uint16 sequence
     IfxGeth_Eth_sendTransmitBuffer(&s_geth, ethTotal, IfxGeth_TxDmaChannel_0);
 
     {
-        uint32 timeout = 100000u;
+        uint32 timeout = FE_TX_COMPLETE_TIMEOUT_LOOPS;
         while (!IfxGeth_dma_isInterruptFlagSet(s_geth.gethSFR, IfxGeth_DmaChannel_0,
                                                 IfxGeth_DmaInterruptFlag_transmitInterrupt))
         {
             if (--timeout == 0u)
             {
+                IfxGeth_Eth_wakeupTransmitter(&s_geth, IfxGeth_TxDmaChannel_0);
+                g_feStats.txWakeups++;
+                frame_eth_snapshot_tx_dma();
+                g_feStats.txTimeouts++;
                 g_feStats.diagTxErrors++;
+                frame_eth_recover_tx_ring(FALSE);
                 return FALSE;
             }
         }
@@ -624,6 +890,10 @@ static boolean send_can_diag_record(const CanDiagRecord *record, uint16 sequence
 boolean frame_eth_send_pending(void)
 {
     if (!s_frameReady)
+        return FALSE;
+
+    frame_eth_update_link_status(FALSE);
+    if (g_feStats.linkUp == 0u || s_macSynced == 0u)
         return FALSE;
 
     s_frameReady = FALSE;
@@ -665,6 +935,10 @@ boolean frame_eth_send_can_diag_pending(void)
     boolean sent = FALSE;
     uint8 burst = 0u;
 
+    frame_eth_update_link_status(FALSE);
+    if (g_feStats.linkUp == 0u || s_macSynced == 0u)
+        return FALSE;
+
     /* Send at most 2 diagnostic records per call.  The previous
      * burst of 8 caused GETH TX channel contention that delayed
      * LVDS frame fragment sending → visible flicker on pane B.
@@ -686,6 +960,8 @@ boolean frame_eth_send_can_diag_pending(void)
 
 void frame_eth_poll_rx(void)
 {
+    frame_eth_update_link_status(FALSE);
+
     /* Drain ALL available RX buffers.  Every buffer MUST be freed even if the
      * frame is not for us, otherwise the 8-deep descriptor ring fills up and
      * the DMA enters an abnormal state (bus error trap). */

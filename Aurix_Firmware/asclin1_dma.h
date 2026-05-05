@@ -19,13 +19,16 @@
  * Dual buffer sizing:
  * - Osram frame  = 326 bytes/line × 80 lines = 25600 px (plus headers/CRC)
  * - Nichia frame = 260 bytes/line × 64 lines = 16384 px
- * - BUFFER_SIZE = 2560 bytes ≈ 10 Nichia lines → balances ISR rate vs latency
+ * - BUFFER_SIZE = 8192 bytes, giving several milliseconds of slack while
+ *   Ethernet TX bursts are in progress.
  */
 
 /* ==================== Configuration ==================== */
 
-/** DMA buffer size (bytes per ping-pong buffer). */
-#define ASCLIN1_DMA_BUFFER_SIZE   (2560u)
+/** DMA buffer size (bytes per ping-pong buffer).
+ * 8192 B gives several milliseconds of slack while Ethernet TX bursts run.
+ */
+#define ASCLIN1_DMA_BUFFER_SIZE   (8192u)
 
 /** DMA ISR priority for LVDS channel completion. */
 #define ASCLIN1_DMA_ISR_PRIO      (14u)
@@ -54,6 +57,23 @@ typedef struct
     volatile uint32  completionCount;   /**< Total DMA buffer completions */
     volatile uint32  missedBuffers;     /**< Overwritten before consumer read */
     uint32           timeoutWarnings;   /**< Consumer-lag warnings */
+
+    /* Hardware health snapshots/counters for debugger watch. */
+    volatile uint32  initCount;
+    volatile uint32  frameErrors;
+    volatile uint32  parityErrors;
+    volatile uint32  overrunErrors;
+    volatile uint32  fifoFlushes;
+    volatile uint32  rxFifoFill;
+    volatile uint32  regFlags;
+    volatile uint32  regFlagsEn;
+    volatile uint32  regFrameCon;
+    volatile uint32  regRxFifoCon;
+    volatile uint32  regBrg;
+    volatile uint32  regBitCon;
+    volatile uint32  regCsr;
+    volatile uint32  dmaTsr;
+    volatile uint32  dmaChcsr;
 } Asclin1Dma;
 
 extern Asclin1Dma g_asclin1_dma;
@@ -66,6 +86,7 @@ extern Asclin1Dma g_asclin1_dma;
  * @param frameMode Frame layout (Frame_8N1 or Frame_8Odd1).
  */
 void asclin1_dma_init(uint32 baud_bps, LvdsFrameMode frameMode);
+void asclin1_dma_poll_health(void);
 
 /**
  * @brief Check if a DMA buffer is ready for the parser to consume.

@@ -94,6 +94,18 @@ IFX_INTERRUPT(ASCLIN1_DMA_ISR, 0, ASCLIN1_DMA_ISR_PRIO)
 
 /* ===================== ASCLIN1 Configuration ===================== */
 
+static void asclin1_dma_reset_hardware(void)
+{
+    volatile Ifx_SRC_SRCR *rxSrc = IfxAsclin_getSrcPointerRx(&MODULE_ASCLIN1);
+
+    IfxSrc_disable(rxSrc);
+    MODULE_ASCLIN1.FLAGSENABLE.U = 0u;
+    IfxAsclin_flushRxFifo(&MODULE_ASCLIN1);
+    IfxAsclin_clearAllFlags(&MODULE_ASCLIN1);
+
+    IfxAsclin_resetModule(&MODULE_ASCLIN1);
+}
+
 /**
  * Configure ASCLIN1 for RX-only on P14.8, with the RX SRC routed to DMA.
  */
@@ -240,9 +252,14 @@ static void asclin1_dma_configure_channel(void)
 
 void asclin1_dma_init(uint32 baud_bps, LvdsFrameMode frameMode)
 {
+    uint32 nextInitCount = g_asclin1_dma.initCount + 1u;
+
     IfxCpu_disableInterrupts();
 
     /* 1. Enable ASCLIN1 clock */
+    IfxAsclin_enableModule(&MODULE_ASCLIN1);
+    IfxAsclin_setSuspendMode(&MODULE_ASCLIN1, IfxAsclin_SuspendMode_none);
+    asclin1_dma_reset_hardware();
     IfxAsclin_enableModule(&MODULE_ASCLIN1);
     IfxAsclin_setSuspendMode(&MODULE_ASCLIN1, IfxAsclin_SuspendMode_none);
 
@@ -258,8 +275,65 @@ void asclin1_dma_init(uint32 baud_bps, LvdsFrameMode frameMode)
     g_asclin1_dma.completionCount  = 0;
     g_asclin1_dma.missedBuffers    = 0;
     g_asclin1_dma.timeoutWarnings  = 0;
+    g_asclin1_dma.frameErrors      = 0;
+    g_asclin1_dma.parityErrors     = 0;
+    g_asclin1_dma.overrunErrors    = 0;
+    g_asclin1_dma.fifoFlushes      = 0;
+    g_asclin1_dma.rxFifoFill       = 0;
+    g_asclin1_dma.regFlags         = MODULE_ASCLIN1.FLAGS.U;
+    g_asclin1_dma.regFlagsEn       = MODULE_ASCLIN1.FLAGSENABLE.U;
+    g_asclin1_dma.regFrameCon      = MODULE_ASCLIN1.FRAMECON.U;
+    g_asclin1_dma.regRxFifoCon     = MODULE_ASCLIN1.RXFIFOCON.U;
+    g_asclin1_dma.regBrg           = MODULE_ASCLIN1.BRG.U;
+    g_asclin1_dma.regBitCon        = MODULE_ASCLIN1.BITCON.U;
+    g_asclin1_dma.regCsr           = MODULE_ASCLIN1.CSR.U;
+    g_asclin1_dma.dmaTsr           = MODULE_DMA.TSR[ASCLIN1_DMA_CHANNEL_ID].U;
+    g_asclin1_dma.dmaChcsr         = MODULE_DMA.CH[ASCLIN1_DMA_CHANNEL_ID].CHCSR.U;
+    g_asclin1_dma.initCount        = nextInitCount;
 
     IfxCpu_enableInterrupts();
+}
+
+void asclin1_dma_poll_health(void)
+{
+    Ifx_ASCLIN *asclin = &MODULE_ASCLIN1;
+    uint32 flags = asclin->FLAGS.U;
+
+    g_asclin1_dma.regFlags     = flags;
+    g_asclin1_dma.regFlagsEn   = asclin->FLAGSENABLE.U;
+    g_asclin1_dma.regFrameCon  = asclin->FRAMECON.U;
+    g_asclin1_dma.regRxFifoCon = asclin->RXFIFOCON.U;
+    g_asclin1_dma.regBrg       = asclin->BRG.U;
+    g_asclin1_dma.regBitCon    = asclin->BITCON.U;
+    g_asclin1_dma.regCsr       = asclin->CSR.U;
+    g_asclin1_dma.rxFifoFill   = asclin->RXFIFOCON.B.FILL;
+    g_asclin1_dma.dmaTsr       = MODULE_DMA.TSR[ASCLIN1_DMA_CHANNEL_ID].U;
+    g_asclin1_dma.dmaChcsr     = MODULE_DMA.CH[ASCLIN1_DMA_CHANNEL_ID].CHCSR.U;
+
+    if (asclin->FLAGS.B.FE != 0u)
+    {
+        g_asclin1_dma.frameErrors++;
+        IfxAsclin_clearFrameErrorFlag(asclin);
+    }
+
+    if (asclin->FLAGS.B.PE != 0u)
+    {
+        g_asclin1_dma.parityErrors++;
+        IfxAsclin_clearParityErrorFlag(asclin);
+    }
+
+    if (asclin->FLAGS.B.RFO != 0u)
+    {
+        g_asclin1_dma.overrunErrors++;
+        IfxAsclin_clearRxFifoOverflowFlag(asclin);
+        IfxAsclin_flushRxFifo(asclin);
+        g_asclin1_dma.fifoFlushes++;
+    }
+
+    if (asclin->FLAGS.B.RFU != 0u)
+    {
+        IfxAsclin_clearRxFifoUnderflowFlag(asclin);
+    }
 }
 
 /* ===================== Consumer API ===================== */

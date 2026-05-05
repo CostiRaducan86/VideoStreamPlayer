@@ -51,6 +51,9 @@
 #include "Stm/Std/IfxStm.h"
 #include <string.h>
 
+/* Basler video camera */
+#include "camera_trigger.h"
+
 /* -------------------- CPU sync -------------------- */
 IFX_ALIGN(4) IfxCpu_syncEvent cpuSyncEvent = 0;
 
@@ -75,6 +78,22 @@ static uint64 fps_t0 = 0;
 static uint64 fps_win = 0;
 static uint32 framesOk_base = 0;
 
+/* Standalone recovery: if an unplug/reset/power transient wedges the
+ * ASCLIN1/DMA LVDS path, re-arm only the LVDS receiver and parser. */
+#define LVDS_RECOVERY_TIMEOUT_MS    1000u
+#define LVDS_RECOVERY_COOLDOWN_MS   1000u
+
+volatile uint32 g_lvdsRecoveryCount;
+volatile uint32 g_lvdsRecoveryLastDevice;
+volatile uint32 g_lvdsRecoveryLastProgress;
+
+static uint64 s_lvdsRecoveryTimeoutTicks;
+static uint64 s_lvdsRecoveryCooldownTicks;
+static uint64 s_lvdsLastProgressTick;
+static uint64 s_lvdsLastRecoveryTick;
+static uint32 s_lvdsLastProgress;
+static FrameEthDevice s_lvdsLastDevice = FE_DEVICE_NICHIA;
+
 static void fps_init(void)
 {
     fps_t0  = stm_now64();
@@ -93,6 +112,83 @@ static void fps_update(void)
         framesOk_base            = g_rxmon.framesOk;
         fps_t0                   = now;
     }
+}
+
+static uint32 lvds_progress_counter(FrameEthDevice device)
+{
+    return (device == FE_DEVICE_OSRAM)
+        ? g_feStats.osramFramesPushed
+        : g_feStats.nichiaFramesAssembled;
+}
+
+static void lvds_recovery_init(void)
+{
+    s_lvdsRecoveryTimeoutTicks =
+        (uint64)IfxStm_getTicksFromMilliseconds(&MODULE_STM0, LVDS_RECOVERY_TIMEOUT_MS);
+    s_lvdsRecoveryCooldownTicks =
+        (uint64)IfxStm_getTicksFromMilliseconds(&MODULE_STM0, LVDS_RECOVERY_COOLDOWN_MS);
+
+    s_lvdsLastDevice       = device_mode_get();
+    s_lvdsLastProgress     = lvds_progress_counter(s_lvdsLastDevice);
+    s_lvdsLastProgressTick = stm_now64();
+    s_lvdsLastRecoveryTick = 0u;
+}
+
+static void lvds_recover_rx_path(FrameEthDevice device)
+{
+    g_asclin1_dma.pCompletedBuffer = NULL_PTR;
+
+    if (device == FE_DEVICE_OSRAM)
+    {
+        osram_frame_init();
+        asclin1_dma_init(DM_OSRAM_BAUD, Frame_8Odd1);
+    }
+    else
+    {
+        rxmon_reset();
+        asclin1_dma_init(DM_NICHIA_BAUD, Frame_8N1);
+    }
+
+    frame_eth_reset_frame_state();
+
+    g_lvdsRecoveryCount++;
+    g_lvdsRecoveryLastDevice = (uint32)device;
+    g_lvdsRecoveryLastProgress = s_lvdsLastProgress;
+}
+
+static void lvds_recovery_tick(void)
+{
+    FrameEthDevice device = device_mode_get();
+    uint32 progress = lvds_progress_counter(device);
+    uint64 now = stm_now64();
+
+    if (device != s_lvdsLastDevice)
+    {
+        s_lvdsLastDevice       = device;
+        s_lvdsLastProgress     = progress;
+        s_lvdsLastProgressTick = now;
+        s_lvdsLastRecoveryTick = 0u;
+        return;
+    }
+
+    if (progress != s_lvdsLastProgress)
+    {
+        s_lvdsLastProgress     = progress;
+        s_lvdsLastProgressTick = now;
+        return;
+    }
+
+    if ((now - s_lvdsLastProgressTick) < s_lvdsRecoveryTimeoutTicks)
+        return;
+
+    if ((s_lvdsLastRecoveryTick != 0u) &&
+        ((now - s_lvdsLastRecoveryTick) < s_lvdsRecoveryCooldownTicks))
+        return;
+
+    s_lvdsLastRecoveryTick = now;
+    lvds_recover_rx_path(device);
+    s_lvdsLastProgress     = lvds_progress_counter(device);
+    s_lvdsLastProgressTick = now;
 }
 
 /* User callback: feed appropriate parser based on device mode */
@@ -116,10 +212,17 @@ void core0_main(void)
      * Change to FE_DEVICE_OSRAM for Osram (20 Mbaud, 8O1, 320×80).
      * This configures ASCLIN9, parsers, and GETH all in one call.
      */
-    device_mode_init(FE_DEVICE_OSRAM);
+    device_mode_init(FE_DEVICE_NICHIA);
+
+    /* Basler trigger on P23.1 -> camera Pin 3 (Line3), GND -> Pin 6 */
+    camera_trigger_init();
+    /* First try: 50 fps trigger, 200 us pulse width */
+    camera_trigger_set_period_us(20000U, 200U);
+    camera_trigger_start();
 
     /* FPS */
     fps_init();
+    lvds_recovery_init();
 
     while (1)
     {
@@ -138,6 +241,16 @@ void core0_main(void)
                 consume_dma_buffer(completed, ASCLIN1_DMA_BUFFER_SIZE);
             }
         }
+
+        asclin1_dma_poll_health();
+        if (device_mode_get() == FE_DEVICE_NICHIA)
+        {
+            g_rxmon.hwFrameErr   = g_asclin1_dma.frameErrors;
+            g_rxmon.hwParityErr  = g_asclin1_dma.parityErrors;
+            g_rxmon.hwOverrunErr = g_asclin1_dma.overrunErrors;
+        }
+
+        lvds_recovery_tick();
 
         /* Diagnostic UART sniffer: poll + decode + bridge to queue.
          * Only active when PC has sent FE_CMD_DIAG_SNIFF start command.

@@ -7,7 +7,7 @@
  *       2) Configuration page with tabs for device and view settings
  *   - Read the latest completed frame from frame_eth and render it locally
  *   - Poll the touch controller and translate touch coordinates for rotation
- *   - Keep a lightweight UI-side FPS estimate based on frames sent by CPU0
+ *   - Keep a lightweight UI-side FPS estimate based on LVDS frames assembled by CPU0
  *
  * Rendering strategy:
  *   - Frames are Gray8 and are expanded with 2x vertical scaling on the TFT
@@ -166,6 +166,11 @@ static uint32 s_lastStatusFpsX10  = 0xFFFFFFFFu;
 static uint32 s_lastStatusDevice  = 0xFFu;
 static uint32 s_lastStatusLink    = 0xFFu;
 static uint32 s_lastStatusRun     = 0xFFu;
+static uint32 s_lastStatusEth     = 0xFFFFFFFFu;
+static uint32 s_lastEthTxFrames   = 0u;
+static uint32 s_lastEthLvdsFrames = 0u;
+static uint64 s_lastEthTxTick     = 0u;
+static uint8  s_ethTxStalled      = 0u;
 static uint32 s_statusCycleCount  = 0u;
 static uint32 s_debounceCounter   = 0u;
 
@@ -229,16 +234,23 @@ static uint64 ui_stm_now64(void)
     return (stm_hi_acc | (uint64)lo);
 }
 
+static uint32 ui_lvds_frame_counter(void)
+{
+    return (device_mode_get() == FE_DEVICE_OSRAM)
+        ? g_feStats.osramFramesPushed
+        : g_feStats.nichiaFramesAssembled;
+}
+
 /* Initialise the local FPS measurement window.
- * Uses a 500 ms sliding window driven by the STM timer.  The frame count
- * comes from frame_eth telemetry (g_feStats.framesSent) which is updated
- * by CPU0 each time a complete frame is transmitted over Ethernet.
+ * Uses a 500 ms sliding window driven by the STM timer. The frame count
+ * comes from LVDS assembly telemetry, so the TFT can show whether the
+ * local LVDS receiver is alive even when Ethernet TX is unavailable.
  */
 static void ui_fps_init(void)
 {
     s_fpsTickPrev    = ui_stm_now64();
     s_fpsWindowTicks = (uint64)IfxStm_getTicksFromMilliseconds(IFXSTM_DEFAULT_TIMER, 500);
-    s_fpsFramesPrev  = g_feStats.framesSent;
+    s_fpsFramesPrev  = ui_lvds_frame_counter();
     s_uiFpsX10       = 0u;
 }
 
@@ -246,7 +258,7 @@ static void ui_fps_init(void)
 static void ui_fps_reset(void)
 {
     s_fpsTickPrev   = ui_stm_now64();
-    s_fpsFramesPrev = g_feStats.framesSent;
+    s_fpsFramesPrev = ui_lvds_frame_counter();
     s_uiFpsX10      = 0u;
 }
 
@@ -292,7 +304,7 @@ static void ui_fps_update(void)
         return;
     }
 
-    framesNow   = g_feStats.framesSent;
+    framesNow   = ui_lvds_frame_counter();
     framesDelta = framesNow - s_fpsFramesPrev;
     ticksPerSec = (uint64)IfxStm_getTicksFromMilliseconds(IFXSTM_DEFAULT_TIMER, 1000);
 
@@ -578,6 +590,88 @@ static void build_fps_value_text(char *buf, uint8 bufSize)
     append_char(buf, &pos, (char)('0' + (char)fpsDec), bufSize);
 }
 
+static void ui_eth_tx_stall_update(void)
+{
+    uint64 now;
+    uint64 interval;
+    uint32 lvdsFrames;
+    uint32 txFrames;
+
+    if ((g_feStats.linkUp == 0u) || (g_feStats.macSynced == 0u) || (s_runState != UI_RUN_RUNNING))
+    {
+        s_ethTxStalled = 0u;
+        s_lastEthTxFrames = g_feStats.framesSent;
+        s_lastEthLvdsFrames = ui_lvds_frame_counter();
+        s_lastEthTxTick = ui_stm_now64();
+        return;
+    }
+
+    now = ui_stm_now64();
+    interval = (uint64)IfxStm_getTicksFromMilliseconds(IFXSTM_DEFAULT_TIMER, 1000);
+    if (s_lastEthTxTick == 0u)
+    {
+        s_lastEthTxTick = now;
+        s_lastEthTxFrames = g_feStats.framesSent;
+        s_lastEthLvdsFrames = ui_lvds_frame_counter();
+        return;
+    }
+
+    if ((now - s_lastEthTxTick) < interval)
+    {
+        return;
+    }
+
+    lvdsFrames = ui_lvds_frame_counter();
+    txFrames = g_feStats.framesSent;
+
+    s_ethTxStalled = ((lvdsFrames != s_lastEthLvdsFrames) && (txFrames == s_lastEthTxFrames)) ? 1u : 0u;
+    s_lastEthTxFrames = txFrames;
+    s_lastEthLvdsFrames = lvdsFrames;
+    s_lastEthTxTick = now;
+}
+
+static uint32 build_eth_status_text(char *buf, uint8 bufSize)
+{
+    uint8 pos = 0u;
+    uint32 speed;
+
+    buf[0] = '\0';
+
+    if (g_feStats.linkUp == 0u)
+    {
+        append_text(buf, &pos, "--", bufSize);
+        return 0u;
+    }
+
+    if (g_feStats.macSynced == 0u)
+    {
+        append_text(buf, &pos, "??", bufSize);
+        return 1u;
+    }
+
+    if (s_ethTxStalled != 0u)
+    {
+        append_text(buf, &pos, "TX!", bufSize);
+        return 2u;
+    }
+
+    speed = g_feStats.phyLineSpeedMbps;
+    if (speed >= 1000u)
+    {
+        append_text(buf, &pos, "1G", bufSize);
+        return 1000u;
+    }
+
+    if (speed >= 100u)
+    {
+        append_text(buf, &pos, "100", bufSize);
+        return 100u;
+    }
+
+    append_text(buf, &pos, "10", bufSize);
+    return 10u;
+}
+
 static void draw_status_bar_base(uint16 barColor)
 {
     tft_fill_rect_color(0u, STATUS_Y, TFT_WIDTH, STATUS_H, barColor);
@@ -598,18 +692,48 @@ static void draw_status_bar(void)
     const char *devTxt;
     const char *runTxt;
     char fpsValBuf[8];
+    char ethBuf[5];
     uint16 barColor;
     uint8 forceAll;
+    uint32 ethState;
+    uint32 ethKey;
 
-    barColor = (g_feStats.linkUp != 0u) ? TFT_BLUE : TFT_NAVY;
+    ethState = (g_feStats.linkUp != 0u) ? 1u : 0u;
+    if (g_feStats.macSynced != 0u)
+    {
+        ethState |= 2u;
+    }
+
+    ui_eth_tx_stall_update();
+    if (s_ethTxStalled != 0u)
+    {
+        ethState |= 4u;
+    }
+
+    if (g_feStats.linkUp == 0u)
+    {
+        barColor = TFT_NAVY;
+    }
+    else if (g_feStats.macSynced == 0u)
+    {
+        barColor = TFT_ORANGE;
+    }
+    else if (s_ethTxStalled != 0u)
+    {
+        barColor = TFT_RED;
+    }
+    else
+    {
+        barColor = TFT_BLUE;
+    }
 
     if (s_page == UI_PAGE_CONFIG)
     {
-        if ((s_lastStatusLink != g_feStats.linkUp) || (s_lastStatusRun != 0xFFFFFFFEu))
+        if ((s_lastStatusLink != ethState) || (s_lastStatusRun != 0xFFFFFFFEu))
         {
             draw_status_bar_base(barColor);
             draw_centered_text_medium(0u, STATUS_Y, TFT_WIDTH, STATUS_H, "Configuration", TFT_WHITE, barColor);
-            s_lastStatusLink = g_feStats.linkUp;
+            s_lastStatusLink = ethState;
             s_lastStatusRun = 0xFFFFFFFEu;
         }
         return;
@@ -640,10 +764,11 @@ static void draw_status_bar(void)
     }
 
     build_fps_value_text(fpsValBuf, (uint8)sizeof(fpsValBuf));
+    ethKey = build_eth_status_text(ethBuf, (uint8)sizeof(ethBuf));
 
     forceAll = 0u;
 
-    if (s_lastStatusLink != g_feStats.linkUp)
+    if (s_lastStatusLink != ethState)
     {
         draw_status_bar_base(barColor);
         forceAll = 1u;
@@ -664,15 +789,16 @@ static void draw_status_bar(void)
         draw_status_region(STATUS_FPSVAL_X, STATUS_FPSVAL_W, fpsValBuf, barColor);
     }
 
-    if ((s_lastStatusFpsX10 == 0xFFFFFFFFu) || (forceAll != 0u))
+    if ((s_lastStatusEth == 0xFFFFFFFFu) || (forceAll != 0u) || (ethKey != s_lastStatusEth))
     {
-        draw_status_region(STATUS_FPSSUF_X, STATUS_FPSSUF_W, "fps", barColor);
+        draw_status_region(STATUS_FPSSUF_X, STATUS_FPSSUF_W, ethBuf, barColor);
     }
 
     s_lastStatusFpsX10 = s_uiFpsX10;
     s_lastStatusDevice = (uint32)dev;
-    s_lastStatusLink   = g_feStats.linkUp;
+    s_lastStatusLink   = ethState;
     s_lastStatusRun    = (uint32)s_runState;
+    s_lastStatusEth    = ethKey;
 }
 
 static void draw_static_layout(void)
