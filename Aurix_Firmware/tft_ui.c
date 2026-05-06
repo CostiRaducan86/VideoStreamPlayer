@@ -72,6 +72,12 @@
 #define UI_NO_SIGNAL_TIMEOUT_MS   300u  /* Declare signal loss if no fresh frame arrives. */
 #define DIRTY_PAD_COLS            1u    /* Expand each changed run to avoid edge artifacts. */
 #define FORCE_FULL_REDRAW_PERIOD  255u  /* Periodic full redraw to re-synchronise the panel. */
+#define DIRTY_BLIT_MAX_COLS       8u    /* Scratch blit width; keeps UI RAM usage low. */
+
+#define ETH_DMA_STAT_TX_STOPPED   (1u << 1)
+#define ETH_DMA_STAT_TX_BUF_UNAV  (1u << 2)
+#define ETH_DMA_STAT_FATAL_BUS    (1u << 12)
+#define ETH_DMA_STAT_ABNORMAL     (1u << 14)
 
 /* Button style. */
 #define BTN_BG_IDLE               TFT_RGB565(90, 170, 255)
@@ -198,12 +204,12 @@ static void enter_page(UiPage page);
  * The TFT is much slower than the frame source, so we keep a copy of the last
  * drawn image and redraw only changed column bands after the first full frame.
  *
- * Memory budget: 3 x FE_MAX_FRAME_BYTES (~77 KB for Osram 320x80).
+ * Memory budget: 2 x FE_MAX_FRAME_BYTES + small scratch blit buffer.
  * These are static .bss allocations; verify linker map if RAM is tight.
  */
 static uint8  s_uiFrameBuf[FE_MAX_FRAME_BYTES];
 static uint8  s_prevDrawnBuf[FE_MAX_FRAME_BYTES];
-static uint8  s_bandBuf[FE_MAX_FRAME_BYTES];
+static uint8  s_bandBuf[DIRTY_BLIT_MAX_COLS * FE_OSRAM_H];
 static uint16 s_uiFrameW       = 0u;
 static uint16 s_uiFrameH       = 0u;
 static uint8  s_uiFrameValid   = 0u;
@@ -651,8 +657,44 @@ static uint32 build_eth_status_text(char *buf, uint8 bufSize)
 
     if (s_ethTxStalled != 0u)
     {
-        append_text(buf, &pos, "TX!", bufSize);
-        return 2u;
+        if (g_feStats.txLastFailReason == FE_TX_FAIL_LINK)
+        {
+            append_text(buf, &pos, "LK!", bufSize);
+        }
+        else if (g_feStats.txLastFailReason == FE_TX_FAIL_NO_BUFFER)
+        {
+            append_text(buf, &pos, "NB!", bufSize);
+        }
+        else if (g_feStats.txLastFailReason == FE_TX_FAIL_TIMEOUT)
+        {
+            if ((g_feStats.txDmaStatus & ETH_DMA_STAT_FATAL_BUS) != 0u)
+            {
+                append_text(buf, &pos, "FB!", bufSize);
+            }
+            else if ((g_feStats.txDmaStatus & ETH_DMA_STAT_TX_STOPPED) != 0u)
+            {
+                append_text(buf, &pos, "TS!", bufSize);
+            }
+            else if ((g_feStats.txDmaStatus & ETH_DMA_STAT_TX_BUF_UNAV) != 0u)
+            {
+                append_text(buf, &pos, "BU!", bufSize);
+            }
+            else if ((g_feStats.txDmaStatus & ETH_DMA_STAT_ABNORMAL) != 0u)
+            {
+                append_text(buf, &pos, "AI!", bufSize);
+            }
+            else
+            {
+                append_text(buf, &pos, "TO!", bufSize);
+            }
+        }
+        else
+        {
+            append_text(buf, &pos, "TX!", bufSize);
+        }
+        return 0x80000000u
+             | ((g_feStats.txLastFailReason & 0xFFu) << 16)
+             | (g_feStats.txDmaStatus & 0xFFFFu);
     }
 
     speed = g_feStats.phyLineSpeedMbps;
@@ -1248,6 +1290,7 @@ static void enter_page(UiPage page)
     s_lastStatusRun    = 0xFFu;
     s_lastStatusFpsX10 = 0xFFFFFFFFu;
     s_lastStatusLink   = 0xFFu;
+    s_lastStatusEth    = 0xFFFFFFFFu;
     draw_status_bar();
 
     configure_buttons_for_page();
@@ -1387,18 +1430,32 @@ static void pack_and_draw_band(uint16 dstX, uint16 dstY,
                                const uint8 *src, uint16 frameW, uint16 frameH,
                                uint16 startCol, uint16 bandW)
 {
+    uint16 drawnCols;
+    uint16 chunkW;
     uint16 y;
     uint32 srcOff;
     uint32 dstOff;
 
-    for (y = 0u; y < frameH; y++)
-    {
-        srcOff = ((uint32)y * (uint32)frameW) + (uint32)startCol;
-        dstOff = (uint32)y * (uint32)bandW;
-        memcpy(&s_bandBuf[dstOff], &src[srcOff], bandW);
-    }
+    drawnCols = 0u;
 
-    tft_blit_gray8_v2x((uint16)(dstX + startCol), dstY, bandW, frameH, s_bandBuf);
+    while (drawnCols < bandW)
+    {
+        chunkW = (uint16)(bandW - drawnCols);
+        if (chunkW > DIRTY_BLIT_MAX_COLS)
+        {
+            chunkW = DIRTY_BLIT_MAX_COLS;
+        }
+
+        for (y = 0u; y < frameH; y++)
+        {
+            srcOff = ((uint32)y * (uint32)frameW) + (uint32)startCol + (uint32)drawnCols;
+            dstOff = (uint32)y * (uint32)chunkW;
+            memcpy(&s_bandBuf[dstOff], &src[srcOff], chunkW);
+        }
+
+        tft_blit_gray8_v2x((uint16)(dstX + startCol + drawnCols), dstY, chunkW, frameH, s_bandBuf);
+        drawnCols = (uint16)(drawnCols + chunkW);
+    }
 }
 
 /* Compare one frame column between the current and previously drawn buffers.
@@ -1649,6 +1706,11 @@ void tft_ui_init(void)
     s_lastStatusDevice  = 0xFFu;
     s_lastStatusLink    = 0xFFu;
     s_lastStatusRun     = 0xFFu;
+    s_lastStatusEth     = 0xFFFFFFFFu;
+    s_lastEthTxFrames   = 0u;
+    s_lastEthLvdsFrames = 0u;
+    s_lastEthTxTick     = 0u;
+    s_ethTxStalled      = 0u;
     s_statusCycleCount  = 0u;
     s_debounceCounter   = 0u;
 

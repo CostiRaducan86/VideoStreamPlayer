@@ -16,6 +16,7 @@
 
 #include "frame_eth.h"
 #include "can_diag.h"
+#include "Cpu/Std/IfxCpu_Intrinsics.h"
 #include "Geth/Eth/IfxGeth_Eth.h"
 #include "Geth/Std/IfxGeth.h"
 #include "Stm/Std/IfxStm.h"
@@ -46,6 +47,7 @@ static uint32         s_frameBytes = FE_NICHIA_FRAME_BYTES;
  */
 static uint8  s_frameBufA[FE_MAX_FRAME_BYTES];
 static uint8  s_frameBufB[FE_MAX_FRAME_BYTES];
+static uint8  s_txFrameBuf[FE_NICHIA_FRAME_BYTES];
 static uint8 *s_framePtr[2] = { s_frameBufA, s_frameBufB };
 static uint8  s_assembleIdx = 0;
 
@@ -61,10 +63,23 @@ static uint16           s_frameSeq   = 0;
 static volatile uint32  s_displaySeq = 0;
 static uint16           s_diagSeq    = 0;
 
+/* Ethernet TX retry state.
+ * A completed LVDS frame is copied here before Ethernet fragmentation starts,
+ * so transient TX stalls do not block the live frame assembler/display buffers.
+ */
+static uint8  s_txActive     = 0u;
+static uint16 s_txSeq        = 0u;
+static uint8  s_txFragIdx    = 0u;
+static uint8  s_txFragCnt    = 0u;
+static uint16 s_txOffset     = 0u;
+static uint32 s_txRemaining  = 0u;
+static uint32 s_txTimestamp  = 0u;
+static const uint8 *s_txPixels = NULL_PTR;
+
 /* ==================== Telemetry ==================== */
 FeStats g_feStats;
 
-#define FE_TX_COMPLETE_TIMEOUT_LOOPS 20000u
+#define FE_TX_COMPLETE_TIMEOUT_US    3000u
 #define FE_TX_RECOVERY_INTERVAL_MS   100u
 
 #define PHY_BMSR_LINK_STATUS         0x0004u
@@ -77,6 +92,15 @@ FeStats g_feStats;
 #define PHY_GB_CTRL_1000_FULL        0x0200u
 #define PHY_GB_STAT_LP_1000_HALF     0x0400u
 #define PHY_GB_STAT_LP_1000_FULL     0x0800u
+
+#define FE_CACHE_LINE_SIZE           32u
+
+#define RTL8211F_MDIO_BMCR           0x00u
+#define RTL8211F_MDIO_PAGSR          0x1Fu
+#define RTL8211F_MDIO_LCR            0x10u
+#define RTL8211F_MDIO_EEELCR         0x11u
+#define RTL8211F_PAGE_RGMII          0x0D08u
+#define RTL8211F_PAGE_LED_EEE        0x0D04u
 
 /* PHY link tracking.
  * In debugger runs the PHY link is usually already settled by the time CPU0
@@ -135,6 +159,68 @@ static void put_be32(uint8 *dst, uint32 val)
     dst[3] = (uint8)(val);
 }
 
+static void frame_eth_cache_writeback_invalidate_line(void *addr)
+{
+#if defined(__TASKING__)
+    __asm__ volatile ("cachea.wi [%0]0" : : "a"(addr) : "memory");
+#elif defined(__DCC__)
+    __cacheawi(addr);
+#else
+    __cacheawi(addr);
+#endif
+}
+
+static void frame_eth_cache_invalidate_line(void *addr)
+{
+#if defined(__TASKING__)
+    __asm__ volatile ("cachea.i [%0]0" : : "a"(addr) : "memory");
+#elif defined(__DCC__)
+    __cacheawi(addr);
+#else
+    __cacheai(addr);
+#endif
+}
+
+static void frame_eth_cache_writeback_invalidate_range(const volatile void *addr, uint32 len)
+{
+    uint32 start;
+    uint32 end;
+
+    if ((addr == NULL_PTR) || (len == 0u))
+        return;
+
+    start = ((uint32)addr) & ~(FE_CACHE_LINE_SIZE - 1u);
+    end   = ((uint32)addr + len + FE_CACHE_LINE_SIZE - 1u) & ~(FE_CACHE_LINE_SIZE - 1u);
+
+    while (start < end)
+    {
+        frame_eth_cache_writeback_invalidate_line((void *)start);
+        start += FE_CACHE_LINE_SIZE;
+    }
+
+    __dsync();
+}
+
+static void frame_eth_cache_invalidate_range(const volatile void *addr, uint32 len)
+{
+    uint32 start;
+    uint32 end;
+
+    if ((addr == NULL_PTR) || (len == 0u))
+        return;
+
+    start = ((uint32)addr) & ~(FE_CACHE_LINE_SIZE - 1u);
+    end   = ((uint32)addr + len + FE_CACHE_LINE_SIZE - 1u) & ~(FE_CACHE_LINE_SIZE - 1u);
+
+    while (start < end)
+    {
+        frame_eth_cache_invalidate_line((void *)start);
+        start += FE_CACHE_LINE_SIZE;
+    }
+
+    __dsync();
+}
+
 static void frame_eth_snapshot_tx_dma(void)
 {
     volatile IfxGeth_TxDescr *descr;
@@ -144,8 +230,149 @@ static void frame_eth_snapshot_tx_dma(void)
 
     g_feStats.txDmaStatus = s_geth.gethSFR->DMA_CH[IfxGeth_DmaChannel_0].STATUS.U;
     descr = IfxGeth_Eth_getActualTxDescriptor(&s_geth, IfxGeth_TxDmaChannel_0);
+    frame_eth_cache_invalidate_range(descr, (uint32)sizeof(IfxGeth_TxDescr));
     if (descr != NULL_PTR)
         g_feStats.txDescOwn = descr->TDES3.R.OWN;
+}
+
+static void frame_eth_clear_tx_status_flags(void)
+{
+    IfxGeth_dma_clearInterruptFlag(s_geth.gethSFR, IfxGeth_DmaChannel_0,
+                                   IfxGeth_DmaInterruptFlag_transmitInterrupt);
+    IfxGeth_dma_clearInterruptFlag(s_geth.gethSFR, IfxGeth_DmaChannel_0,
+                                   IfxGeth_DmaInterruptFlag_transmitStopped);
+    IfxGeth_dma_clearInterruptFlag(s_geth.gethSFR, IfxGeth_DmaChannel_0,
+                                   IfxGeth_DmaInterruptFlag_transmitBufferUnavailable);
+    IfxGeth_dma_clearInterruptFlag(s_geth.gethSFR, IfxGeth_DmaChannel_0,
+                                   IfxGeth_DmaInterruptFlag_earlyTransmitInterrupt);
+    IfxGeth_dma_clearInterruptFlag(s_geth.gethSFR, IfxGeth_DmaChannel_0,
+                                   IfxGeth_DmaInterruptFlag_fatalBusError);
+    IfxGeth_dma_clearInterruptFlag(s_geth.gethSFR, IfxGeth_DmaChannel_0,
+                                   IfxGeth_DmaInterruptFlag_contextDescriptorError);
+    IfxGeth_dma_clearInterruptFlag(s_geth.gethSFR, IfxGeth_DmaChannel_0,
+                                   IfxGeth_DmaInterruptFlag_abnormalInterruptSummary);
+    IfxGeth_dma_clearInterruptFlag(s_geth.gethSFR, IfxGeth_DmaChannel_0,
+                                   IfxGeth_DmaInterruptFlag_normalInterruptSummary);
+}
+
+static volatile IfxGeth_TxDescr *frame_eth_next_tx_descriptor(volatile IfxGeth_TxDescr *descr)
+{
+    volatile IfxGeth_TxDescr *base;
+    volatile IfxGeth_TxDescr *last;
+
+    base = s_geth.txChannel[IfxGeth_TxDmaChannel_0].txDescrList->descr;
+    last = &base[FE_TX_DESCRIPTORS - 1u];
+
+    return (descr == last) ? base : &descr[1];
+}
+
+static void frame_eth_submit_tx_descriptor(volatile IfxGeth_TxDescr *descr,
+                                           const uint8 *packetBuffer,
+                                           uint32 packetLength)
+{
+    volatile IfxGeth_TxDescr *nextDescr;
+
+    if (descr == NULL_PTR)
+        return;
+
+    nextDescr = frame_eth_next_tx_descriptor(descr);
+
+    /* Descriptor and payload are in cached CPU0 memory in this build. Make
+     * the payload visible first, then release the descriptor, then move the
+     * DMA tail pointer.
+     */
+    frame_eth_cache_writeback_invalidate_range(packetBuffer, packetLength);
+
+    descr->TDES2.R.B1L       = packetLength;
+    descr->TDES2.R.VTIR      = 0u;
+    descr->TDES2.R.B2L       = 0u;
+    descr->TDES2.R.TTSE_TMWD = 0u;
+    descr->TDES2.R.IOC       = 1u;
+
+    descr->TDES3.U           = 0u;
+    descr->TDES3.R.FL_TPL    = packetLength;
+    descr->TDES3.R.TSE       = 0u;
+    descr->TDES3.R.CIC_TPL   = 3u;
+    descr->TDES3.R.SAIC      = 0u;
+    descr->TDES3.R.CPC       = 0u;
+    descr->TDES3.R.LD        = 1u;
+    descr->TDES3.R.FD        = 1u;
+    __dsync();
+
+    descr->TDES3.R.OWN = 1u;
+    __dsync();
+    frame_eth_cache_writeback_invalidate_range(descr, (uint32)sizeof(IfxGeth_TxDescr));
+
+    s_geth.txChannel[IfxGeth_TxDmaChannel_0].txDescrPtr = descr;
+    IfxGeth_dma_setTxDescriptorTailPointer(s_geth.gethSFR, IfxGeth_TxDmaChannel_0,
+                                           (uint32)nextDescr);
+    IfxGeth_Eth_startTransmitter(&s_geth, IfxGeth_TxDmaChannel_0);
+    IfxGeth_Eth_wakeupTransmitter(&s_geth, IfxGeth_TxDmaChannel_0);
+    s_geth.txChannel[IfxGeth_TxDmaChannel_0].txDescrPtr = nextDescr;
+    s_geth.txChannel[IfxGeth_TxDmaChannel_0].txCount++;
+}
+
+static void frame_eth_phy_select_page(uint8 phyAddr, uint32 page)
+{
+    IfxGeth_Phy_Clause22_writeMDIORegister(phyAddr, RTL8211F_MDIO_PAGSR, page);
+}
+
+static void frame_eth_configure_rtl8211f(uint8 phyAddr)
+{
+    uint32 value;
+    uint32 timeout;
+
+    IfxGeth_Phy_Clause22_writeMDIORegister(phyAddr, RTL8211F_MDIO_BMCR, 0x8000u);
+
+    timeout = 2000000u;
+    value   = 0x8000u;
+    while (((value & 0x8000u) != 0u) && (timeout-- != 0u))
+    {
+        IfxGeth_phy_Clause22_readMDIORegister(phyAddr, RTL8211F_MDIO_BMCR, &value);
+    }
+
+    frame_eth_phy_select_page(phyAddr, RTL8211F_PAGE_RGMII);
+    value = 0u;
+    IfxGeth_phy_Clause22_readMDIORegister(phyAddr, 0x11u, &value);
+    value |= 0x0100u;
+    IfxGeth_Phy_Clause22_writeMDIORegister(phyAddr, 0x11u, value);
+    frame_eth_phy_select_page(phyAddr, 0x0000u);
+
+    /* Keep the local sequence aligned with Infineon's RTL8211F examples:
+     * LED page setup plus EEE-off.  EEE/LPI can leave the standalone link in
+     * low-power idle long enough for the polled TX path to time out.
+     */
+    frame_eth_phy_select_page(phyAddr, RTL8211F_PAGE_LED_EEE);
+    IfxGeth_Phy_Clause22_writeMDIORegister(phyAddr, RTL8211F_MDIO_LCR, 0x8170u);
+    IfxGeth_Phy_Clause22_writeMDIORegister(phyAddr, RTL8211F_MDIO_EEELCR, 0x0000u);
+    frame_eth_phy_select_page(phyAddr, 0x0000u);
+
+    IfxGeth_Phy_Clause22_writeMDIORegister(phyAddr, RTL8211F_MDIO_BMCR, 0x1200u);
+}
+
+static boolean frame_eth_wait_tx_done(volatile IfxGeth_TxDescr *descr)
+{
+    uint32 start;
+    uint32 timeoutTicks;
+
+    if (descr == NULL_PTR)
+        return FALSE;
+
+    start        = (uint32)IfxStm_getLower(&MODULE_STM0);
+    timeoutTicks = (uint32)IfxStm_getTicksFromMicroseconds(&MODULE_STM0,
+                                                           FE_TX_COMPLETE_TIMEOUT_US);
+
+    do
+    {
+        frame_eth_cache_invalidate_range(descr, (uint32)sizeof(IfxGeth_TxDescr));
+        if (descr->TDES3.R.OWN == 0u)
+        {
+            return TRUE;
+        }
+    } while ((uint32)((uint32)IfxStm_getLower(&MODULE_STM0) - start) < timeoutTicks);
+
+    frame_eth_cache_invalidate_range(descr, (uint32)sizeof(IfxGeth_TxDescr));
+    return (descr->TDES3.R.OWN == 0u) ? TRUE : FALSE;
 }
 
 static void frame_eth_recover_tx_ring(boolean force)
@@ -173,14 +400,13 @@ static void frame_eth_recover_tx_ring(boolean force)
     {
         s_txChannelConfig.txDescrList->descr[i].TDES3.U = 0u;
     }
+    frame_eth_cache_writeback_invalidate_range(s_txChannelConfig.txDescrList->descr,
+                                               (uint32)(sizeof(IfxGeth_TxDescr) * FE_TX_DESCRIPTORS));
 
     IfxGeth_Eth_initTransmitDescriptors(&s_geth, &s_txChannelConfig);
-    IfxGeth_dma_clearInterruptFlag(s_geth.gethSFR, IfxGeth_DmaChannel_0,
-                                   IfxGeth_DmaInterruptFlag_transmitInterrupt);
-    IfxGeth_dma_clearInterruptFlag(s_geth.gethSFR, IfxGeth_DmaChannel_0,
-                                   IfxGeth_DmaInterruptFlag_transmitStopped);
-    IfxGeth_dma_clearInterruptFlag(s_geth.gethSFR, IfxGeth_DmaChannel_0,
-                                   IfxGeth_DmaInterruptFlag_transmitBufferUnavailable);
+    frame_eth_cache_writeback_invalidate_range(s_txChannelConfig.txDescrList->descr,
+                                               (uint32)(sizeof(IfxGeth_TxDescr) * FE_TX_DESCRIPTORS));
+    frame_eth_clear_tx_status_flags();
 
     IfxGeth_Eth_startTransmitters(&s_geth, 1u);
     IfxGeth_Eth_wakeupTransmitter(&s_geth, IfxGeth_TxDmaChannel_0);
@@ -419,7 +645,7 @@ void frame_eth_init(FrameEthDevice device)
     config.mtl.txQueue[0].txQueueSize    = IfxGeth_QueueSize_2560Bytes;
     config.mtl.rxQueue[0].queueEnable    = TRUE;
     config.mtl.rxQueue[0].storeAndForward = TRUE;
-    config.mtl.rxQueue[0].rxQueueSize    = IfxGeth_QueueSize_256Bytes;
+    config.mtl.rxQueue[0].rxQueueSize    = IfxGeth_QueueSize_2560Bytes;
     config.mtl.rxQueue[0].rxDmaChannelMap = IfxGeth_RxDmaChannel_0;
 
     /* DMA: 1 TX channel, 1 RX channel */
@@ -516,41 +742,15 @@ void frame_eth_init(FrameEthDevice device)
             s_phyFound       = 1u;
             s_phyAddrRuntime = phyAddr;
 
-            /* Reset PHY (bit 15) */
-            IfxGeth_Phy_Clause22_writeMDIORegister(phyAddr, 0u, 0x8000u);
+            frame_eth_configure_rtl8211f(phyAddr);
             g_feStats.initStep = 51;
-
-            /* Wait for reset bit to self-clear */
-            {
-                uint32 timeout = 2000000u;
-                uint32 ctrl    = 0x8000u;
-                while ((ctrl & 0x8000u) && timeout--)
-                {
-                    IfxGeth_phy_Clause22_readMDIORegister(phyAddr, 0u, &ctrl);
-                }
-            }
-            g_feStats.initStep = 52;
-
-            /* RTL8211F: enable TX delay (page 0x0d08, reg 0x11 bit 8) */
-            IfxGeth_Phy_Clause22_writeMDIORegister(phyAddr, 31u, 0x0d08u);
-            {
-                uint32 value = 0;
-                IfxGeth_phy_Clause22_readMDIORegister(phyAddr, 0x11u, &value);
-                value |= 0x0100u;
-                IfxGeth_Phy_Clause22_writeMDIORegister(phyAddr, 0x11u, value);
-            }
-            IfxGeth_Phy_Clause22_writeMDIORegister(phyAddr, 31u, 0x0000u);
-
-            /* Restart auto-negotiation (BMCR = 0x1200) */
-            IfxGeth_Phy_Clause22_writeMDIORegister(phyAddr, 0u, 0x1200u);
-            g_feStats.initStep = 53;
 
             /* Brief delay for PHY to settle */
             {
                 volatile uint32 d = 2000000u;
                 while (d--) {}
             }
-            g_feStats.initStep = 54;
+            g_feStats.initStep = 52;
 
             /* Poll link status (reg 1, bit 2) — read twice per IEEE spec */
             {
@@ -562,13 +762,14 @@ void frame_eth_init(FrameEthDevice device)
                         break;
                 } while (--timeout);
             }
-            g_feStats.initStep = 55;
+            g_feStats.initStep = 53;
         }
     }
 
     /* Clear frame buffers */
     memset(s_frameBufA, 0, FE_MAX_FRAME_BYTES);
     memset(s_frameBufB, 0, FE_MAX_FRAME_BYTES);
+    memset(s_txFrameBuf, 0, sizeof(s_txFrameBuf));
 
     /* Reset assembly state */
     frame_eth_reset_frame_state();
@@ -594,6 +795,15 @@ void frame_eth_reset_frame_state(void)
     s_readyIdx     = 0;
     s_frameTimestamp = 0;
     s_displaySeq   = 0;
+    s_txActive     = 0u;
+    s_txFragIdx    = 0u;
+    s_txFragCnt    = 0u;
+    s_txOffset     = 0u;
+    s_txRemaining  = 0u;
+    s_txTimestamp  = 0u;
+    s_txPixels     = NULL_PTR;
+    g_feStats.txLastFailReason = FE_TX_FAIL_NONE;
+    g_feStats.txLastFailFrag   = 0u;
 }
 
 /* ==================== Zero-copy Osram API ==================== */
@@ -705,17 +915,22 @@ const uint8 *frame_eth_get_display_frame(uint16 *width, uint16 *height, uint32 *
  *   [14..31] Protocol header (18 bytes)
  *   [32..]   Pixel data (up to 1482 bytes)
  */
-static boolean send_fragment(const uint8 *framePixels, uint16 frameSeq,
-                             uint8 fragIdx, uint8 fragCnt,
-                             uint16 dataOffset, uint16 dataLen,
-                             uint32 timestamp)
+#if 0
+static boolean send_fragment_legacy(const uint8 *framePixels, uint16 frameSeq,
+                                    uint8 fragIdx, uint8 fragCnt,
+                                    uint16 dataOffset, uint16 dataLen,
+                                    uint32 timestamp)
 {
     uint32 ethPayload = FE_HDR_LEN + dataLen;
     uint32 ethTotal   = 14u + ethPayload;
 
     frame_eth_update_link_status(FALSE);
     if (g_feStats.linkUp == 0u || s_macSynced == 0u)
+    {
+        g_feStats.txLastFailReason = FE_TX_FAIL_LINK;
+        g_feStats.txLastFailFrag   = fragIdx;
         return FALSE;
+    }
 
     /* Minimum Ethernet frame = 60 bytes (excl. FCS) */
     if (ethTotal < 60u) ethTotal = 60u;
@@ -732,6 +947,8 @@ static boolean send_fragment(const uint8 *framePixels, uint16 frameSeq,
         frame_eth_snapshot_tx_dma();
         g_feStats.txNoBuffer++;
         g_feStats.txErrors++;
+        g_feStats.txLastFailReason = FE_TX_FAIL_NO_BUFFER;
+        g_feStats.txLastFailFrag   = fragIdx;
         frame_eth_recover_tx_ring(FALSE);
         return FALSE;
     }
@@ -782,6 +999,8 @@ static boolean send_fragment(const uint8 *framePixels, uint16 frameSeq,
                 frame_eth_snapshot_tx_dma();
                 g_feStats.txTimeouts++;
                 g_feStats.txErrors++;
+                g_feStats.txLastFailReason = FE_TX_FAIL_TIMEOUT;
+                g_feStats.txLastFailFrag   = fragIdx;
                 frame_eth_recover_tx_ring(FALSE);
                 return FALSE;
             }
@@ -795,7 +1014,7 @@ static boolean send_fragment(const uint8 *framePixels, uint16 frameSeq,
     return TRUE;
 }
 
-static boolean send_can_diag_record(const CanDiagRecord *record, uint16 sequence)
+static boolean send_can_diag_record_legacy(const CanDiagRecord *record, uint16 sequence)
 {
     uint32 ethPayload = FE_DIAG_HDR_LEN + FE_DIAG_PAYLOAD_LEN;
     uint32 ethTotal   = 14u + ethPayload;
@@ -886,47 +1105,294 @@ static boolean send_can_diag_record(const CanDiagRecord *record, uint16 sequence
     g_feStats.diagRecordsSent++;
     return TRUE;
 }
+#endif
+
+static uint8 *frame_eth_get_tx_buffer_from_ring(volatile IfxGeth_TxDescr **txDescrOut)
+{
+    volatile IfxGeth_TxDescr *txDescr;
+
+    if (txDescrOut == NULL_PTR)
+        return NULL_PTR;
+
+    *txDescrOut = NULL_PTR;
+    txDescr = IfxGeth_Eth_getActualTxDescriptor(&s_geth, IfxGeth_TxDmaChannel_0);
+    frame_eth_cache_invalidate_range(txDescr, (uint32)sizeof(IfxGeth_TxDescr));
+    if ((txDescr == NULL_PTR) || (txDescr->TDES3.R.OWN != 0u))
+        return NULL_PTR;
+
+    *txDescrOut = txDescr;
+    return (uint8 *)txDescr->TDES0.U;
+}
+
+static boolean send_fragment(const uint8 *framePixels, uint16 frameSeq,
+                             uint8 fragIdx, uint8 fragCnt,
+                             uint16 dataOffset, uint16 dataLen,
+                             uint32 timestamp)
+{
+    uint32 ethPayload;
+    uint32 ethTotal;
+    volatile IfxGeth_TxDescr *txDescr;
+    uint8 *pTxBuf;
+    uint8 *hdr;
+
+    ethPayload = FE_HDR_LEN + dataLen;
+    ethTotal   = 14u + ethPayload;
+
+    frame_eth_update_link_status(FALSE);
+    if ((g_feStats.linkUp == 0u) || (s_macSynced == 0u))
+    {
+        g_feStats.txLastFailReason = FE_TX_FAIL_LINK;
+        g_feStats.txLastFailFrag   = fragIdx;
+        return FALSE;
+    }
+
+    if (ethTotal < 60u)
+        ethTotal = 60u;
+
+    pTxBuf = frame_eth_get_tx_buffer_from_ring(&txDescr);
+    if (pTxBuf == NULL_PTR)
+    {
+        IfxGeth_Eth_wakeupTransmitter(&s_geth, IfxGeth_TxDmaChannel_0);
+        g_feStats.txWakeups++;
+        frame_eth_snapshot_tx_dma();
+        g_feStats.txNoBuffer++;
+        g_feStats.txErrors++;
+        g_feStats.txLastFailReason = FE_TX_FAIL_NO_BUFFER;
+        g_feStats.txLastFailFrag   = fragIdx;
+        frame_eth_recover_tx_ring(FALSE);
+        return FALSE;
+    }
+
+    memcpy(&pTxBuf[0], s_dstMac, 6u);
+    memcpy(&pTxBuf[6], s_srcMac, 6u);
+    put_be16(&pTxBuf[12], FE_ETHERTYPE);
+
+    hdr = &pTxBuf[14];
+    put_be16(&hdr[0],  s_magic);
+    put_be16(&hdr[2],  frameSeq);
+    hdr[4] = fragIdx;
+    hdr[5] = fragCnt;
+    put_be16(&hdr[6],  dataOffset);
+    put_be16(&hdr[8],  dataLen);
+    put_be16(&hdr[10], s_width);
+    put_be16(&hdr[12], s_height);
+    put_be32(&hdr[14], timestamp);
+
+    memcpy(&pTxBuf[14u + FE_HDR_LEN], &framePixels[dataOffset], dataLen);
+
+    if (ethTotal > (14u + ethPayload))
+        memset(&pTxBuf[14u + ethPayload], 0, ethTotal - (14u + ethPayload));
+
+    frame_eth_submit_tx_descriptor(txDescr, pTxBuf, ethTotal);
+
+    if (!frame_eth_wait_tx_done(txDescr))
+    {
+        IfxGeth_Eth_wakeupTransmitter(&s_geth, IfxGeth_TxDmaChannel_0);
+        g_feStats.txWakeups++;
+        frame_eth_snapshot_tx_dma();
+        g_feStats.txDescOwn = txDescr->TDES3.R.OWN;
+        g_feStats.txTimeouts++;
+        g_feStats.txErrors++;
+        g_feStats.txLastFailReason = FE_TX_FAIL_TIMEOUT;
+        g_feStats.txLastFailFrag   = fragIdx;
+        frame_eth_recover_tx_ring(TRUE);
+        return FALSE;
+    }
+
+    frame_eth_clear_tx_status_flags();
+    g_feStats.fragmentsSent++;
+    return TRUE;
+}
+
+static boolean send_can_diag_record(const CanDiagRecord *record, uint16 sequence)
+{
+    uint32 ethPayload;
+    uint32 ethTotal;
+    volatile IfxGeth_TxDescr *txDescr;
+    uint8 *pTxBuf;
+    uint8 *hdr;
+    uint8 *payload;
+
+    if (record == NULL_PTR)
+    {
+        g_feStats.diagTxErrors++;
+        return FALSE;
+    }
+
+    ethPayload = FE_DIAG_HDR_LEN + FE_DIAG_PAYLOAD_LEN;
+    ethTotal   = 14u + ethPayload;
+
+    frame_eth_update_link_status(FALSE);
+    if ((g_feStats.linkUp == 0u) || (s_macSynced == 0u))
+    {
+        g_feStats.diagTxErrors++;
+        g_feStats.txLastFailReason = FE_TX_FAIL_LINK;
+        g_feStats.txLastFailFrag   = 0u;
+        return FALSE;
+    }
+
+    if (ethTotal < 60u)
+        ethTotal = 60u;
+
+    pTxBuf = frame_eth_get_tx_buffer_from_ring(&txDescr);
+    if (pTxBuf == NULL_PTR)
+    {
+        IfxGeth_Eth_wakeupTransmitter(&s_geth, IfxGeth_TxDmaChannel_0);
+        g_feStats.txWakeups++;
+        frame_eth_snapshot_tx_dma();
+        g_feStats.txNoBuffer++;
+        g_feStats.diagTxErrors++;
+        frame_eth_recover_tx_ring(FALSE);
+        return FALSE;
+    }
+
+    memcpy(&pTxBuf[0], s_dstMac, 6u);
+    memcpy(&pTxBuf[6], s_srcMac, 6u);
+    put_be16(&pTxBuf[12], FE_ETHERTYPE);
+
+    hdr = &pTxBuf[14];
+    put_be16(&hdr[0], FE_MAGIC_CAN_DIAG);
+    hdr[2] = CAN_DIAG_PROTOCOL_VERSION;
+    hdr[3] = CAN_DIAG_RECORD_TYPE_REG_IO;
+    put_be16(&hdr[4], sequence);
+    put_be16(&hdr[6], FE_DIAG_PAYLOAD_LEN);
+
+    payload = &pTxBuf[14u + FE_DIAG_HDR_LEN];
+    put_be32(&payload[0],  record->sourceTimestamp);
+    put_be16(&payload[4],  record->address);
+    put_be16(&payload[6],  record->responseDelayUs);
+    put_be16(&payload[8],  record->interFrameDelayUs);
+    put_be32(&payload[10], record->value);
+    put_be32(&payload[14], record->checksum);
+    payload[18] = record->deviceId;
+    payload[19] = record->operation;
+    payload[20] = record->status;
+    payload[21] = record->valueLen;
+
+    {
+        uint8 rawLen;
+
+        rawLen = (record->valueLen < CAN_DIAG_RAW_MAX) ? record->valueLen : (uint8)CAN_DIAG_RAW_MAX;
+        if (rawLen > 0u)
+            memcpy(&payload[FE_DIAG_PAYLOAD_FIXED], record->rawPayload, rawLen);
+        if (rawLen < FE_DIAG_PAYLOAD_RAW_MAX)
+            memset(&payload[FE_DIAG_PAYLOAD_FIXED + rawLen], 0,
+                   FE_DIAG_PAYLOAD_RAW_MAX - rawLen);
+    }
+
+    if (ethTotal > (14u + ethPayload))
+        memset(&pTxBuf[14u + ethPayload], 0, ethTotal - (14u + ethPayload));
+
+    frame_eth_submit_tx_descriptor(txDescr, pTxBuf, ethTotal);
+
+    if (!frame_eth_wait_tx_done(txDescr))
+    {
+        IfxGeth_Eth_wakeupTransmitter(&s_geth, IfxGeth_TxDmaChannel_0);
+        g_feStats.txWakeups++;
+        frame_eth_snapshot_tx_dma();
+        g_feStats.txDescOwn = txDescr->TDES3.R.OWN;
+        g_feStats.txTimeouts++;
+        g_feStats.diagTxErrors++;
+        frame_eth_recover_tx_ring(TRUE);
+        return FALSE;
+    }
+
+    frame_eth_clear_tx_status_flags();
+    g_feStats.diagRecordsSent++;
+    return TRUE;
+}
+
+static void frame_eth_begin_tx_from_ready(void)
+{
+    uint32 bytes;
+
+    bytes = s_frameBytes;
+    if (bytes > FE_MAX_FRAME_BYTES)
+        bytes = FE_MAX_FRAME_BYTES;
+
+    if (bytes <= (uint32)sizeof(s_txFrameBuf))
+    {
+        memcpy(s_txFrameBuf, s_framePtr[s_readyIdx], bytes);
+        s_txPixels = s_txFrameBuf;
+    }
+    else
+    {
+        s_txPixels = s_framePtr[s_readyIdx];
+    }
+
+    s_frameReady  = FALSE;
+    s_txActive    = 1u;
+    s_txSeq       = s_frameSeq++;
+    s_txFragCnt   = (uint8)((bytes + FE_MAX_PAYLOAD - 1u) / FE_MAX_PAYLOAD);
+    s_txFragIdx   = 0u;
+    s_txOffset    = 0u;
+    s_txRemaining = bytes;
+    s_txTimestamp = s_frameTimestamp;
+
+    g_feStats.txFramesQueued++;
+}
 
 boolean frame_eth_send_pending(void)
 {
-    if (!s_frameReady)
-        return FALSE;
+    uint16 chunkLen;
 
-    frame_eth_update_link_status(FALSE);
-    if (g_feStats.linkUp == 0u || s_macSynced == 0u)
-        return FALSE;
-
-    s_frameReady = FALSE;
-    const uint8 *pixels = s_framePtr[s_readyIdx];
-    uint16 seq = s_frameSeq++;
-
-    /* Compute fragment count dynamically based on current frame size */
-    uint8 fragCnt = (uint8)((s_frameBytes + FE_MAX_PAYLOAD - 1u) / FE_MAX_PAYLOAD);
-
-    uint32 remaining = s_frameBytes;
-    uint16 offset    = 0;
-    uint8  fragIdx   = 0;
-
-    while (remaining > 0)
+    if (s_txActive != 0u && s_frameReady)
     {
-        uint16 chunkLen = (remaining > FE_MAX_PAYLOAD)
-                        ? (uint16)FE_MAX_PAYLOAD
-                        : (uint16)remaining;
+        s_frameReady = FALSE;
+        g_feStats.txReadyDropped++;
+    }
 
-        if (!send_fragment(pixels, seq, fragIdx, fragCnt,
-                           offset, chunkLen, s_frameTimestamp))
+    if (s_txActive == 0u && !s_frameReady)
+        return FALSE;
+
+    if (s_txActive == 0u)
+    {
+        frame_eth_update_link_status(FALSE);
+        if (g_feStats.linkUp == 0u || s_macSynced == 0u)
         {
-            /* TX error — abort remaining fragments for this frame */
+            s_frameReady = FALSE;
+            g_feStats.txReadyDropped++;
+            g_feStats.txLastFailReason = FE_TX_FAIL_LINK;
+            g_feStats.txLastFailFrag   = 0u;
             return FALSE;
         }
 
-        offset    += chunkLen;
-        remaining -= chunkLen;
-        fragIdx++;
+        frame_eth_begin_tx_from_ready();
     }
 
-    g_feStats.framesSent++;
-    return TRUE;
+    if (s_txRemaining == 0u || s_txFragCnt == 0u || s_txPixels == NULL_PTR)
+    {
+        s_txActive = 0u;
+        s_txPixels = NULL_PTR;
+        return FALSE;
+    }
+
+    chunkLen = (s_txRemaining > FE_MAX_PAYLOAD)
+             ? (uint16)FE_MAX_PAYLOAD
+             : (uint16)s_txRemaining;
+
+    if (!send_fragment(s_txPixels, s_txSeq, s_txFragIdx, s_txFragCnt,
+                       s_txOffset, chunkLen, s_txTimestamp))
+    {
+        g_feStats.txRetries++;
+        return FALSE;
+    }
+
+    s_txOffset    = (uint16)(s_txOffset + chunkLen);
+    s_txRemaining -= chunkLen;
+    s_txFragIdx++;
+
+    if (s_txRemaining == 0u)
+    {
+        s_txActive = 0u;
+        s_txPixels = NULL_PTR;
+        g_feStats.framesSent++;
+        g_feStats.txLastFailReason = FE_TX_FAIL_NONE;
+        g_feStats.txLastFailFrag   = 0u;
+        return TRUE;
+    }
+
+    return FALSE;
 }
 
 boolean frame_eth_send_can_diag_pending(void)
@@ -934,6 +1400,9 @@ boolean frame_eth_send_can_diag_pending(void)
     CanDiagRecord record;
     boolean sent = FALSE;
     uint8 burst = 0u;
+
+    if (s_txActive != 0u || s_frameReady)
+        return FALSE;
 
     frame_eth_update_link_status(FALSE);
     if (g_feStats.linkUp == 0u || s_macSynced == 0u)

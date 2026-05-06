@@ -65,10 +65,16 @@
  * If they are smaller, iLLD places buffer pointers past the end of our
  * array → MAC DMA writes to invalid memory → bus error trap.
  */
-#define FE_TX_BUF_SIZE            1536u
+#define FE_TX_BUF_SIZE            2576u       /* match Infineon lwIP examples: 2560 + 14 + 2 */
 #define FE_TX_DESCRIPTORS         8u          /* must match IFXGETH_MAX_TX_DESCRIPTORS */
 #define FE_RX_DESCRIPTORS         8u          /* must match IFXGETH_MAX_RX_DESCRIPTORS */
 #define FE_RX_BUF_SIZE            1536u       /* must hold a full Ethernet frame (up to 1518 + alignment) */
+
+/* TX diagnostic reason codes exposed through g_feStats.txLastFailReason. */
+#define FE_TX_FAIL_NONE           0u
+#define FE_TX_FAIL_LINK           1u
+#define FE_TX_FAIL_NO_BUFFER      2u
+#define FE_TX_FAIL_TIMEOUT        3u
 
 /* ─── ISR priorities ─── */
 #define FE_GETH_TX_ISR_PRIO       0u          /* polled for TX */
