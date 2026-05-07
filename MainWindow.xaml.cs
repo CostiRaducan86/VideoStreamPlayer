@@ -93,6 +93,9 @@ namespace VilsSharpX
 
         private volatile bool _zeroZeroIsWhite = false;
 
+        /// <summary>Comparison mode: 0=AVTP vs LVDS (default), 1=AVTP vs LSM, 2=LVDS vs LSM</summary>
+        private volatile int _comparisonMode = 0;
+
         // Live AVTP capture settings (Ethernet via SharpPcap)
         private bool _avtpLiveEnabled = true;
         private string? _avtpLiveDeviceHint;
@@ -156,6 +159,7 @@ namespace VilsSharpX
 
         private Frame? _latestA;
         private Frame? _latestB;
+        private Frame? _latestC;
         private Frame? _latestD;
 
         // Snapshot used while paused so overlays/inspectors match the frozen image.
@@ -1853,6 +1857,23 @@ namespace VilsSharpX
             RenderAll();
         }
 
+        private static readonly string[] ComparisonModeLabels = { "LVDS-AVTP", "LSM-LVDS", "LSM-AVTP" };
+
+        private void CmbComparisonMode_SelectionChanged(object sender, System.Windows.Controls.SelectionChangedEventArgs e)
+        {
+            if (_settingsManager.IsLoading) return;
+            _comparisonMode = CmbComparisonMode?.SelectedIndex ?? 0;
+            UpdateComparisonModeLabel();
+            SaveUiSettings();
+            RenderAll();
+        }
+
+        private void UpdateComparisonModeLabel()
+        {
+            if (RunCompModeLabel != null)
+                RunCompModeLabel.Text = ComparisonModeLabels[Math.Clamp(_comparisonMode, 0, ComparisonModeLabels.Length - 1)];
+        }
+
         private void TxtMac_TextChanged(object sender, System.Windows.Controls.TextChangedEventArgs e)
         {
             if (_settingsManager.IsLoading) return;
@@ -3277,10 +3298,12 @@ namespace VilsSharpX
 
         private void ImgA_MouseMove(object sender, MouseEventArgs e) => ShowPixelInfo(e, GetDisplayedFrameForPane(Pane.A), LblA);
         private void ImgB_MouseMove(object sender, MouseEventArgs e) => ShowPixelInfo(e, GetDisplayedFrameForPane(Pane.B), LblB);
+        private void ImgC_MouseMove(object sender, MouseEventArgs e) => ShowPixelInfo(e, _latestC, LblC);
         private void ImgD_MouseMove(object sender, MouseEventArgs e) => ShowPixelInfoDiff(e, LblD);
 
         private void ImgA_MouseLeave(object sender, MouseEventArgs e) => LblA.Text = "";
         private void ImgB_MouseLeave(object sender, MouseEventArgs e) => LblB.Text = "";
+        private void ImgC_MouseLeave(object sender, MouseEventArgs e) => LblC.Text = "";
         private void ImgD_MouseLeave(object sender, MouseEventArgs e) => LblD.Text = "";
 
         private static Pane PaneFromSender(object sender)
@@ -3291,6 +3314,7 @@ namespace VilsSharpX
                 {
                     "ImgA" => Pane.A,
                     "ImgB" => Pane.B,
+                    "ImgC" => Pane.B, // C uses same zoom logic as B
                     _ => Pane.D,
                 };
             }
@@ -3402,6 +3426,65 @@ namespace VilsSharpX
             if (text.StartsWith("0x", StringComparison.OrdinalIgnoreCase))
                 text = text[2..];
             return byte.TryParse(text, System.Globalization.NumberStyles.HexNumber, null, out var v) ? v : fallback;
+        }
+
+        // ─── Menu handlers ─────────────────────────────────────────────────────────
+
+        private void MenuExit_Click(object sender, RoutedEventArgs e) => Close();
+
+        private Window? _hwConfigWindow;
+        private Window? _appSettingsWindow;
+        private Window? _ethConfigWindow;
+
+        private void MenuHardwareConfig_Click(object sender, RoutedEventArgs e)
+        {
+            if (_hwConfigWindow != null && _hwConfigWindow.IsVisible) { _hwConfigWindow.Activate(); return; }
+            HiddenConfigPanel.Children.Remove(GrpHardwareConfig);
+            _hwConfigWindow = new Window
+            {
+                Title = "Hardware Configuration",
+                Owner = this,
+                Width = 380, Height = 260,
+                WindowStartupLocation = WindowStartupLocation.CenterOwner,
+                Content = GrpHardwareConfig,
+                ResizeMode = ResizeMode.NoResize,
+            };
+            _hwConfigWindow.Closed += (s, a) => { _hwConfigWindow.Content = null; HiddenConfigPanel.Children.Add(GrpHardwareConfig); _hwConfigWindow = null; };
+            _hwConfigWindow.Show();
+        }
+
+        private void MenuAppSettings_Click(object sender, RoutedEventArgs e)
+        {
+            if (_appSettingsWindow != null && _appSettingsWindow.IsVisible) { _appSettingsWindow.Activate(); return; }
+            HiddenConfigPanel.Children.Remove(GrpAppSettings);
+            _appSettingsWindow = new Window
+            {
+                Title = "Application Settings",
+                Owner = this,
+                Width = 380, Height = 360,
+                WindowStartupLocation = WindowStartupLocation.CenterOwner,
+                Content = GrpAppSettings,
+                ResizeMode = ResizeMode.NoResize,
+            };
+            _appSettingsWindow.Closed += (s, a) => { _appSettingsWindow.Content = null; HiddenConfigPanel.Children.Add(GrpAppSettings); _appSettingsWindow = null; };
+            _appSettingsWindow.Show();
+        }
+
+        private void MenuEthernetConfig_Click(object sender, RoutedEventArgs e)
+        {
+            if (_ethConfigWindow != null && _ethConfigWindow.IsVisible) { _ethConfigWindow.Activate(); return; }
+            HiddenConfigPanel.Children.Remove(GrpEthernetConfig);
+            _ethConfigWindow = new Window
+            {
+                Title = "Ethernet Configuration",
+                Owner = this,
+                Width = 500, Height = 380,
+                WindowStartupLocation = WindowStartupLocation.CenterOwner,
+                Content = GrpEthernetConfig,
+                ResizeMode = ResizeMode.NoResize,
+            };
+            _ethConfigWindow.Closed += (s, a) => { _ethConfigWindow.Content = null; HiddenConfigPanel.Children.Add(GrpEthernetConfig); _ethConfigWindow = null; };
+            _ethConfigWindow.Show();
         }
     }
 
