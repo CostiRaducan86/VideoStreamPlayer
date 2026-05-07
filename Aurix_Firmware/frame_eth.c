@@ -239,19 +239,32 @@ static void frame_eth_snapshot_tx_dma(void)
 
 static boolean frame_eth_tx_pending_complete(void)
 {
+    volatile uint32 spin;
+
     if (s_txPendingDescr == NULL_PTR)
         return TRUE;
 
-    frame_eth_cache_invalidate_range(s_txPendingDescr, FE_TX_DESC_BYTES);
-    if (s_txPendingDescr->TDES3.R.OWN == 0u)
+    /* TX descriptors are in DSPR0 (non-cached, direct-mapped).  CPU reads
+     * are always coherent with DMA writes — no cache invalidation needed.
+     * Spin until the DMA releases OWN.  At 1 Gbps a max-size Ethernet frame
+     * takes ~12 µs on the wire.  10 000 iterations ≈ 250 µs at 200 MHz
+     * which generously covers normal TX latency including store-and-forward
+     * delay in the MTL TX queue.
+     * If DMA doesn't complete within this window, something is wrong —
+     * recovery will handle it on the next main-loop iteration. */
+    for (spin = 0u; spin < 10000u; spin++)
     {
-        s_txPendingDescr = NULL_PTR;
-        return TRUE;
+        if (s_txPendingDescr->TDES3.R.OWN == 0u)
+        {
+            s_txPendingDescr = NULL_PTR;
+            return TRUE;
+        }
     }
 
-    IfxGeth_Eth_wakeupTransmitter(&s_geth, IfxGeth_TxDmaChannel_0);
+    /* DMA did not release OWN within ~250 µs.  Abort the burst.
+     * frame_eth_recover_tx_ring will fire on the next send attempt
+     * (rate-limited to 100 ms). */
     g_feStats.txWakeups++;
-    frame_eth_snapshot_tx_dma();
     return FALSE;
 }
 
@@ -273,68 +286,6 @@ static void frame_eth_clear_tx_status_flags(void)
                                    IfxGeth_DmaInterruptFlag_abnormalInterruptSummary);
     IfxGeth_dma_clearInterruptFlag(s_geth.gethSFR, IfxGeth_DmaChannel_0,
                                    IfxGeth_DmaInterruptFlag_normalInterruptSummary);
-}
-
-static volatile IfxGeth_TxDescr *frame_eth_next_tx_descriptor(volatile IfxGeth_TxDescr *descr)
-{
-    volatile IfxGeth_TxDescr *base;
-    volatile IfxGeth_TxDescr *last;
-
-    base = s_geth.txChannel[IfxGeth_TxDmaChannel_0].txDescrList->descr;
-    last = &base[FE_TX_DESCRIPTORS - 1u];
-
-    return (descr == last) ? base : &descr[1];
-}
-
-static void frame_eth_submit_tx_descriptor(volatile IfxGeth_TxDescr *descr,
-                                           const uint8 *packetBuffer,
-                                           uint32 packetLength)
-{
-    volatile IfxGeth_TxDescr *nextDescr;
-
-    if (descr == NULL_PTR)
-        return;
-
-    nextDescr = frame_eth_next_tx_descriptor(descr);
-
-    /* Publish the payload first, then publish a complete descriptor, and only
-     * after that move the DMA tail pointer.  The iLLD helper sets OWN before
-     * FD and writes the tail pointer before we can flush the descriptor, which
-     * is timing-sensitive when running without the debugger attached.
-     */
-    frame_eth_cache_writeback_invalidate_range(packetBuffer, packetLength);
-
-    descr->TDES2.U           = 0u;
-    descr->TDES2.R.B1L       = packetLength;
-    descr->TDES2.R.VTIR      = 0u;
-    descr->TDES2.R.B2L       = 0u;
-    descr->TDES2.R.TTSE_TMWD = 0u;
-    descr->TDES2.R.IOC       = 1u;
-
-    descr->TDES3.U           = 0u;
-    descr->TDES3.R.FL_TPL    = packetLength;
-    descr->TDES3.R.TSE       = 0u;
-    descr->TDES3.R.CIC_TPL   = 3u;
-    descr->TDES3.R.SAIC      = 0u;
-    descr->TDES3.R.CPC       = 0u;
-    descr->TDES3.R.LD        = 1u;
-    descr->TDES3.R.FD        = 1u;
-    __dsync();
-    frame_eth_cache_writeback_invalidate_range(descr, FE_TX_DESC_BYTES);
-
-    descr->TDES3.R.OWN = 1u;
-    __dsync();
-    frame_eth_cache_writeback_invalidate_range(descr, FE_TX_DESC_BYTES);
-
-    s_geth.txChannel[IfxGeth_TxDmaChannel_0].txDescrPtr = descr;
-    IfxGeth_dma_setTxDescriptorTailPointer(s_geth.gethSFR, IfxGeth_TxDmaChannel_0,
-                                           (uint32)nextDescr);
-    IfxGeth_Eth_startTransmitter(&s_geth, IfxGeth_TxDmaChannel_0);
-    IfxGeth_Eth_wakeupTransmitter(&s_geth, IfxGeth_TxDmaChannel_0);
-    s_geth.txChannel[IfxGeth_TxDmaChannel_0].txDescrPtr = nextDescr;
-    s_geth.txChannel[IfxGeth_TxDmaChannel_0].txCount++;
-
-    s_txPendingDescr = descr;
 }
 
 static void frame_eth_phy_select_page(uint8 phyAddr, uint32 page)
@@ -409,11 +360,32 @@ static void frame_eth_recover_tx_ring(boolean force)
                                                FE_TX_DESC_RING_BYTES);
     frame_eth_clear_tx_status_flags();
 
+    /* Set tail pointer = base so DMA knows the ring is empty.  Without this,
+     * the stale tail pointer from before the stop may cause the DMA to scan
+     * OWN=0 descriptors and enter Suspended state from which a tail-pointer
+     * write is needed to recover — creating a chicken-and-egg problem. */
+    {
+        volatile IfxGeth_TxDescr *base;
+        base = s_txChannelConfig.txDescrList->descr;
+        IfxGeth_dma_setTxDescriptorTailPointer(s_geth.gethSFR,
+                                               IfxGeth_TxDmaChannel_0,
+                                               (uint32)base);
+    }
+
     IfxGeth_Eth_startTransmitters(&s_geth, 1u);
     IfxGeth_Eth_wakeupTransmitter(&s_geth, IfxGeth_TxDmaChannel_0);
     g_feStats.txRecoveries++;
     g_feStats.txWakeups++;
     frame_eth_snapshot_tx_dma();
+
+    /* Reset the frame TX state machine so we don't attempt to send a partial
+     * frame whose early fragments may have been lost.  The next complete frame
+     * from the LVDS assembler will start a fresh burst. */
+    s_txActive   = 0u;
+    s_txPixels   = NULL_PTR;
+    s_txFragIdx  = 0u;
+    s_txOffset   = 0u;
+    s_txRemaining = 0u;
 }
 
 static boolean frame_eth_sync_mac_with_phy(void)
@@ -601,6 +573,18 @@ static void frame_eth_update_link_status(boolean force)
         if (frame_eth_sync_mac_with_phy())
             frame_eth_recover_tx_ring(TRUE);
     }
+
+    /* Paranoia: ensure MAC transmitter is enabled.
+     * A debug-disconnect transient or OCDS event could clear MAC_CONFIGURATION.TE.
+     * Re-enabling is harmless if it's already set. */
+    if (newLink != 0u && s_macSynced != 0u)
+    {
+        if (s_geth.gethSFR->MAC_CONFIGURATION.B.TE == 0u)
+        {
+            IfxGeth_mac_enableTransmitter(s_geth.gethSFR);
+            g_feStats.txRecoveries++;
+        }
+    }
 }
 
 /* ==================== Update device parameters ==================== */
@@ -624,6 +608,16 @@ static void apply_device_params(FrameEthDevice device)
     }
 }
 
+/* ==================== TX ISR — required for standalone operation ==================== */
+
+#if (FE_GETH_TX_ISR_PRIO > 0u)
+IFX_INTERRUPT(ISR_frame_eth_geth_tx, 0, FE_GETH_TX_ISR_PRIO)
+{
+    /* Clear Transmit Interrupt (TI) + Normal Interrupt Summary (NIS) */
+    MODULE_GETH.DMA_CH[0].STATUS.U = (1u << 0) | (1u << 15);  /* TI=bit0, NIS=bit15 */
+}
+#endif
+
 /* ==================== GETH initialisation ==================== */
 
 void frame_eth_init(FrameEthDevice device)
@@ -646,6 +640,25 @@ void frame_eth_init(FrameEthDevice device)
     s_lastLinkUp = 0u;
     s_macSynced = 0u;
     g_feStats.initStep = 1;
+
+    /* ╔═══════════════════════════════════════════════════════════════════════╗
+     * ║  STANDALONE FIX: 3-second boot delay + explicit module enable.       ║
+     * ║  Without debugger, CPU boots instantly; PHY CLK125 (GREFCLK on      ║
+     * ║  P11.5) needs time to stabilize. Without this, GETH TX hangs.       ║
+     * ╚═══════════════════════════════════════════════════════════════════════╝ */
+    {
+        uint32 bootDelay = (uint32)IfxStm_getTicksFromMilliseconds(&MODULE_STM0, 3000u);
+        uint32 bootStart = (uint32)IfxStm_getLower(&MODULE_STM0);
+        while (((uint32)IfxStm_getLower(&MODULE_STM0) - bootStart) < bootDelay) {}
+    }
+
+    /* Explicit module enable BEFORE initModule (matches official Infineon example) */
+    IfxGeth_enableModule(&MODULE_GETH);
+    {
+        uint32 enDelay = (uint32)IfxStm_getTicksFromMilliseconds(&MODULE_STM0, 100u);
+        uint32 enStart = (uint32)IfxStm_getLower(&MODULE_STM0);
+        while (((uint32)IfxStm_getLower(&MODULE_STM0) - enStart) < enDelay) {}
+    }
 
     /* Default config */
     IfxGeth_Eth_initModuleConfig(&config, &MODULE_GETH);
@@ -796,6 +809,14 @@ void frame_eth_init(FrameEthDevice device)
      * RX DMA descriptor ring from being exhausted. */
     IfxGeth_Eth_startReceivers(&s_geth, 1u);
     g_feStats.initStep = 61;
+
+    /* STANDALONE FIX: Enable DMA TX interrupt (NIE + TIE) so the ISR can clear
+     * the TI flag.  Without this, DMA TX stalls after first TBU in standalone. */
+#if (FE_GETH_TX_ISR_PRIO > 0u)
+    s_geth.gethSFR->DMA_CH[0].INTERRUPT_ENABLE.B.NIE = 1u;
+    s_geth.gethSFR->DMA_CH[0].INTERRUPT_ENABLE.B.TIE = 1u;
+#endif
+    g_feStats.initStep = 62;
 
     /* Clear frame buffers */
     memset(s_frameBufA, 0, FE_MAX_FRAME_BYTES);
@@ -1139,25 +1160,34 @@ static boolean send_can_diag_record_legacy(const CanDiagRecord *record, uint16 s
 }
 #endif
 
-static uint8 *frame_eth_get_tx_buffer_from_ring(volatile IfxGeth_TxDescr **txDescrOut)
+static uint8 *frame_eth_get_tx_buffer(void)
 {
-    volatile IfxGeth_TxDescr *txDescr;
-
-    if (txDescrOut == NULL_PTR)
-        return NULL_PTR;
-
-    *txDescrOut = NULL_PTR;
-
     if (!frame_eth_tx_pending_complete())
         return NULL_PTR;
 
-    txDescr = IfxGeth_Eth_getActualTxDescriptor(&s_geth, IfxGeth_TxDmaChannel_0);
-    frame_eth_cache_invalidate_range(txDescr, FE_TX_DESC_BYTES);
-    if ((txDescr == NULL_PTR) || (txDescr->TDES3.R.OWN != 0u))
-        return NULL_PTR;
+    /* Use the EXACT iLLD function — same as the official Ethernet example.
+     * getTransmitBuffer checks OWN==0 on the current descriptor and returns
+     * the buffer pointer (TDES0.U). Returns NULL if descriptor is busy. */
+    return (uint8 *)IfxGeth_Eth_getTransmitBuffer(&s_geth, IfxGeth_TxDmaChannel_0);
+}
 
-    *txDescrOut = txDescr;
-    return (uint8 *)txDescr->TDES0.U;
+/* Use the EXACT iLLD sendTransmitBuffer function for TX submission.
+ * This function: sets TDES3 fields (FL, TSE, CIC, SAIC, CPC),
+ * sets B1L+IOC on last descriptor, sets OWN=1, shuffles descriptor,
+ * sets FD=1 on first, writes tail pointer, calls wakeupTransmitter,
+ * advances txDescrPtr.  All proven to work in the official Ethernet example. */
+static void frame_eth_send_packet(uint32 packetLength)
+{
+    volatile IfxGeth_TxDescr *descr;
+
+    /* Remember which descriptor we just submitted so tx_pending_complete
+     * can poll its OWN bit before the next send. */
+    descr = IfxGeth_Eth_getActualTxDescriptor(&s_geth, IfxGeth_TxDmaChannel_0);
+
+    /* Call the standard iLLD function — identical to what the lwIP netif uses */
+    IfxGeth_Eth_sendTransmitBuffer(&s_geth, packetLength, IfxGeth_TxDmaChannel_0);
+
+    s_txPendingDescr = descr;
 }
 
 static boolean send_fragment(const uint8 *framePixels, uint16 frameSeq,
@@ -1167,7 +1197,6 @@ static boolean send_fragment(const uint8 *framePixels, uint16 frameSeq,
 {
     uint32 ethPayload;
     uint32 ethTotal;
-    volatile IfxGeth_TxDescr *txDescr;
     uint8 *pTxBuf;
     uint8 *hdr;
 
@@ -1185,7 +1214,7 @@ static boolean send_fragment(const uint8 *framePixels, uint16 frameSeq,
     if (ethTotal < 60u)
         ethTotal = 60u;
 
-    pTxBuf = frame_eth_get_tx_buffer_from_ring(&txDescr);
+    pTxBuf = frame_eth_get_tx_buffer();
     if (pTxBuf == NULL_PTR)
     {
         IfxGeth_Eth_wakeupTransmitter(&s_geth, IfxGeth_TxDmaChannel_0);
@@ -1194,6 +1223,7 @@ static boolean send_fragment(const uint8 *framePixels, uint16 frameSeq,
         g_feStats.txNoBuffer++;
         g_feStats.txLastFailReason = FE_TX_FAIL_NO_BUFFER;
         g_feStats.txLastFailFrag   = fragIdx;
+        frame_eth_recover_tx_ring(FALSE);
         return FALSE;
     }
 
@@ -1217,8 +1247,7 @@ static boolean send_fragment(const uint8 *framePixels, uint16 frameSeq,
     if (ethTotal > (14u + ethPayload))
         memset(&pTxBuf[14u + ethPayload], 0, ethTotal - (14u + ethPayload));
 
-    frame_eth_clear_tx_status_flags();
-    frame_eth_submit_tx_descriptor(txDescr, pTxBuf, ethTotal);
+    frame_eth_send_packet(ethTotal);
     g_feStats.fragmentsSent++;
     return TRUE;
 }
@@ -1227,7 +1256,6 @@ static boolean send_can_diag_record(const CanDiagRecord *record, uint16 sequence
 {
     uint32 ethPayload;
     uint32 ethTotal;
-    volatile IfxGeth_TxDescr *txDescr;
     uint8 *pTxBuf;
     uint8 *hdr;
     uint8 *payload;
@@ -1253,7 +1281,7 @@ static boolean send_can_diag_record(const CanDiagRecord *record, uint16 sequence
     if (ethTotal < 60u)
         ethTotal = 60u;
 
-    pTxBuf = frame_eth_get_tx_buffer_from_ring(&txDescr);
+    pTxBuf = frame_eth_get_tx_buffer();
     if (pTxBuf == NULL_PTR)
     {
         IfxGeth_Eth_wakeupTransmitter(&s_geth, IfxGeth_TxDmaChannel_0);
@@ -1261,6 +1289,7 @@ static boolean send_can_diag_record(const CanDiagRecord *record, uint16 sequence
         frame_eth_snapshot_tx_dma();
         g_feStats.txNoBuffer++;
         g_feStats.diagTxErrors++;
+        frame_eth_recover_tx_ring(FALSE);
         return FALSE;
     }
 
@@ -1301,8 +1330,7 @@ static boolean send_can_diag_record(const CanDiagRecord *record, uint16 sequence
     if (ethTotal > (14u + ethPayload))
         memset(&pTxBuf[14u + ethPayload], 0, ethTotal - (14u + ethPayload));
 
-    frame_eth_clear_tx_status_flags();
-    frame_eth_submit_tx_descriptor(txDescr, pTxBuf, ethTotal);
+    frame_eth_send_packet(ethTotal);
     g_feStats.diagRecordsSent++;
     return TRUE;
 }
@@ -1372,32 +1400,36 @@ boolean frame_eth_send_pending(void)
         return FALSE;
     }
 
-    chunkLen = (s_txRemaining > FE_MAX_PAYLOAD)
-             ? (uint16)FE_MAX_PAYLOAD
-             : (uint16)s_txRemaining;
-
-    if (!send_fragment(s_txPixels, s_txSeq, s_txFragIdx, s_txFragCnt,
-                       s_txOffset, chunkLen, s_txTimestamp))
+    /* Send ALL remaining fragments in one burst.  The spin-wait inside
+     * frame_eth_tx_pending_complete() (~12-15 µs per fragment at 1 Gbps)
+     * ensures each fragment completes before submitting the next.
+     * Total burst time for Nichia (12 frags): ~180 µs
+     * Total burst time for Osram  (18 frags): ~270 µs
+     * Both are ≪ 20 ms frame period — main loop is not starved. */
+    while (s_txRemaining > 0u)
     {
-        g_feStats.txRetries++;
-        return FALSE;
+        chunkLen = (s_txRemaining > FE_MAX_PAYLOAD)
+                 ? (uint16)FE_MAX_PAYLOAD
+                 : (uint16)s_txRemaining;
+
+        if (!send_fragment(s_txPixels, s_txSeq, s_txFragIdx, s_txFragCnt,
+                           s_txOffset, chunkLen, s_txTimestamp))
+        {
+            g_feStats.txRetries++;
+            return FALSE;
+        }
+
+        s_txOffset    = (uint16)(s_txOffset + chunkLen);
+        s_txRemaining -= chunkLen;
+        s_txFragIdx++;
     }
 
-    s_txOffset    = (uint16)(s_txOffset + chunkLen);
-    s_txRemaining -= chunkLen;
-    s_txFragIdx++;
-
-    if (s_txRemaining == 0u)
-    {
-        s_txActive = 0u;
-        s_txPixels = NULL_PTR;
-        g_feStats.framesSent++;
-        g_feStats.txLastFailReason = FE_TX_FAIL_NONE;
-        g_feStats.txLastFailFrag   = 0u;
-        return TRUE;
-    }
-
-    return FALSE;
+    s_txActive = 0u;
+    s_txPixels = NULL_PTR;
+    g_feStats.framesSent++;
+    g_feStats.txLastFailReason = FE_TX_FAIL_NONE;
+    g_feStats.txLastFailFrag   = 0u;
+    return TRUE;
 }
 
 boolean frame_eth_send_can_diag_pending(void)

@@ -77,7 +77,7 @@
 #define FE_TX_FAIL_TIMEOUT        3u
 
 /* ─── ISR priorities ─── */
-#define FE_GETH_TX_ISR_PRIO       0u          /* polled for TX */
+#define FE_GETH_TX_ISR_PRIO       10u         /* non-zero: required for standalone TX! */
 #define FE_GETH_RX_ISR_PRIO       0u          /* polled for RX */
 
 /* ─── Device type selector ─── */
