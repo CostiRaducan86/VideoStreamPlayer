@@ -657,7 +657,23 @@ static uint32 build_eth_status_text(char *buf, uint8 bufSize)
 
     if (s_ethTxStalled != 0u)
     {
-        if (g_feStats.txLastFailReason == FE_TX_FAIL_LINK)
+        if ((g_feStats.txDmaStatus & ETH_DMA_STAT_FATAL_BUS) != 0u)
+        {
+            append_text(buf, &pos, "FB!", bufSize);
+        }
+        else if ((g_feStats.txDmaStatus & ETH_DMA_STAT_TX_STOPPED) != 0u)
+        {
+            append_text(buf, &pos, "TS!", bufSize);
+        }
+        else if ((g_feStats.txDmaStatus & ETH_DMA_STAT_TX_BUF_UNAV) != 0u)
+        {
+            append_text(buf, &pos, "BU!", bufSize);
+        }
+        else if ((g_feStats.txDmaStatus & ETH_DMA_STAT_ABNORMAL) != 0u)
+        {
+            append_text(buf, &pos, "AI!", bufSize);
+        }
+        else if (g_feStats.txLastFailReason == FE_TX_FAIL_LINK)
         {
             append_text(buf, &pos, "LK!", bufSize);
         }
@@ -667,26 +683,7 @@ static uint32 build_eth_status_text(char *buf, uint8 bufSize)
         }
         else if (g_feStats.txLastFailReason == FE_TX_FAIL_TIMEOUT)
         {
-            if ((g_feStats.txDmaStatus & ETH_DMA_STAT_FATAL_BUS) != 0u)
-            {
-                append_text(buf, &pos, "FB!", bufSize);
-            }
-            else if ((g_feStats.txDmaStatus & ETH_DMA_STAT_TX_STOPPED) != 0u)
-            {
-                append_text(buf, &pos, "TS!", bufSize);
-            }
-            else if ((g_feStats.txDmaStatus & ETH_DMA_STAT_TX_BUF_UNAV) != 0u)
-            {
-                append_text(buf, &pos, "BU!", bufSize);
-            }
-            else if ((g_feStats.txDmaStatus & ETH_DMA_STAT_ABNORMAL) != 0u)
-            {
-                append_text(buf, &pos, "AI!", bufSize);
-            }
-            else
-            {
-                append_text(buf, &pos, "TO!", bufSize);
-            }
+            append_text(buf, &pos, "TO!", bufSize);
         }
         else
         {
