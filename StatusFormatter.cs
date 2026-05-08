@@ -31,7 +31,7 @@ public static class StatusFormatter
         if (isPaused) return "Paused";
 
         if (noSignal)
-            return $"Running @: {0.0:F1} fps";
+            return "";
 
         if (bFpsEma <= 0.0)
             return "Running";

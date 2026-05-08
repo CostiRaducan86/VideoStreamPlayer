@@ -142,8 +142,9 @@ public sealed class AviTripletRecorder : IDisposable
     }
 
     /// <summary>
-    /// Binary-patches the <c>microSecPerFrame</c> DWORD in an AVI file header (offset 32)
-    /// so that playback speed reflects the measured recording rate.
+    /// Binary-patches the AVI file header so that playback speed reflects the measured recording rate.
+    /// Patches both <c>avih.dwMicroSecPerFrame</c> (offset 32) and all <c>strh.dwRate/dwScale</c>
+    /// fields so that VLC and other players honour the actual fps.
     /// </summary>
     public static void PatchAviFps(string path, double actualFps)
     {
@@ -153,7 +154,6 @@ public sealed class AviTripletRecorder : IDisposable
         uint microSecPerFrame = (uint)Math.Round(1_000_000.0 / actualFps);
         if (microSecPerFrame == 0) microSecPerFrame = 1;
 
-        // AVI layout: RIFF(4) size(4) AVI (4) LIST(4) size(4) hdrl(4) avih(4) size(4) → offset 32 = microSecPerFrame
         using var fs = new FileStream(path, FileMode.Open, FileAccess.ReadWrite, FileShare.None);
         if (fs.Length < 36) return;
 
@@ -163,9 +163,58 @@ public sealed class AviTripletRecorder : IDisposable
         if (System.Text.Encoding.ASCII.GetString(magic, 0, 4) != "RIFF") return;
         if (System.Text.Encoding.ASCII.GetString(magic, 8, 4) != "AVI ") return;
 
+        // Patch avih.dwMicroSecPerFrame at offset 32
         fs.Position = 32;
-        var buf = BitConverter.GetBytes(microSecPerFrame);
-        fs.Write(buf, 0, 4);
+        fs.Write(BitConverter.GetBytes(microSecPerFrame), 0, 4);
+
+        // Scan for "strh" chunks and patch dwScale (offset+20) / dwRate (offset+24).
+        // strh is typically within the first 1024 bytes of the file.
+        fs.Position = 12; // after RIFF header
+        var tag = new byte[4];
+        long limit = Math.Min(fs.Length, 4096);
+        while (fs.Position + 8 <= limit)
+        {
+            long chunkPos = fs.Position;
+            if (fs.Read(tag, 0, 4) < 4) break;
+            var sizeBuf = new byte[4];
+            if (fs.Read(sizeBuf, 0, 4) < 4) break;
+
+            string tagStr = System.Text.Encoding.ASCII.GetString(tag);
+
+            if (tagStr == "LIST")
+            {
+                // LIST chunk: read the list type (4 bytes) and continue scanning inside
+                fs.Position = chunkPos + 12; // skip LIST + size + type
+                continue;
+            }
+
+            if (tagStr == "strh")
+            {
+                long dataStart = fs.Position;
+                // strh data layout: fccType(4) fccHandler(4) dwFlags(4) wPriority(2) wLanguage(2)
+                //                   dwInitialFrames(4) dwScale(4) dwRate(4) ...
+                // dwScale at offset+20, dwRate at offset+24
+                if (dataStart + 28 <= fs.Length)
+                {
+                    // Set dwScale=1, dwRate=round(actualFps) for integer fps
+                    // Or dwScale=1000, dwRate=round(actualFps*1000) for fractional fps
+                    uint dwScale = 1000;
+                    uint dwRate = (uint)Math.Round(actualFps * 1000);
+                    if (dwRate == 0) dwRate = 1;
+
+                    fs.Position = dataStart + 20;
+                    fs.Write(BitConverter.GetBytes(dwScale), 0, 4);
+                    fs.Write(BitConverter.GetBytes(dwRate), 0, 4);
+                }
+            }
+
+            // Skip to next chunk (chunks are 2-byte aligned)
+            uint chunkSize = BitConverter.ToUInt32(sizeBuf, 0);
+            long nextPos = chunkPos + 8 + chunkSize;
+            if (chunkSize % 2 != 0) nextPos++; // pad byte
+            if (nextPos <= chunkPos + 8) break; // safety
+            fs.Position = nextPos;
+        }
     }
 
     public static void SaveSingleFrameCompareXlsx(

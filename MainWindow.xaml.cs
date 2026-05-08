@@ -166,6 +166,11 @@ namespace VilsSharpX
         private Frame? _latestC;
         private Frame? _latestD;
 
+        /// <summary>UTC time when the last LVDS/Ethernet frame arrived (for signal-lost detection).</summary>
+        private DateTime _lastLvdsFrameUtc = DateTime.MinValue;
+        /// <summary>Persistent flag: true when LVDS signal timed out, cleared when a new LVDS frame arrives.</summary>
+        private bool _lvdsSignalLost;
+
         // Snapshot used while paused so overlays/inspectors match the frozen image.
         private Frame? _pausedA;
         private Frame? _pausedB;
@@ -435,6 +440,8 @@ namespace VilsSharpX
                 _pausedD = null;
                 _pausedMatchedA = null;
             }
+            _lastLvdsFrameUtc = DateTime.MinValue;
+            _lvdsSignalLost = false;
         }
 
         private void ApplyNoSignalUiState(bool noSignal)
@@ -1758,6 +1765,8 @@ namespace VilsSharpX
             {
                 _matchedAForDiff = matched;
                 _latestB = new Frame(_currentWidth, _currentHeight, frame, DateTime.UtcNow);
+                _lastLvdsFrameUtc = DateTime.UtcNow;
+                _lvdsSignalLost = false;
             }
 
             // When the main playback loop is NOT running (user didn't press Start),
@@ -2008,7 +2017,7 @@ namespace VilsSharpX
             if (!_playback.IsRunning)
             {
                 Start(fps);
-                if (BtnStart != null) BtnStart.Content = "Pause";
+                if (BtnStart != null) BtnStart.Content = "⏸ Pause";
                 ApplyButtonStates(isRunning: true, isPaused: false);
                 return;
             }
@@ -2154,7 +2163,12 @@ namespace VilsSharpX
                 return;
             }
 
-            int fps = (int)Math.Clamp(_playback.TargetFps > 0 ? _playback.TargetFps : 30, 1, 1000);
+            // AVI fps must match the actual recording rate. RenderAll is called by
+            // UiRefreshLoop at ~60fps (16ms period), NOT at the AVTP input rate (~100fps).
+            // Using _playback.TargetFps would create a mismatch causing VLC playback to be too fast.
+            // The recorder's PatchAviFps will further refine the header to the exact measured rate.
+            const int RecordFps = 50;
+            int fps = RecordFps;
 
             // Pass pane C dimensions if Basler camera is active
             int cW = 0, cH = 0;
@@ -2168,12 +2182,24 @@ namespace VilsSharpX
 
             if (success)
             {
-                if (BtnRecord != null) BtnRecord.Content = "Stop Rec";
+                if (BtnRecord != null)
+                {
+                    BtnRecord.Content = "⏹ Stop Rec";
+                    BtnRecord.Background = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(0xCC, 0x33, 0x33));
+                    BtnRecord.Foreground = System.Windows.Media.Brushes.White;
+                }
+                // Disable other buttons while recording
+                if (BtnStart != null) BtnStart.IsEnabled = false;
+                if (BtnPrev != null) BtnPrev.IsEnabled = false;
+                if (BtnNext != null) BtnNext.IsEnabled = false;
+                if (BtnStop != null) BtnStop.IsEnabled = false;
+                if (BtnSave != null) BtnSave.IsEnabled = false;
+                if (BtnLoadFiles != null) BtnLoadFiles.IsEnabled = false;
                 LblStatus.Text = statusMessage ?? "Recording started.";
             }
             else
             {
-                if (BtnRecord != null) BtnRecord.Content = "Record";
+                if (BtnRecord != null) BtnRecord.Content = "⏺ Record";
                 MessageBox.Show($"Failed to start recording: {error}", "Record error");
             }
         }
@@ -2181,7 +2207,16 @@ namespace VilsSharpX
         private void StopRecording()
         {
             LblStatus.Text = _recordingManager.StopRecording();
-            if (BtnRecord != null) BtnRecord.Content = "Record";
+            if (BtnRecord != null)
+            {
+                BtnRecord.Content = "⏺ Record";
+                BtnRecord.Background = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(0xDD, 0xDD, 0xDD));
+                BtnRecord.Foreground = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(0x00, 0x00, 0x00));
+            }
+            // Re-enable Pause and Stop buttons after recording stops
+            if (BtnStart != null) BtnStart.IsEnabled = true;
+            if (BtnStop != null) BtnStop.IsEnabled = true;
+            if (BtnSave != null) BtnSave.IsEnabled = true;
         }
 
         private void Pause()
@@ -2236,7 +2271,7 @@ namespace VilsSharpX
             // Re-render once from the frozen snapshot to avoid any race with in-flight frame updates.
             RenderAll();
 
-            if (BtnStart != null) BtnStart.Content = "Start";
+            if (BtnStart != null) BtnStart.Content = "▶ Start";
             if (LblRunInfoA != null) LblRunInfoA.Text = "Paused";
             if (LblRunInfoB != null) LblRunInfoB.Text = "Paused";
             if (LblRunInfoC != null) LblRunInfoC.Text = "Paused";
@@ -2263,7 +2298,7 @@ namespace VilsSharpX
                 _pausedMatchedA = null;
             }
 
-            if (BtnStart != null) BtnStart.Content = "Pause";
+            if (BtnStart != null) BtnStart.Content = "⏸ Pause";
 
             ApplyButtonStates(isRunning: true, isPaused: false);
 
@@ -2533,6 +2568,12 @@ namespace VilsSharpX
                 StartOsramEthCapture();
             }
 
+            // Arm LVDS timeout: if no LVDS frame arrives within LiveSignalLostTimeoutSec,
+            // _lvdsSignalLost will be set to true by the RenderAll timeout check.
+            // Without this, _lastLvdsFrameUtc stays MinValue after Stop→Start and the
+            // timeout never fires (the guard requires != MinValue).
+            _lastLvdsFrameUtc = DateTime.UtcNow;
+
             // Pane C: Basler USB3 camera live capture
             StartBaslerCapture();
 
@@ -2589,7 +2630,7 @@ namespace VilsSharpX
             if (_recordingManager.IsRecording) StopRecording();
             _playback.Resume();
             _playback.Stop();
-            if (BtnStart != null) BtnStart.Content = "Start";
+            if (BtnStart != null) BtnStart.Content = "▶ Start";
 
             lock (_frameLock)
             {
@@ -2598,6 +2639,8 @@ namespace VilsSharpX
                 _pausedD = null;
                 _latestC = null;
             }
+            _lastLvdsFrameUtc = DateTime.MinValue;
+            _lvdsSignalLost = false;
             ResetSyncState();
 
             StopRenderLoops();
@@ -3048,6 +3091,25 @@ namespace VilsSharpX
                 EnterWaitingForSignalState();
             }
 
+            // LVDS Ethernet: if ECU powers off, LVDS frames stop arriving.
+            // Detect timeout and reset pane B + D to "Signal not available".
+            if (_playback.IsRunning
+                && _modeOfOperation == ModeOfOperation.AvtpLiveMonitor
+                && !_playback.IsPaused
+                && !_lvdsSignalLost
+                && _lastLvdsFrameUtc != DateTime.MinValue
+                && ((_nichiaEthCapture != null && _nichiaEthCapture.IsCapturing)
+                 || (_osramEthCapture != null && _osramEthCapture.IsCapturing))
+                && (DateTime.UtcNow - _lastLvdsFrameUtc) > TimeSpan.FromSeconds(LiveSignalLostTimeoutSec))
+            {
+                _lvdsSignalLost = true;
+                lock (_frameLock)
+                {
+                    _latestB = null;
+                    _matchedAForDiff = null;
+                }
+            }
+
             // In AVTP Live mode, while waiting for the first frame, keep showing "Signal not available".
             if (ShouldShowNoSignalWhileRunning())
             {
@@ -3146,13 +3208,20 @@ namespace VilsSharpX
             if (LblDiffStats != null)
                 LblDiffStats.Text = StatusFormatter.FormatDiffStats(maxDiff, minDiff, meanAbsDiff, aboveDeadband, totalDarkPixels, _lastMatchNcc);
 
-            // Per-pane no-signal: when AVTP hasn't arrived but ETH pane B is valid,
-            // show "Signal not available" only on pane A.
+            // Per-pane no-signal visibility.
+            // When AVTP is lost: show "Signal not available" on A, B, D (comparison meaningless without reference).
+            // When LVDS is lost: show "Signal not available" on B, D (no ECU output to compare).
             if (_modeOfOperation == ModeOfOperation.AvtpLiveMonitor && !_liveCapture.HasAvtpFrame)
             {
                 if (NoSignalA != null) NoSignalA.Visibility = Visibility.Visible;
-                if (NoSignalB != null) NoSignalB.Visibility = Visibility.Collapsed;
-                if (NoSignalD != null) NoSignalD.Visibility = Visibility.Collapsed;
+                if (NoSignalB != null) NoSignalB.Visibility = Visibility.Visible;
+                if (NoSignalD != null) NoSignalD.Visibility = Visibility.Visible;
+            }
+            else if (_lvdsSignalLost)
+            {
+                if (NoSignalA != null) NoSignalA.Visibility = Visibility.Collapsed;
+                if (NoSignalB != null) NoSignalB.Visibility = Visibility.Visible;
+                if (NoSignalD != null) NoSignalD.Visibility = Visibility.Visible;
             }
             else
             {
@@ -3191,7 +3260,8 @@ namespace VilsSharpX
             if (LblRunInfoB != null)
             {
                 double paneBFps = 0.0;
-                if (!noSignal)
+                bool bNoSignal = noSignal || _lvdsSignalLost;
+                if (!bNoSignal)
                 {
                     if (_nichiaEthCapture != null && _nichiaEthCapture.IsCapturing && _nichiaEthCapture.FpsEma > 0.0)
                         paneBFps = _nichiaEthCapture.FpsEma;
@@ -3203,7 +3273,7 @@ namespace VilsSharpX
                         paneBFps = _playback.BFpsEma;
                 }
 
-                LblRunInfoB.Text = StatusFormatter.FormatRunInfoB(isRunning, isPaused, noSignal, paneBFps);
+                LblRunInfoB.Text = StatusFormatter.FormatRunInfoB(isRunning, isPaused, bNoSignal, paneBFps);
             }
 
             // Pane C: Basler camera FPS
@@ -3677,20 +3747,36 @@ namespace VilsSharpX
         private Window? _appSettingsWindow;
         private Window? _ethConfigWindow;
 
+        /// <summary>
+        /// Wraps a config GroupBox in a DockPanel with an OK button at the bottom.
+        /// Returns a tuple of (wrapper, okButton) so the caller can wire up close logic.
+        /// </summary>
+        private static (DockPanel wrapper, Button okBtn) WrapWithOkButton(UIElement content)
+        {
+            var okBtn = new Button { Content = "OK", Padding = new Thickness(24, 4, 24, 4), HorizontalAlignment = HorizontalAlignment.Center, Margin = new Thickness(0, 8, 0, 4) };
+            DockPanel.SetDock(okBtn, Dock.Bottom);
+            var panel = new DockPanel { LastChildFill = true };
+            panel.Children.Add(okBtn);
+            panel.Children.Add(content);
+            return (panel, okBtn);
+        }
+
         private void MenuHardwareConfig_Click(object sender, RoutedEventArgs e)
         {
             if (_hwConfigWindow != null && _hwConfigWindow.IsVisible) { _hwConfigWindow.Activate(); return; }
             HiddenConfigPanel.Children.Remove(GrpHardwareConfig);
+            var (wrapper, okBtn) = WrapWithOkButton(GrpHardwareConfig);
             _hwConfigWindow = new Window
             {
                 Title = "Hardware Configuration",
                 Owner = this,
-                Width = 380, Height = 260,
+                Width = 380, Height = 290,
                 WindowStartupLocation = WindowStartupLocation.CenterOwner,
-                Content = GrpHardwareConfig,
+                Content = wrapper,
                 ResizeMode = ResizeMode.NoResize,
             };
-            _hwConfigWindow.Closed += (s, a) => { _hwConfigWindow.Content = null; HiddenConfigPanel.Children.Add(GrpHardwareConfig); _hwConfigWindow = null; };
+            okBtn.Click += (_, _) => _hwConfigWindow.Close();
+            _hwConfigWindow.Closed += (s, a) => { ((DockPanel)_hwConfigWindow.Content).Children.Clear(); HiddenConfigPanel.Children.Add(GrpHardwareConfig); _hwConfigWindow = null; };
             _hwConfigWindow.Show();
         }
 
@@ -3698,16 +3784,18 @@ namespace VilsSharpX
         {
             if (_appSettingsWindow != null && _appSettingsWindow.IsVisible) { _appSettingsWindow.Activate(); return; }
             HiddenConfigPanel.Children.Remove(GrpAppSettings);
+            var (wrapper, okBtn) = WrapWithOkButton(GrpAppSettings);
             _appSettingsWindow = new Window
             {
                 Title = "Application Settings",
                 Owner = this,
-                Width = 380, Height = 360,
+                Width = 380, Height = 390,
                 WindowStartupLocation = WindowStartupLocation.CenterOwner,
-                Content = GrpAppSettings,
+                Content = wrapper,
                 ResizeMode = ResizeMode.NoResize,
             };
-            _appSettingsWindow.Closed += (s, a) => { _appSettingsWindow.Content = null; HiddenConfigPanel.Children.Add(GrpAppSettings); _appSettingsWindow = null; };
+            okBtn.Click += (_, _) => _appSettingsWindow.Close();
+            _appSettingsWindow.Closed += (s, a) => { ((DockPanel)_appSettingsWindow.Content).Children.Clear(); HiddenConfigPanel.Children.Add(GrpAppSettings); _appSettingsWindow = null; };
             _appSettingsWindow.Show();
         }
 
@@ -3715,16 +3803,18 @@ namespace VilsSharpX
         {
             if (_ethConfigWindow != null && _ethConfigWindow.IsVisible) { _ethConfigWindow.Activate(); return; }
             HiddenConfigPanel.Children.Remove(GrpEthernetConfig);
+            var (wrapper, okBtn) = WrapWithOkButton(GrpEthernetConfig);
             _ethConfigWindow = new Window
             {
                 Title = "Ethernet Configuration",
                 Owner = this,
-                Width = 500, Height = 380,
+                Width = 500, Height = 410,
                 WindowStartupLocation = WindowStartupLocation.CenterOwner,
-                Content = GrpEthernetConfig,
+                Content = wrapper,
                 ResizeMode = ResizeMode.NoResize,
             };
-            _ethConfigWindow.Closed += (s, a) => { _ethConfigWindow.Content = null; HiddenConfigPanel.Children.Add(GrpEthernetConfig); _ethConfigWindow = null; };
+            okBtn.Click += (_, _) => _ethConfigWindow.Close();
+            _ethConfigWindow.Closed += (s, a) => { ((DockPanel)_ethConfigWindow.Content).Children.Clear(); HiddenConfigPanel.Children.Add(GrpEthernetConfig); _ethConfigWindow = null; };
             _ethConfigWindow.Show();
         }
     }
