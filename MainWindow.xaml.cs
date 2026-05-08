@@ -10,6 +10,7 @@ using SharpPcap;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
+using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
@@ -210,6 +211,10 @@ namespace VilsSharpX
         private bool _overlayPendingD;
 
         private bool _isUpdatingDiffThresholdText;
+
+        // ─── Fullscreen pane toggle ────────────────────────────────────────
+        private Pane? _fullscreenPane;
+        private int _fsOrigRow, _fsOrigCol, _fsOrigRowSpan, _fsOrigColSpan;
 
         private WriteableBitmap _wbA = null!;
         private WriteableBitmap _wbB = null!;
@@ -765,14 +770,15 @@ namespace VilsSharpX
 
             var dpi = VisualTreeHelper.GetDpi(this);
             double pixelsPerDip = dpi.PixelsPerDip;
+            double fontScale = _fullscreenPane != null ? 2.0 : 1.0;
 
             if (pane == Pane.D && fA != null && fB != null)
             {
-                _overlayRenderer.RenderDiffOverlay(ovr, img, fA, fB, zoom.ScaleX, imgToOvr, pixelsPerDip, _diffThreshold, _zeroZeroIsWhite);
+                _overlayRenderer.RenderDiffOverlay(ovr, img, fA, fB, zoom.ScaleX, imgToOvr, pixelsPerDip, _diffThreshold, _zeroZeroIsWhite, fontScale);
             }
             else
             {
-                _overlayRenderer.RenderGrayscaleOverlay(ovr, img, fBase, zoom.ScaleX, imgToOvr, pixelsPerDip);
+                _overlayRenderer.RenderGrayscaleOverlay(ovr, img, fBase, zoom.ScaleX, imgToOvr, pixelsPerDip, fontScale);
             }
         }
 
@@ -1203,6 +1209,10 @@ namespace VilsSharpX
 
             _latestC = new Frame(w, h, frame, DateTime.UtcNow);
             BitmapUtils.Blit(_wbC, frame, w);
+
+            // Enqueue pane C frame for recording
+            if (_recordingManager.IsRecording)
+                _recordingManager.TryEnqueueFrameC(frame);
 
             // Show live image, hide "Signal not available" overlay
             if (NoSignalC != null) NoSignalC.Visibility = Visibility.Collapsed;
@@ -2145,7 +2155,16 @@ namespace VilsSharpX
             }
 
             int fps = (int)Math.Clamp(_playback.TargetFps > 0 ? _playback.TargetFps : 30, 1, 1000);
-            var (success, error, statusMessage) = _recordingManager.StartRecording(fps, _diffThreshold);
+
+            // Pass pane C dimensions if Basler camera is active
+            int cW = 0, cH = 0;
+            var latC = _latestC;
+            if (latC != null)
+            {
+                cW = latC.Width;
+                cH = latC.Height;
+            }
+            var (success, error, statusMessage) = _recordingManager.StartRecording(fps, _diffThreshold, cW, cH);
 
             if (success)
             {
@@ -2564,6 +2583,9 @@ namespace VilsSharpX
 
         private void StopAll()
         {
+            // Exit fullscreen if active
+            ExitFullscreen();
+
             if (_recordingManager.IsRecording) StopRecording();
             _playback.Resume();
             _playback.Stop();
@@ -3426,6 +3448,112 @@ namespace VilsSharpX
             return Pane.A;
         }
 
+        // ─── Fullscreen pane toggle ────────────────────────────────────────
+
+        private System.Windows.Controls.Border GetPaneBorder(Pane pane) => pane switch
+        {
+            Pane.A => PaneA,
+            Pane.B => PaneB,
+            Pane.C => PaneC,
+            _ => PaneD,
+        };
+
+        private void ToggleFullscreen(Pane pane)
+        {
+            if (_fullscreenPane != null)
+            {
+                // Exit fullscreen
+                ExitFullscreen();
+            }
+            else
+            {
+                // Enter fullscreen for the selected pane
+                EnterFullscreen(pane);
+            }
+
+            // Refresh overlays if paused
+            if (_playback.IsPaused)
+                UpdateOverlaysAll();
+        }
+
+        private void EnterFullscreen(Pane pane)
+        {
+            var border = GetPaneBorder(pane);
+
+            // Save original grid position
+            _fsOrigRow = Grid.GetRow(border);
+            _fsOrigCol = Grid.GetColumn(border);
+            _fsOrigRowSpan = Grid.GetRowSpan(border);
+            _fsOrigColSpan = Grid.GetColumnSpan(border);
+
+            // Hide all other panes
+            System.Windows.Controls.Border[] allPanes = [PaneA, PaneB, PaneC, PaneD];
+            foreach (var p in allPanes)
+            {
+                if (p != border) p.Visibility = Visibility.Collapsed;
+            }
+
+            // Hide sidebars and comparison bar
+            SidebarCan.Visibility = Visibility.Collapsed;
+            SidebarInfo.Visibility = Visibility.Collapsed;
+            ComparisonBar.Visibility = Visibility.Collapsed;
+
+            // ButtonBar stays visible below the pane (in its natural row 3, spanning all columns)
+            Grid.SetColumnSpan(ButtonBar, 3);
+
+            // Make the selected pane span rows 0-2 (leave row 3 for ButtonBar, hide row 4)
+            Grid.SetRow(border, 0);
+            Grid.SetColumn(border, 0);
+            Grid.SetRowSpan(border, 3);
+            Grid.SetColumnSpan(border, 3);
+            border.Margin = new Thickness(4);
+
+            _fullscreenPane = pane;
+        }
+
+        private void ExitFullscreen()
+        {
+            if (_fullscreenPane == null) return;
+
+            var pane = _fullscreenPane.Value;
+            var border = GetPaneBorder(pane);
+
+            // Reset zoom/pan for this pane (coordinates are invalid after container resize)
+            _zoomPan.Reset((int)pane);
+            ClearOverlay(pane);
+
+            // Restore original grid position
+            Grid.SetRow(border, _fsOrigRow);
+            Grid.SetColumn(border, _fsOrigCol);
+            Grid.SetRowSpan(border, _fsOrigRowSpan);
+            Grid.SetColumnSpan(border, _fsOrigColSpan);
+
+            // Restore original margin
+            if (pane == Pane.B)
+                border.Margin = new Thickness(4, 4, 6, 4);
+            else if (pane == Pane.C)
+                border.Margin = new Thickness(6, 4, 4, 4);
+            else
+                border.Margin = new Thickness(4);
+
+            // Show all panes again
+            PaneA.Visibility = Visibility.Visible;
+            PaneB.Visibility = Visibility.Visible;
+            PaneC.Visibility = Visibility.Visible;
+            PaneD.Visibility = Visibility.Visible;
+
+            // Show sidebars, button bar, comparison bar
+            SidebarCan.Visibility = Visibility.Visible;
+            SidebarInfo.Visibility = Visibility.Visible;
+            ButtonBar.Visibility = Visibility.Visible;
+            ComparisonBar.Visibility = Visibility.Visible;
+
+            // Restore ButtonBar to its normal grid span
+            Grid.SetColumnSpan(ButtonBar, 2);
+
+            _fullscreenPane = null;
+        }
+
         private void Img_PreviewMouseWheel(object sender, MouseWheelEventArgs e)
         {
             if (sender is not System.Windows.Controls.Image img) return;
@@ -3445,6 +3573,14 @@ namespace VilsSharpX
         {
             if (sender is not System.Windows.Controls.Image img) return;
             var pane = PaneFromSender(sender);
+
+            // Plain double-click (no Ctrl): toggle fullscreen for this pane
+            if (e.ClickCount >= 2 && (Keyboard.Modifiers & ModifierKeys.Control) == 0)
+            {
+                ToggleFullscreen(pane);
+                e.Handled = true;
+                return;
+            }
 
             if (_zoomPan.StartPan((int)pane, e, this, img))
             {

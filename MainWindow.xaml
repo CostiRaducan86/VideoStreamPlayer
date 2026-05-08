@@ -267,7 +267,7 @@
             </Grid.ColumnDefinitions>
 
         <!-- A (top, spans col 0+1) -->
-        <Border Grid.Row="0" Grid.Column="0" Grid.ColumnSpan="2" BorderBrush="#ABADB3" BorderThickness="1" CornerRadius="8" Margin="4" Padding="6" Background="#F0F0F0">
+        <Border x:Name="PaneA" Grid.Row="0" Grid.Column="0" Grid.ColumnSpan="2" BorderBrush="#ABADB3" BorderThickness="1" CornerRadius="8" Margin="4" Padding="6" Background="#F0F0F0">
             <Grid ClipToBounds="True">
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto" />
@@ -306,7 +306,7 @@
         </Border>
 
         <!-- B (middle-left: LVDS) -->
-        <Border Grid.Row="1" Grid.Column="0" BorderBrush="#ABADB3" BorderThickness="1" CornerRadius="8" Margin="4,4,6,4" Padding="6" Background="#F0F0F0">
+        <Border x:Name="PaneB" Grid.Row="1" Grid.Column="0" BorderBrush="#ABADB3" BorderThickness="1" CornerRadius="8" Margin="4,4,6,4" Padding="6" Background="#F0F0F0">
             <Grid ClipToBounds="True">
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto" />
@@ -345,7 +345,7 @@
         </Border>
 
         <!-- C (middle-right: Basler Camera) -->
-        <Border Grid.Row="1" Grid.Column="1" BorderBrush="#ABADB3" BorderThickness="1" CornerRadius="8" Margin="6,4,4,4" Padding="6" Background="#F0F0F0">
+        <Border x:Name="PaneC" Grid.Row="1" Grid.Column="1" BorderBrush="#ABADB3" BorderThickness="1" CornerRadius="8" Margin="6,4,4,4" Padding="6" Background="#F0F0F0">
             <Grid ClipToBounds="True">
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto" />
@@ -384,7 +384,7 @@
         </Border>
 
         <!-- D (bottom, spans col 0+1: Comparison) -->
-        <Border Grid.Row="2" Grid.Column="0" Grid.ColumnSpan="2" BorderBrush="#ABADB3" BorderThickness="1" CornerRadius="8" Margin="4" Padding="6" Background="#F0F0F0">
+        <Border x:Name="PaneD" Grid.Row="2" Grid.Column="0" Grid.ColumnSpan="2" BorderBrush="#ABADB3" BorderThickness="1" CornerRadius="8" Margin="4" Padding="6" Background="#F0F0F0">
             <Grid ClipToBounds="True">
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto" />
@@ -422,7 +422,7 @@
         </Border>
 
         <!-- Right side: CAN/UART (spans rows 0-1: A + B/C) -->
-        <GroupBox Grid.Row="0" Grid.RowSpan="2" Grid.Column="2" Header="CAN/UART Monitor" Padding="8" Margin="4" Background="#F0F0F0">
+        <GroupBox x:Name="SidebarCan" Grid.Row="0" Grid.RowSpan="2" Grid.Column="2" Header="CAN/UART Monitor" Padding="8" Margin="4" Background="#F0F0F0">
             <Grid>
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto"/>
@@ -608,7 +608,7 @@
         </GroupBox>
 
         <!-- Right side bottom: LVDS Info + Status -->
-        <Grid Grid.Row="2" Grid.RowSpan="3" Grid.Column="2" Margin="4,4,4,8">
+        <Grid x:Name="SidebarInfo" Grid.Row="2" Grid.RowSpan="3" Grid.Column="2" Margin="4,4,4,8">
             <Grid.RowDefinitions>
                 <RowDefinition Height="3*"/>
                 <RowDefinition Height="2*"/>
@@ -649,7 +649,7 @@
         </Grid>
 
         <!-- Button Bar (under pane D) -->
-        <Grid Grid.Row="3" Grid.ColumnSpan="2" Margin="4,6,4,0">
+        <Grid x:Name="ButtonBar" Grid.Row="3" Grid.ColumnSpan="2" Margin="4,6,4,0">
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto"/>
                 <RowDefinition Height="Auto"/>
@@ -692,7 +692,7 @@
         </Grid>
 
         <!-- Comparison Options (under buttons) -->
-        <Border Grid.Row="4" Grid.ColumnSpan="2" BorderBrush="#ABADB3" BorderThickness="1" CornerRadius="6" Margin="4,8,4,4" Padding="10,6" Background="#F8F8F8">
+        <Border x:Name="ComparisonBar" Grid.Row="4" Grid.ColumnSpan="2" BorderBrush="#ABADB3" BorderThickness="1" CornerRadius="6" Margin="4,8,4,4" Padding="10,6" Background="#F8F8F8">
             <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
                 <TextBlock Text="Comparison Options" FontWeight="SemiBold" VerticalAlignment="Center" Margin="0,0,16,0"/>
                 <Rectangle Width="1" Height="22" Fill="#ABADB3" Margin="0,0,16,0" VerticalAlignment="Center"/>

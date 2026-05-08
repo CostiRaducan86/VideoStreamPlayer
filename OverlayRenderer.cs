@@ -66,7 +66,8 @@ public sealed class OverlayRenderer
         Frame frame,
         double zoomScale,
         GeneralTransform imgToOverlay,
-        double pixelsPerDip)
+        double pixelsPerDip,
+        double fontScale = 1.0)
     {
         double aw = img.ActualWidth;
         double ah = img.ActualHeight;
@@ -82,7 +83,7 @@ public sealed class OverlayRenderer
         }
 
         int step = 1;
-        double fontSize = Math.Max(1.0, TextSizePx);
+        double fontSize = Math.Max(1.0, TextSizePx * fontScale);
 
         // Compute visible pixel range to avoid iterating off-screen pixels
         // (critical for large images like 1792×480 camera frames).
@@ -186,7 +187,8 @@ public sealed class OverlayRenderer
         GeneralTransform imgToOverlay,
         double pixelsPerDip,
         byte diffThreshold,
-        bool zeroZeroIsWhite)
+        bool zeroZeroIsWhite,
+        double fontScale = 1.0)
     {
         double aw = img.ActualWidth;
         double ah = img.ActualHeight;
@@ -202,7 +204,7 @@ public sealed class OverlayRenderer
         }
 
         int step = 1;
-        double fontSize = Math.Max(1.0, TextSizePx);
+        double fontSize = Math.Max(1.0, TextSizePx * fontScale);
 
         // Compute visible pixel range (viewport culling for large images)
         int xMin = 0, xMax = frameA.Width - 1;

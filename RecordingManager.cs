@@ -13,6 +13,7 @@ namespace VilsSharpX
         private readonly int _height = height;
 
         private AviTripletRecorder? _recorder;
+        private AviSingleRecorder? _recorderC;
         private bool _isRecording;
         private int _recordDropped;
 
@@ -23,7 +24,8 @@ namespace VilsSharpX
         /// <summary>
         /// Starts recording to AVI files.
         /// </summary>
-        public (bool success, string? error, string? statusMessage) StartRecording(int fps, byte diffThreshold)
+        public (bool success, string? error, string? statusMessage) StartRecording(int fps, byte diffThreshold,
+            int paneCWidth = 0, int paneCHeight = 0)
         {
             if (fps <= 0) fps = 30;
 
@@ -40,14 +42,28 @@ namespace VilsSharpX
                 _recorder?.Dispose();
                 _recorder = new AviTripletRecorder(pathA, pathB, pathD, _width, _height, fps, 
                     compareCsvPath: pathXlsx, compareDeadband: diffThreshold);
+
+                // Pane C (Basler camera) – optional, only if valid dimensions supplied
+                _recorderC?.Dispose();
+                _recorderC = null;
+                string cInfo = "";
+                if (paneCWidth > 0 && paneCHeight > 0)
+                {
+                    string pathC = MakeUniquePath(Path.Combine(outDir, $"{ts}_LSM.avi"));
+                    _recorderC = new AviSingleRecorder(pathC, paneCWidth, paneCHeight, fps);
+                    cInfo = "/LSM";
+                }
+
                 _recordDropped = 0;
                 _isRecording = true;
-                return (true, null, $"Recording AVI to: {outDir}  ({ts}_AVTP/LVDS/Compare) @ {fps} fps");
+                return (true, null, $"Recording AVI to: {outDir}  ({ts}_AVTP/LVDS/Compare{cInfo}) @ {fps} fps");
             }
             catch (Exception ex)
             {
                 try { _recorder?.Dispose(); } catch { }
+                try { _recorderC?.Dispose(); } catch { }
                 _recorder = null;
+                _recorderC = null;
                 _isRecording = false;
                 return (false, ex.Message, null);
             }
@@ -69,6 +85,7 @@ namespace VilsSharpX
                 catch { }
             }
             try { _recorder?.Dispose(); } catch { }
+            try { _recorderC?.Dispose(); } catch { }
 
             // After Dispose, ActualFps is updated and AVI headers are patched.
             if (_recorder != null && actualFps <= 0)
@@ -76,6 +93,7 @@ namespace VilsSharpX
                 try { actualFps = _recorder.ActualFps; } catch { }
             }
             _recorder = null;
+            _recorderC = null;
 
             string fpsInfo = actualFps > 0 ? $" Actual fps: {actualFps:F1}" : "";
             return _recordDropped > 0
@@ -91,6 +109,20 @@ namespace VilsSharpX
             if (!_isRecording || _recorder == null) return false;
 
             if (!_recorder.TryEnqueue(aData, bData, dBgr))
+            {
+                _recordDropped++;
+                return false;
+            }
+            return true;
+        }
+
+        /// <summary>
+        /// Enqueues a pane C (Basler/LSM camera) frame for recording.
+        /// </summary>
+        public bool TryEnqueueFrameC(byte[] gray8Data)
+        {
+            if (!_isRecording || _recorderC == null) return false;
+            if (!_recorderC.TryEnqueue(gray8Data))
             {
                 _recordDropped++;
                 return false;
