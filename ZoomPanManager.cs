@@ -12,7 +12,7 @@ namespace VilsSharpX;
 public sealed class ZoomPanManager
 {
     public const double MinZoom = 1.0;
-    public const double MaxZoom = 40.0;
+    public const double MaxZoom = 100.0;
     public const double ZoomFactor = 1.15;
 
     private readonly ScaleTransform[] _zooms;
@@ -26,10 +26,10 @@ public sealed class ZoomPanManager
 
     public ZoomPanManager()
     {
-        _zooms = new ScaleTransform[3];
-        _pans = new TranslateTransform[3];
+        _zooms = new ScaleTransform[4];
+        _pans = new TranslateTransform[4];
 
-        for (int i = 0; i < 3; i++)
+        for (int i = 0; i < 4; i++)
         {
             _zooms[i] = new ScaleTransform(1.0, 1.0);
             _pans[i] = new TranslateTransform(0.0, 0.0);
@@ -37,32 +37,34 @@ public sealed class ZoomPanManager
     }
 
     /// <summary>
-    /// Gets the zoom transform for the specified pane index (0=A, 1=B, 2=D).
+    /// Gets the zoom transform for the specified pane index (0=A, 1=B, 2=D, 3=C).
     /// </summary>
-    public ScaleTransform GetZoom(int paneIndex) => _zooms[Math.Clamp(paneIndex, 0, 2)];
+    public ScaleTransform GetZoom(int paneIndex) => _zooms[Math.Clamp(paneIndex, 0, 3)];
 
     /// <summary>
-    /// Gets the pan transform for the specified pane index (0=A, 1=B, 2=D).
+    /// Gets the pan transform for the specified pane index (0=A, 1=B, 2=D, 3=C).
     /// </summary>
-    public TranslateTransform GetPan(int paneIndex) => _pans[Math.Clamp(paneIndex, 0, 2)];
+    public TranslateTransform GetPan(int paneIndex) => _pans[Math.Clamp(paneIndex, 0, 3)];
 
     /// <summary>
     /// Gets both transforms for the specified pane index.
     /// </summary>
     public (ScaleTransform zoom, TranslateTransform pan) GetTransforms(int paneIndex)
     {
-        int i = Math.Clamp(paneIndex, 0, 2);
+        int i = Math.Clamp(paneIndex, 0, 3);
         return (_zooms[i], _pans[i]);
     }
 
     /// <summary>
     /// Attaches the zoom/pan transforms to the given images.
     /// </summary>
-    public void AttachToImages(Image imgA, Image imgB, Image imgD)
+    public void AttachToImages(Image imgA, Image imgB, Image imgD, Image? imgC = null)
     {
         imgA.RenderTransform = CreateTransformGroup(0);
         imgB.RenderTransform = CreateTransformGroup(1);
         imgD.RenderTransform = CreateTransformGroup(2);
+        if (imgC != null)
+            imgC.RenderTransform = CreateTransformGroup(3);
     }
 
     private TransformGroup CreateTransformGroup(int paneIndex)

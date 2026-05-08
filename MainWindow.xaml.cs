@@ -27,6 +27,7 @@ namespace VilsSharpX
         {
             A = 0,
             B = 1,
+            C = 3,
             D = 2,
         }
 
@@ -146,6 +147,8 @@ namespace VilsSharpX
         // Ethernet capture from Aurix GETH → raw ethertype 0x88B5 (pane B)
         private NichiaEthCapture? _nichiaEthCapture;
         private OsramEthCapture? _osramEthCapture;
+        // Basler USB3 camera capture (pane C)
+        private BaslerCameraCapture? _baslerCapture;
         private LsmCanDiagCapture? _canDiagCapture;
         private readonly LsmCanDiagStore _canDiagStore = new(32768);
         private readonly ObservableCollection<CanDiagRowView> _canDiagRows = [];
@@ -196,18 +199,21 @@ namespace VilsSharpX
 
         private readonly DispatcherTimer _overlayTimerA;
         private readonly DispatcherTimer _overlayTimerB;
+        private readonly DispatcherTimer _overlayTimerC;
         private readonly DispatcherTimer _overlayTimerD;
 
         private readonly DateTime _statusOverrideUntil = DateTime.MinValue;
 
         private bool _overlayPendingA;
         private bool _overlayPendingB;
+        private bool _overlayPendingC;
         private bool _overlayPendingD;
 
         private bool _isUpdatingDiffThresholdText;
 
         private WriteableBitmap _wbA = null!;
         private WriteableBitmap _wbB = null!;
+        private WriteableBitmap _wbC = null!;
         private WriteableBitmap _wbD = null!;
 
         // --- AVTP Transmitter (managed by AvtpTransmitManager) ---
@@ -245,10 +251,12 @@ namespace VilsSharpX
             InitializeCanDiagMonitor();
             ImgA.Source = _wbA;
             ImgB.Source = _wbB;
+            ImgC.Source = _wbC;
             ImgD.Source = _wbD;
-            _zoomPan.AttachToImages(ImgA, ImgB, ImgD);
+            _zoomPan.AttachToImages(ImgA, ImgB, ImgD, ImgC);
             _overlayTimerA = MakeOverlayTimer(Pane.A);
             _overlayTimerB = MakeOverlayTimer(Pane.B);
+            _overlayTimerC = MakeOverlayTimer(Pane.C);
             _overlayTimerD = MakeOverlayTimer(Pane.D);
 
             InitializeDefaultPatterns();
@@ -280,6 +288,10 @@ namespace VilsSharpX
             // Bitmaps
             _wbA = BitmapUtils.MakeGray8(w, h);
             _wbB = BitmapUtils.MakeGray8(w, h);
+            // Pane C bitmap is sized to camera resolution, not LSM active area.
+            // Initialised with a 1×1 placeholder; resized on first Basler frame.
+            if (_wbC == null)
+                _wbC = BitmapUtils.MakeGray8(1, 1);
             _wbD = BitmapUtils.MakeBgr24(w, h);
 
             // Helper classes that depend on resolution
@@ -327,6 +339,7 @@ namespace VilsSharpX
             // Rebind bitmaps to UI
             if (ImgA != null) ImgA.Source = _wbA;
             if (ImgB != null) ImgB.Source = _wbB;
+            if (ImgC != null) ImgC.Source = _wbC;
             if (ImgD != null) ImgD.Source = _wbD;
 
             // Reset frame state
@@ -423,14 +436,17 @@ namespace VilsSharpX
         {
             if (NoSignalA != null) NoSignalA.Visibility = noSignal ? Visibility.Visible : Visibility.Collapsed;
             if (NoSignalB != null) NoSignalB.Visibility = noSignal ? Visibility.Visible : Visibility.Collapsed;
+            if (NoSignalC != null) NoSignalC.Visibility = noSignal ? Visibility.Visible : Visibility.Collapsed;
             if (NoSignalD != null) NoSignalD.Visibility = noSignal ? Visibility.Visible : Visibility.Collapsed;
 
             if (noSignal)
             {
                 if (LblA != null) LblA.Text = "";
                 if (LblB != null) LblB.Text = "";
+                if (LblC != null) LblC.Text = "";
                 if (LblD != null) LblD.Text = "";
                 if (LblDiffStats != null) LblDiffStats.Text = "";
+                if (LblRunInfoC != null) LblRunInfoC.Text = "";
             }
         }
 
@@ -483,6 +499,7 @@ namespace VilsSharpX
             {
                 Pane.A => _overlayPendingA,
                 Pane.B => _overlayPendingB,
+                Pane.C => _overlayPendingC,
                 _ => _overlayPendingD,
             };
 
@@ -497,6 +514,7 @@ namespace VilsSharpX
             {
                 case Pane.A: _overlayPendingA = false; break;
                 case Pane.B: _overlayPendingB = false; break;
+                case Pane.C: _overlayPendingC = false; break;
                 default: _overlayPendingD = false; break;
             }
 
@@ -514,6 +532,10 @@ namespace VilsSharpX
                 case Pane.B:
                     _overlayPendingB = false;
                     if (_overlayTimerB.IsEnabled) _overlayTimerB.Stop();
+                    break;
+                case Pane.C:
+                    _overlayPendingC = false;
+                    if (_overlayTimerC.IsEnabled) _overlayTimerC.Stop();
                     break;
                 default:
                     _overlayPendingD = false;
@@ -542,6 +564,10 @@ namespace VilsSharpX
                     _overlayPendingB = true;
                     if (!_overlayTimerB.IsEnabled) _overlayTimerB.Start();
                     break;
+                case Pane.C:
+                    _overlayPendingC = true;
+                    if (!_overlayTimerC.IsEnabled) _overlayTimerC.Start();
+                    break;
                 default:
                     _overlayPendingD = true;
                     if (!_overlayTimerD.IsEnabled) _overlayTimerD.Start();
@@ -555,6 +581,7 @@ namespace VilsSharpX
             {
                 Pane.A => (ImgA, OvrA, _zoomPan.GetZoom(0)),
                 Pane.B => (ImgB, OvrB, _zoomPan.GetZoom(1)),
+                Pane.C => (ImgC, OvrC, _zoomPan.GetZoom(3)),
                 _ => (ImgD, OvrD, _zoomPan.GetZoom(2)),
             };
         }
@@ -580,6 +607,7 @@ namespace VilsSharpX
                     var f = pane switch
                     {
                         Pane.A => a,
+                        Pane.C => _latestC,
                         _ => d,
                     };
                     return f;
@@ -752,6 +780,7 @@ namespace VilsSharpX
         {
             UpdateOverlay(Pane.A);
             UpdateOverlay(Pane.B);
+            UpdateOverlay(Pane.C);
             UpdateOverlay(Pane.D);
         }
 
@@ -1129,6 +1158,54 @@ namespace VilsSharpX
                 _osramEthCapture = null;
                 AppendDiagLog("[ofe] Osram Ethernet capture stopped");
             }
+        }
+
+        // ─── Basler camera capture (pane C) ────────────────────────────────
+
+        private void StartBaslerCapture()
+        {
+            try
+            {
+                StopBaslerCapture();
+                _baslerCapture = BaslerCameraCapture.Start(AppendDiagLog);
+                _baslerCapture.OnFrameReady += (frame, w, h) =>
+                    Dispatcher.BeginInvoke(() => HandleBaslerFrameReady(frame, w, h));
+                AppendDiagLog("[basler] Basler camera capture started");
+            }
+            catch (Exception ex)
+            {
+                AppendDiagLog($"[basler] Camera capture error: {ex.Message}");
+            }
+        }
+
+        private void StopBaslerCapture()
+        {
+            if (_baslerCapture != null)
+            {
+                _baslerCapture.Dispose();
+                _baslerCapture = null;
+                AppendDiagLog("[basler] Basler camera capture stopped");
+            }
+        }
+
+        private void HandleBaslerFrameReady(byte[] frame, int w, int h)
+        {
+            // While paused or stopped, keep the frozen frame — don't update pane C.
+            if (_playback.IsPaused || _playback.Cts == null) return;
+
+            // Resize _wbC if the camera resolution changed
+            if (_wbC.PixelWidth != w || _wbC.PixelHeight != h)
+            {
+                _wbC = BitmapUtils.MakeGray8(w, h);
+                ImgC.Source = _wbC;
+                AppendDiagLog($"[basler] Pane C bitmap resized to {w}×{h}");
+            }
+
+            _latestC = new Frame(w, h, frame, DateTime.UtcNow);
+            BitmapUtils.Blit(_wbC, frame, w);
+
+            // Show live image, hide "Signal not available" overlay
+            if (NoSignalC != null) NoSignalC.Visibility = Visibility.Collapsed;
         }
 
         private DispatcherTimer? _canDiagStatusTimer;
@@ -1910,6 +1987,7 @@ namespace VilsSharpX
             try { StopCanDiagCapture(); } catch { /* ignore */ }
             try { StopNichiaEthCapture(); } catch { /* ignore */ }
             try { StopOsramEthCapture(); } catch { /* ignore */ }
+            try { StopBaslerCapture(); } catch { /* ignore */ }
             try { _lvdsManager?.Dispose(); } catch { /* ignore */ }
         }
 
@@ -2142,6 +2220,7 @@ namespace VilsSharpX
             if (BtnStart != null) BtnStart.Content = "Start";
             if (LblRunInfoA != null) LblRunInfoA.Text = "Paused";
             if (LblRunInfoB != null) LblRunInfoB.Text = "Paused";
+            if (LblRunInfoC != null) LblRunInfoC.Text = "Paused";
             LblStatus.Text = "Paused.";
 
             ApplyButtonStates(isRunning: true, isPaused: true);
@@ -2435,6 +2514,9 @@ namespace VilsSharpX
                 StartOsramEthCapture();
             }
 
+            // Pane C: Basler USB3 camera live capture
+            StartBaslerCapture();
+
 
         }
 
@@ -2492,6 +2574,7 @@ namespace VilsSharpX
                 _pausedA = null;
                 _pausedB = null;
                 _pausedD = null;
+                _latestC = null;
             }
             ResetSyncState();
 
@@ -2506,6 +2589,7 @@ namespace VilsSharpX
             StopCanDiagCapture();
             StopNichiaEthCapture();
             StopOsramEthCapture();
+            StopBaslerCapture();
 
             // Ensure we don't remain paused after stopping.
             _playback.PauseGate.Set();
@@ -2525,7 +2609,14 @@ namespace VilsSharpX
 
             ClearOverlay(Pane.A);
             ClearOverlay(Pane.B);
+            ClearOverlay(Pane.C);
             ClearOverlay(Pane.D);
+
+            // Pane C: show "Signal not available", clear label, reset zoom
+            if (NoSignalC != null) NoSignalC.Visibility = Visibility.Visible;
+            if (LblRunInfoC != null) LblRunInfoC.Text = "";
+            _latestC = null;
+            _zoomPan.Reset((int)Pane.C);
 
             // Restore button states: Load Files + Start enabled; others disabled
             ApplyButtonStates(false);
@@ -3092,6 +3183,20 @@ namespace VilsSharpX
 
                 LblRunInfoB.Text = StatusFormatter.FormatRunInfoB(isRunning, isPaused, noSignal, paneBFps);
             }
+
+            // Pane C: Basler camera FPS
+            if (LblRunInfoC != null)
+            {
+                double paneCFps = _baslerCapture != null && _baslerCapture.IsCapturing ? _baslerCapture.FpsEma : 0.0;
+                if (!isRunning)
+                    LblRunInfoC.Text = "";
+                else if (isPaused)
+                    LblRunInfoC.Text = "Paused";
+                else if (paneCFps > 0.0)
+                    LblRunInfoC.Text = $"Running @: {paneCFps:F1} fps";
+                else
+                    LblRunInfoC.Text = "Running";
+            }
         }
 
         private double GetShownFps(double avtpInFps)
@@ -3314,7 +3419,7 @@ namespace VilsSharpX
                 {
                     "ImgA" => Pane.A,
                     "ImgB" => Pane.B,
-                    "ImgC" => Pane.B, // C uses same zoom logic as B
+                    "ImgC" => Pane.C,
                     _ => Pane.D,
                 };
             }

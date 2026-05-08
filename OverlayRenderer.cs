@@ -84,6 +84,25 @@ public sealed class OverlayRenderer
         int step = 1;
         double fontSize = Math.Max(1.0, TextSizePx);
 
+        // Compute visible pixel range to avoid iterating off-screen pixels
+        // (critical for large images like 1792×480 camera frames).
+        int xMin = 0, xMax = frame.Width - 1;
+        int yMin = 0, yMax = frame.Height - 1;
+        try
+        {
+            var inv = imgToOverlay.Inverse;
+            if (inv != null)
+            {
+                var topLeft = inv.Transform(new Point(0, 0));
+                var botRight = inv.Transform(new Point(aw, ah));
+                xMin = Math.Max(0, (int)(topLeft.X / scaleX) - 1);
+                yMin = Math.Max(0, (int)(topLeft.Y / scaleY) - 1);
+                xMax = Math.Min(frame.Width - 1, (int)(botRight.X / scaleX) + 1);
+                yMax = Math.Min(frame.Height - 1, (int)(botRight.Y / scaleY) + 1);
+            }
+        }
+        catch { /* fallback to full range */ }
+
         var dg = new DrawingGroup();
         using (var dc = dg.Open())
         {
@@ -125,10 +144,10 @@ public sealed class OverlayRenderer
             }
 
             int added = 0;
-            for (int y = 0; y < frame.Height; y += step)
+            for (int y = yMin; y <= yMax; y += step)
             {
                 double imgCy = (y + 0.5) * scaleY;
-                for (int x = 0; x < frame.Width; x += step)
+                for (int x = xMin; x <= xMax; x += step)
                 {
                     double imgCx = (x + 0.5) * scaleX;
 
@@ -185,6 +204,24 @@ public sealed class OverlayRenderer
         int step = 1;
         double fontSize = Math.Max(1.0, TextSizePx);
 
+        // Compute visible pixel range (viewport culling for large images)
+        int xMin = 0, xMax = frameA.Width - 1;
+        int yMin = 0, yMax = frameA.Height - 1;
+        try
+        {
+            var inv = imgToOverlay.Inverse;
+            if (inv != null)
+            {
+                var topLeft = inv.Transform(new Point(0, 0));
+                var botRight = inv.Transform(new Point(aw, ah));
+                xMin = Math.Max(0, (int)(topLeft.X / scaleX) - 1);
+                yMin = Math.Max(0, (int)(topLeft.Y / scaleY) - 1);
+                xMax = Math.Min(frameA.Width - 1, (int)(botRight.X / scaleX) + 1);
+                yMax = Math.Min(frameA.Height - 1, (int)(botRight.Y / scaleY) + 1);
+            }
+        }
+        catch { /* fallback to full range */ }
+
         var dg = new DrawingGroup();
         using (var dc = dg.Open())
         {
@@ -216,10 +253,10 @@ public sealed class OverlayRenderer
             }
 
             int added = 0;
-            for (int y = 0; y < frameA.Height; y += step)
+            for (int y = yMin; y <= yMax; y += step)
             {
                 double imgCy = (y + 0.5) * scaleY;
-                for (int x = 0; x < frameA.Width; x += step)
+                for (int x = xMin; x <= xMax; x += step)
                 {
                     double imgCx = (x + 0.5) * scaleX;
 
