@@ -46,6 +46,7 @@
 #include "osram_frame.h"
 #include "frame_eth.h"
 #include "device_mode.h"
+#include "adapter_ctrl.h"
 
 /* STM timing */
 #include "Stm/Std/IfxStm.h"
@@ -213,6 +214,11 @@ void core0_main(void)
      * This configures ASCLIN9, parsers, and GETH all in one call.
      */
     device_mode_init(FE_DEVICE_NICHIA);
+
+    /* SmartVisio Adapter: configure all GPIO selectors.
+     * MUST be called early — pins default to LOW (floating),
+     * which puts adapter in Direct mode and breaks ECU path. */
+    adapter_ctrl_init();  /* Sets ECU mode: TTL_SEL=HIGH, ECU_5V_EN=HIGH, relays OFF */
 
     /* Basler trigger on P23.1 -> camera Pin 3 (Line3), GND -> Pin 6 */
     camera_trigger_init();

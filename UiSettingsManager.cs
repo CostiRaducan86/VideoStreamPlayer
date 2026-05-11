@@ -99,7 +99,9 @@ public sealed class UiSettingsManager(int width, int height)
         string avtpEtherType = "0x22F0",
         string streamIdLastByte = "0x50",
         string? lvdsPortHint = null,
-        int lvdsMode = 0)
+        int lvdsMode = 0,
+        int controlMode = 0,
+        int canUartMode = 0)
     {
         return new AppSettings
         {
@@ -121,7 +123,9 @@ public sealed class UiSettingsManager(int width, int height)
             AvtpEtherType = avtpEtherType,
             StreamIdLastByte = streamIdLastByte,
             LvdsPortHint = lvdsPortHint,
-            LvdsMode = lvdsMode
+            LvdsMode = lvdsMode,
+            ControlMode = controlMode,
+            CanUartMode = canUartMode
         };
     }
 }

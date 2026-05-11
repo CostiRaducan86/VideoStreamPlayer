@@ -6,7 +6,7 @@ namespace VilsSharpX;
 
 public sealed class AppSettings
 {
-    public const int CurrentSettingsVersion = 9;
+    public const int CurrentSettingsVersion = 10;
 
     public int SettingsVersion { get; set; } = CurrentSettingsVersion;
 
@@ -48,6 +48,12 @@ public sealed class AppSettings
 
     // LVDS Mode (0 = Monitoring, 1 = Generator)
     public int LvdsMode { get; set; } = 0;
+
+    // Control Mode (0 = ECU, 1 = Direct control)
+    public int ControlMode { get; set; } = 0;
+
+    // CAN UART Mode (0 = ECU CAN UART, 1 = Direct CAN UART, 2 = External CAN UART)
+    public int CanUartMode { get; set; } = 0;
 }
 
 public static class AppSettingsStore
@@ -137,6 +143,15 @@ public static class AppSettingsStore
                 // Migration: add LVDS Mode (default Monitoring).
                 settings.LvdsMode = 0;
                 settings.SettingsVersion = 9;
+                migrated = true;
+            }
+
+            if (settings.SettingsVersion < 10)
+            {
+                // Migration: add Control Mode and CAN UART Mode.
+                settings.ControlMode = 0;
+                settings.CanUartMode = 0;
+                settings.SettingsVersion = 10;
                 migrated = true;
             }
 

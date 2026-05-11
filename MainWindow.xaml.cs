@@ -114,6 +114,8 @@ namespace VilsSharpX
         private string _streamIdLastByte = "0x50";
 
         private ModeOfOperation _modeOfOperation = ModeOfOperation.AvtpLiveMonitor;
+        private int _controlMode = 0; // 0 = ECU, 1 = Direct control
+        private int _canUartMode = 0; // 0 = ECU CAN UART, 1 = Direct CAN UART, 2 = External CAN UART
 
         // Fallback image / generator base
         private byte[] _pgmFrame = null!;
@@ -969,6 +971,18 @@ namespace VilsSharpX
                     CmbLvdsMode.SelectedIndex = Math.Clamp(s.LvdsMode, 0, 1);
                 }
 
+                _controlMode = Math.Clamp(s.ControlMode, 0, 1);
+                if (CmbControlMode != null)
+                {
+                    CmbControlMode.SelectedIndex = _controlMode;
+                }
+
+                _canUartMode = Math.Clamp(s.CanUartMode, 0, 2);
+                if (CmbCanUartMode != null)
+                {
+                    CmbCanUartMode.SelectedIndex = _canUartMode;
+                }
+
                 if (TxtVlanId != null) TxtVlanId.Text = _vlanId.ToString();
                 if (TxtVlanPriority != null) TxtVlanPriority.Text = _vlanPriority.ToString();
                 if (TxtAvtpEtherType != null) TxtAvtpEtherType.Text = _avtpEtherType;
@@ -1001,7 +1015,8 @@ namespace VilsSharpX
                 _avtpLiveEnabled, _avtpLiveDeviceHint, (int)_modeOfOperation,
                 _srcMac, _dstMac, (int)_currentDeviceType,
                 _ecuVariant, _vlanId, _vlanPriority, _avtpEtherType, _streamIdLastByte,
-                null, CmbLvdsMode?.SelectedIndex ?? 0);
+                null, CmbLvdsMode?.SelectedIndex ?? 0,
+                _controlMode, _canUartMode);
             _settingsManager.TrySave(s);
         }
 
@@ -1085,6 +1100,20 @@ namespace VilsSharpX
         {
             if (_settingsManager.IsLoading || !IsLoaded) return;
             // LVDS Mode: 0 = Monitoring (current behavior), 1 = Generator (future)
+            SaveUiSettings();
+        }
+
+        private void CmbControlMode_SelectionChanged(object sender, System.Windows.Controls.SelectionChangedEventArgs e)
+        {
+            if (_settingsManager.IsLoading || !IsLoaded) return;
+            _controlMode = CmbControlMode?.SelectedIndex ?? 0;
+            SaveUiSettings();
+        }
+
+        private void CmbCanUartMode_SelectionChanged(object sender, System.Windows.Controls.SelectionChangedEventArgs e)
+        {
+            if (_settingsManager.IsLoading || !IsLoaded) return;
+            _canUartMode = CmbCanUartMode?.SelectedIndex ?? 0;
             SaveUiSettings();
         }
 
@@ -3771,7 +3800,7 @@ namespace VilsSharpX
             {
                 Title = "Hardware Configuration",
                 Owner = this,
-                Width = 380, Height = 290,
+                Width = 380, Height = 360,
                 WindowStartupLocation = WindowStartupLocation.CenterOwner,
                 Content = wrapper,
                 ResizeMode = ResizeMode.NoResize,

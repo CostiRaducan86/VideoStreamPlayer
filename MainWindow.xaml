@@ -752,6 +752,13 @@
             <GroupBox x:Name="GrpHardwareConfig" Header="Hardware Configuration" Padding="10" Margin="8">
                 <StackPanel Orientation="Vertical">
                     <StackPanel Orientation="Horizontal" HorizontalAlignment="Left" Margin="0,0,0,8">
+                        <TextBlock Text="Control Mode:" VerticalAlignment="Center" Width="110" Margin="0,0,4,0"/>
+                        <ComboBox x:Name="CmbControlMode" Width="160" SelectedIndex="0" SelectionChanged="CmbControlMode_SelectionChanged">
+                            <ComboBoxItem Content="ECU"/>
+                            <ComboBoxItem Content="Direct control"/>
+                        </ComboBox>
+                    </StackPanel>
+                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Left" Margin="0,0,0,8">
                         <TextBlock Text="Mode of Operation:" VerticalAlignment="Center" Width="110" Margin="0,0,4,0"/>
                         <ComboBox x:Name="CmbModeOfOperation" Width="160" SelectedIndex="0" SelectionChanged="CmbModeOfOperation_SelectionChanged">
                             <ComboBoxItem Content="AVTP Monitoring"/>
@@ -777,11 +784,19 @@
                             <ComboBoxItem Content="MB CHLC 2.0"/>
                         </ComboBox>
                     </StackPanel>
-                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Left" Margin="0,0,0,0">
+                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Left" Margin="0,0,0,8">
                         <TextBlock Text="LVDS Mode:" VerticalAlignment="Center" Width="110" Margin="0,0,4,0"/>
                         <ComboBox x:Name="CmbLvdsMode" Width="160" SelectedIndex="0" SelectionChanged="CmbLvdsMode_SelectionChanged">
                             <ComboBoxItem Content="LVDS Monitoring"/>
                             <ComboBoxItem Content="LVDS Generator"/>
+                        </ComboBox>
+                    </StackPanel>
+                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Left" Margin="0,0,0,0">
+                        <TextBlock Text="CAN UART Mode:" VerticalAlignment="Center" Width="110" Margin="0,0,4,0"/>
+                        <ComboBox x:Name="CmbCanUartMode" Width="160" SelectedIndex="0" SelectionChanged="CmbCanUartMode_SelectionChanged">
+                            <ComboBoxItem Content="ECU CAN UART"/>
+                            <ComboBoxItem Content="Direct CAN UART"/>
+                            <ComboBoxItem Content="External CAN UART"/>
                         </ComboBox>
                     </StackPanel>
                 </StackPanel>
