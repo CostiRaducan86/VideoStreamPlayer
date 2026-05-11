@@ -163,7 +163,6 @@ public partial class CameraConfigWindow : Window
             string serial = _camera.CameraInfo[CameraInfoKey.SerialNumber] ?? "?";
             _log($"[camcfg] Connected: {model} (S/N {serial})");
             TxtStatus.Text = $"Connected: {model} ({serial})";
-            TxtConnectLabel.Text = "Connected";
 
             ReadParametersFromCamera();
             UpdateButtonStates();
@@ -193,7 +192,6 @@ public partial class CameraConfigWindow : Window
         }
         _camera = null;
         TxtStatus.Text = "Disconnected";
-        TxtConnectLabel.Text = "Connect";
         _log("[camcfg] Camera disconnected");
         UpdateButtonStates();
     }

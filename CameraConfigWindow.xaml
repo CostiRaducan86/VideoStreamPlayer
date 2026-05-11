@@ -31,8 +31,8 @@
 
         <!-- Pylon-style toolbar button (flat, icon-centric) -->
         <Style x:Key="PylonToolbarBtn" TargetType="Button">
-            <Setter Property="Width" Value="40"/>
-            <Setter Property="Height" Value="36"/>
+            <Setter Property="Width" Value="44"/>
+            <Setter Property="Height" Value="40"/>
             <Setter Property="Margin" Value="1,0"/>
             <Setter Property="Padding" Value="0"/>
             <Setter Property="Background" Value="Transparent"/>
@@ -68,24 +68,24 @@
 
         <!-- Modern toggle switch style for Connect -->
         <Style x:Key="ToggleSwitchStyle" TargetType="ToggleButton">
-            <Setter Property="Width" Value="52"/>
-            <Setter Property="Height" Value="26"/>
+            <Setter Property="Width" Value="44"/>
+            <Setter Property="Height" Value="22"/>
             <Setter Property="Cursor" Value="Hand"/>
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="ToggleButton">
                         <Grid>
-                            <Border x:Name="Track" CornerRadius="13" Background="#CCCCCC"
-                                    Width="52" Height="26"/>
-                            <Canvas Width="52" Height="26">
-                                <Border x:Name="Thumb" CornerRadius="11" Background="White"
-                                        Width="22" Height="22" Canvas.Left="2" Canvas.Top="2"/>
+                            <Border x:Name="Track" CornerRadius="11" Background="#CCCCCC"
+                                    Width="44" Height="22"/>
+                            <Canvas Width="44" Height="22">
+                                <Border x:Name="Thumb" CornerRadius="9" Background="White"
+                                        Width="18" Height="18" Canvas.Left="2" Canvas.Top="2"/>
                             </Canvas>
                         </Grid>
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsChecked" Value="True">
                                 <Setter TargetName="Track" Property="Background" Value="#1E88C8"/>
-                                <Setter TargetName="Thumb" Property="Canvas.Left" Value="28"/>
+                                <Setter TargetName="Thumb" Property="Canvas.Left" Value="24"/>
                             </Trigger>
                             <Trigger Property="IsMouseOver" Value="True">
                                 <Setter TargetName="Thumb" Property="Background" Value="#F0F0F0"/>
@@ -105,15 +105,13 @@
                 <ToggleButton x:Name="BtnConnectToggle" Style="{StaticResource ToggleSwitchStyle}"
                               ToolTip="Connect / Disconnect Camera"
                               Checked="BtnConnectToggle_Checked" Unchecked="BtnConnectToggle_Unchecked"/>
-                <TextBlock x:Name="TxtConnectLabel" Text="Connect" FontSize="12" Foreground="#555"
-                           VerticalAlignment="Center" Margin="6,0,0,0"/>
 
                 <Rectangle Width="1" Fill="#CCCCCC" Margin="12,4"/>
 
                 <!-- Continuous Shot -->
                 <Button x:Name="BtnContinuousShot" Style="{StaticResource PylonToolbarBtn}"
                         ToolTip="Continuous Shot" Click="BtnContinuousShot_Click" IsEnabled="False">
-                    <Viewbox Width="20" Height="20">
+                    <Viewbox Width="22" Height="22">
                         <Canvas Width="24" Height="24">
                             <Polygon Points="5,3 5,21 21,12" Fill="#1E88C8"/>
                         </Canvas>
@@ -123,7 +121,7 @@
                 <!-- Stop -->
                 <Button x:Name="BtnStop" Style="{StaticResource PylonToolbarBtn}"
                         ToolTip="Stop Grabbing" Click="BtnStop_Click" IsEnabled="False">
-                    <Viewbox Width="20" Height="20">
+                    <Viewbox Width="22" Height="22">
                         <Canvas Width="24" Height="24">
                             <Rectangle Canvas.Left="4" Canvas.Top="4" Width="16" Height="16" Fill="#C04040"/>
                         </Canvas>
@@ -135,7 +133,7 @@
                 <!-- Zoom fit -->
                 <Button x:Name="BtnZoomFit" Style="{StaticResource PylonToolbarBtn}"
                         ToolTip="Fit to Window (Ctrl+Dbl-Click)" Click="BtnZoomFit_Click">
-                    <Viewbox Width="20" Height="20">
+                    <Viewbox Width="22" Height="22">
                         <Canvas Width="24" Height="24">
                             <Rectangle Canvas.Left="2" Canvas.Top="2" Width="20" Height="20"
                                        Stroke="#555" StrokeThickness="2" Fill="Transparent"/>
@@ -150,7 +148,7 @@
                 <!-- Load / Save .pfs -->
                 <Button x:Name="BtnLoadPfs" Style="{StaticResource PylonToolbarBtn}"
                         ToolTip="Load .pfs Configuration" Click="BtnLoadPfs_Click">
-                    <Viewbox Width="20" Height="20">
+                    <Viewbox Width="22" Height="22">
                         <Canvas Width="24" Height="24">
                             <Path Data="M4,4 L10,4 12,7 20,7 20,20 4,20 Z" Fill="#E8B040" Stroke="#AA8030" StrokeThickness="1"/>
                         </Canvas>
@@ -158,7 +156,7 @@
                 </Button>
                 <Button x:Name="BtnSavePfs" Style="{StaticResource PylonToolbarBtn}"
                         ToolTip="Save .pfs Configuration" Click="BtnSavePfs_Click">
-                    <Viewbox Width="20" Height="20">
+                    <Viewbox Width="22" Height="22">
                         <Canvas Width="24" Height="24">
                             <Rectangle Canvas.Left="3" Canvas.Top="3" Width="18" Height="18"
                                        Fill="#6090C0" Stroke="#406080" StrokeThickness="1" RadiusX="2" RadiusY="2"/>
@@ -176,15 +174,15 @@
         </Border>
 
         <!-- ── Status bar ──────────────────────────────────── -->
-        <Border DockPanel.Dock="Bottom" Background="#E8E8E8" BorderBrush="#CCCCCC" BorderThickness="0,1,0,0" Padding="8,3">
+        <Border DockPanel.Dock="Bottom" Background="#E8E8E8" BorderBrush="#CCCCCC" BorderThickness="0,1,0,0" Padding="8,4">
             <StackPanel Orientation="Horizontal">
-                <TextBlock x:Name="TxtStatus" FontSize="10" Foreground="#666" Text="Disconnected"/>
-                <TextBlock FontSize="10" Foreground="#999" Margin="12,0,0,0" Text="|"/>
-                <TextBlock x:Name="TxtResolution" FontSize="10" Foreground="#666" Margin="12,0,0,0" Text="--"/>
-                <TextBlock FontSize="10" Foreground="#999" Margin="12,0,0,0" Text="|"/>
-                <TextBlock x:Name="TxtFps" FontSize="10" Foreground="#666" Margin="12,0,0,0" Text="--"/>
-                <TextBlock FontSize="10" Foreground="#999" Margin="12,0,0,0" Text="|"/>
-                <TextBlock x:Name="TxtPfsFile" FontSize="10" Foreground="#666" Margin="12,0,0,0" Text="No .pfs loaded"/>
+                <TextBlock x:Name="TxtStatus" FontSize="11.5" Foreground="#666" Text="Disconnected"/>
+                <TextBlock FontSize="11.5" Foreground="#999" Margin="12,0,0,0" Text="|"/>
+                <TextBlock x:Name="TxtResolution" FontSize="11.5" Foreground="#666" Margin="12,0,0,0" Text="--"/>
+                <TextBlock FontSize="11.5" Foreground="#999" Margin="12,0,0,0" Text="|"/>
+                <TextBlock x:Name="TxtFps" FontSize="11.5" Foreground="#666" Margin="12,0,0,0" Text="--"/>
+                <TextBlock FontSize="11.5" Foreground="#999" Margin="12,0,0,0" Text="|"/>
+                <TextBlock x:Name="TxtPfsFile" FontSize="11.5" Foreground="#666" Margin="12,0,0,0" Text="No .pfs loaded"/>
             </StackPanel>
         </Border>
 
