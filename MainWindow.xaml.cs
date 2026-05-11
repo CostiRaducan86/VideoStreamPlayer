@@ -3746,6 +3746,7 @@ namespace VilsSharpX
         private Window? _hwConfigWindow;
         private Window? _appSettingsWindow;
         private Window? _ethConfigWindow;
+        private CameraConfigWindow? _cameraConfigWindow;
 
         /// <summary>
         /// Wraps a config GroupBox in a DockPanel with an OK button at the bottom.
@@ -3816,6 +3817,14 @@ namespace VilsSharpX
             okBtn.Click += (_, _) => _ethConfigWindow.Close();
             _ethConfigWindow.Closed += (s, a) => { ((DockPanel)_ethConfigWindow.Content).Children.Clear(); HiddenConfigPanel.Children.Add(GrpEthernetConfig); _ethConfigWindow = null; };
             _ethConfigWindow.Show();
+        }
+
+        private void MenuCameraConfig_Click(object sender, RoutedEventArgs e)
+        {
+            if (_cameraConfigWindow != null && _cameraConfigWindow.IsVisible) { _cameraConfigWindow.Activate(); return; }
+            _cameraConfigWindow = new CameraConfigWindow(AppendDiagLog) { Owner = this };
+            _cameraConfigWindow.Closed += (_, _) => _cameraConfigWindow = null;
+            _cameraConfigWindow.Show();
         }
     }
 

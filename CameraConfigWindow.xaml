@@ -1,0 +1,391 @@
+<Window x:Class="VilsSharpX.CameraConfigWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Camera Configuration"
+        Width="1550" Height="470"
+        MinWidth="1000" MinHeight="380"
+        WindowStartupLocation="CenterOwner"
+        Background="#F0F0F0">
+
+    <Window.Resources>
+        <!-- Pylon-viewer-like styles -->
+        <Style x:Key="SectionHeader" TargetType="TextBlock">
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="FontSize" Value="12"/>
+            <Setter Property="Foreground" Value="#1E6EA6"/>
+            <Setter Property="Margin" Value="0,10,0,4"/>
+        </Style>
+        <Style x:Key="ParamLabel" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="11"/>
+            <Setter Property="Foreground" Value="#333333"/>
+            <Setter Property="VerticalAlignment" Value="Center"/>
+            <Setter Property="MinWidth" Value="160"/>
+            <Setter Property="Margin" Value="0,2"/>
+        </Style>
+        <Style x:Key="ParamValue" TargetType="Control">
+            <Setter Property="FontSize" Value="11"/>
+            <Setter Property="MinWidth" Value="120"/>
+            <Setter Property="Margin" Value="4,2"/>
+            <Setter Property="VerticalAlignment" Value="Center"/>
+        </Style>
+
+        <!-- Pylon-style toolbar button (flat, icon-centric) -->
+        <Style x:Key="PylonToolbarBtn" TargetType="Button">
+            <Setter Property="Width" Value="40"/>
+            <Setter Property="Height" Value="36"/>
+            <Setter Property="Margin" Value="1,0"/>
+            <Setter Property="Padding" Value="0"/>
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="BorderBrush" Value="Transparent"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="ToolTipService.ShowDuration" Value="10000"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="Bd" Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                CornerRadius="3" Padding="{TemplateBinding Padding}">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="#D0E8F8"/>
+                                <Setter TargetName="Bd" Property="BorderBrush" Value="#90C8E8"/>
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="#A0D0F0"/>
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter Property="Opacity" Value="0.35"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- Modern toggle switch style for Connect -->
+        <Style x:Key="ToggleSwitchStyle" TargetType="ToggleButton">
+            <Setter Property="Width" Value="52"/>
+            <Setter Property="Height" Value="26"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ToggleButton">
+                        <Grid>
+                            <Border x:Name="Track" CornerRadius="13" Background="#CCCCCC"
+                                    Width="52" Height="26"/>
+                            <Canvas Width="52" Height="26">
+                                <Border x:Name="Thumb" CornerRadius="11" Background="White"
+                                        Width="22" Height="22" Canvas.Left="2" Canvas.Top="2"/>
+                            </Canvas>
+                        </Grid>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsChecked" Value="True">
+                                <Setter TargetName="Track" Property="Background" Value="#1E88C8"/>
+                                <Setter TargetName="Thumb" Property="Canvas.Left" Value="28"/>
+                            </Trigger>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Thumb" Property="Background" Value="#F0F0F0"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+    </Window.Resources>
+
+    <DockPanel>
+        <!-- ── Toolbar ───────────────────────────────────────── -->
+        <Border DockPanel.Dock="Top" Background="#F0F0F0" BorderBrush="#CCCCCC" BorderThickness="0,0,0,1" Padding="6,4">
+            <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                <!-- Connect toggle switch -->
+                <ToggleButton x:Name="BtnConnectToggle" Style="{StaticResource ToggleSwitchStyle}"
+                              ToolTip="Connect / Disconnect Camera"
+                              Checked="BtnConnectToggle_Checked" Unchecked="BtnConnectToggle_Unchecked"/>
+                <TextBlock x:Name="TxtConnectLabel" Text="Connect" FontSize="12" Foreground="#555"
+                           VerticalAlignment="Center" Margin="6,0,0,0"/>
+
+                <Rectangle Width="1" Fill="#CCCCCC" Margin="12,4"/>
+
+                <!-- Continuous Shot -->
+                <Button x:Name="BtnContinuousShot" Style="{StaticResource PylonToolbarBtn}"
+                        ToolTip="Continuous Shot" Click="BtnContinuousShot_Click" IsEnabled="False">
+                    <Viewbox Width="20" Height="20">
+                        <Canvas Width="24" Height="24">
+                            <Polygon Points="5,3 5,21 21,12" Fill="#1E88C8"/>
+                        </Canvas>
+                    </Viewbox>
+                </Button>
+
+                <!-- Stop -->
+                <Button x:Name="BtnStop" Style="{StaticResource PylonToolbarBtn}"
+                        ToolTip="Stop Grabbing" Click="BtnStop_Click" IsEnabled="False">
+                    <Viewbox Width="20" Height="20">
+                        <Canvas Width="24" Height="24">
+                            <Rectangle Canvas.Left="4" Canvas.Top="4" Width="16" Height="16" Fill="#C04040"/>
+                        </Canvas>
+                    </Viewbox>
+                </Button>
+
+                <Rectangle Width="1" Fill="#CCCCCC" Margin="12,4"/>
+
+                <!-- Zoom fit -->
+                <Button x:Name="BtnZoomFit" Style="{StaticResource PylonToolbarBtn}"
+                        ToolTip="Fit to Window (Ctrl+Dbl-Click)" Click="BtnZoomFit_Click">
+                    <Viewbox Width="20" Height="20">
+                        <Canvas Width="24" Height="24">
+                            <Rectangle Canvas.Left="2" Canvas.Top="2" Width="20" Height="20"
+                                       Stroke="#555" StrokeThickness="2" Fill="Transparent"/>
+                            <Line X1="6" Y1="12" X2="18" Y2="12" Stroke="#555" StrokeThickness="1.5"/>
+                            <Line X1="12" Y1="6" X2="12" Y2="18" Stroke="#555" StrokeThickness="1.5"/>
+                        </Canvas>
+                    </Viewbox>
+                </Button>
+
+                <Rectangle Width="1" Fill="#CCCCCC" Margin="12,4"/>
+
+                <!-- Load / Save .pfs -->
+                <Button x:Name="BtnLoadPfs" Style="{StaticResource PylonToolbarBtn}"
+                        ToolTip="Load .pfs Configuration" Click="BtnLoadPfs_Click">
+                    <Viewbox Width="20" Height="20">
+                        <Canvas Width="24" Height="24">
+                            <Path Data="M4,4 L10,4 12,7 20,7 20,20 4,20 Z" Fill="#E8B040" Stroke="#AA8030" StrokeThickness="1"/>
+                        </Canvas>
+                    </Viewbox>
+                </Button>
+                <Button x:Name="BtnSavePfs" Style="{StaticResource PylonToolbarBtn}"
+                        ToolTip="Save .pfs Configuration" Click="BtnSavePfs_Click">
+                    <Viewbox Width="20" Height="20">
+                        <Canvas Width="24" Height="24">
+                            <Rectangle Canvas.Left="3" Canvas.Top="3" Width="18" Height="18"
+                                       Fill="#6090C0" Stroke="#406080" StrokeThickness="1" RadiusX="2" RadiusY="2"/>
+                            <Rectangle Canvas.Left="7" Canvas.Top="3" Width="10" Height="8" Fill="#F0F0F0"/>
+                            <Rectangle Canvas.Left="6" Canvas.Top="14" Width="12" Height="7" Fill="#D0D0D0" RadiusX="1" RadiusY="1"/>
+                        </Canvas>
+                    </Viewbox>
+                </Button>
+            </StackPanel>
+        </Border>
+
+        <!-- ── OK button bar ─────────────────────────────────── -->
+        <Border DockPanel.Dock="Bottom" Background="#F0F0F0" BorderBrush="#CCCCCC" BorderThickness="0,1,0,0" Padding="8,4">
+            <Button x:Name="BtnOk" Content="OK" HorizontalAlignment="Right" Padding="24,5" Click="BtnOk_Click"/>
+        </Border>
+
+        <!-- ── Status bar ──────────────────────────────────── -->
+        <Border DockPanel.Dock="Bottom" Background="#E8E8E8" BorderBrush="#CCCCCC" BorderThickness="0,1,0,0" Padding="8,3">
+            <StackPanel Orientation="Horizontal">
+                <TextBlock x:Name="TxtStatus" FontSize="10" Foreground="#666" Text="Disconnected"/>
+                <TextBlock FontSize="10" Foreground="#999" Margin="12,0,0,0" Text="|"/>
+                <TextBlock x:Name="TxtResolution" FontSize="10" Foreground="#666" Margin="12,0,0,0" Text="--"/>
+                <TextBlock FontSize="10" Foreground="#999" Margin="12,0,0,0" Text="|"/>
+                <TextBlock x:Name="TxtFps" FontSize="10" Foreground="#666" Margin="12,0,0,0" Text="--"/>
+                <TextBlock FontSize="10" Foreground="#999" Margin="12,0,0,0" Text="|"/>
+                <TextBlock x:Name="TxtPfsFile" FontSize="10" Foreground="#666" Margin="12,0,0,0" Text="No .pfs loaded"/>
+            </StackPanel>
+        </Border>
+
+        <!-- ── Main content: Preview + Parameters ────────── -->
+        <Grid>
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" MinWidth="300"/>
+                <ColumnDefinition Width="5"/>
+                <ColumnDefinition Width="360" MinWidth="330"/>
+            </Grid.ColumnDefinitions>
+
+            <!-- Preview pane with zoom support -->
+            <Border x:Name="PreviewBorder" Grid.Column="0" Background="#1A1A1A" BorderBrush="#555" BorderThickness="1" Margin="4"
+                    ClipToBounds="True">
+                <Grid x:Name="PreviewHost"
+                      PreviewMouseWheel="PreviewHost_PreviewMouseWheel"
+                      PreviewMouseLeftButtonDown="PreviewHost_PreviewMouseLeftButtonDown"
+                      PreviewMouseLeftButtonUp="PreviewHost_PreviewMouseLeftButtonUp"
+                      PreviewMouseMove="PreviewHost_PreviewMouseMove"
+                      Background="Transparent">
+                    <!-- Fit mode: Image stretches uniformly to fill pane -->
+                    <Image x:Name="ImgPreviewFit" Stretch="Uniform"
+                           RenderOptions.BitmapScalingMode="NearestNeighbor"
+                           Visibility="Visible"/>
+                    <!-- Zoom mode: ScrollViewer with scaled image -->
+                    <ScrollViewer x:Name="PreviewScroller" HorizontalScrollBarVisibility="Auto"
+                                  VerticalScrollBarVisibility="Auto" Background="Transparent"
+                                  Visibility="Collapsed">
+                        <Image x:Name="ImgPreviewZoom" Stretch="None"
+                               RenderOptions.BitmapScalingMode="NearestNeighbor">
+                            <Image.LayoutTransform>
+                                <ScaleTransform x:Name="PreviewScale" ScaleX="1" ScaleY="1"/>
+                            </Image.LayoutTransform>
+                        </Image>
+                    </ScrollViewer>
+                    <TextBlock x:Name="TxtNoPreview" Text="No Preview" FontSize="20" FontStyle="Italic"
+                               Foreground="#666666" HorizontalAlignment="Center" VerticalAlignment="Center"
+                               IsHitTestVisible="False"/>
+                </Grid>
+            </Border>
+
+            <GridSplitter Grid.Column="1" Width="5" HorizontalAlignment="Stretch"
+                          Background="#CCCCCC" ResizeBehavior="PreviousAndNext"/>
+
+            <!-- Parameters panel -->
+            <Border Grid.Column="2" Background="#FAFAFA" BorderBrush="#CCC" BorderThickness="1" Margin="0,4,4,4">
+                <DockPanel>
+                    <TextBlock DockPanel.Dock="Top" Text="Features — All" FontWeight="SemiBold" FontSize="12"
+                               Foreground="#333" Padding="8,6" Background="#E8E8E8"/>
+                    <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Padding="8,4">
+                        <StackPanel>
+
+                            <!-- ═══ Analog Controls ═══ -->
+                            <TextBlock Style="{StaticResource SectionHeader}" Text="Analog Controls"/>
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/>
+                                    <RowDefinition/>
+                                </Grid.RowDefinitions>
+                                <TextBlock Grid.Row="0" Grid.Column="0" Style="{StaticResource ParamLabel}" Text="Gain Auto"/>
+                                <ComboBox x:Name="CbGainAuto" Grid.Row="0" Grid.Column="1" Style="{StaticResource ParamValue}"/>
+                                <TextBlock Grid.Row="1" Grid.Column="0" Style="{StaticResource ParamLabel}" Text="Gain (Raw)"/>
+                                <TextBox x:Name="TbGainRaw" Grid.Row="1" Grid.Column="1" Style="{StaticResource ParamValue}"/>
+                                <TextBlock Grid.Row="2" Grid.Column="0" Style="{StaticResource ParamLabel}" Text="Gamma Enable"/>
+                                <CheckBox x:Name="ChkGammaEnable" Grid.Row="2" Grid.Column="1" VerticalAlignment="Center" Margin="4,2"/>
+                                <TextBlock Grid.Row="3" Grid.Column="0" Style="{StaticResource ParamLabel}" Text="Gamma"/>
+                                <TextBox x:Name="TbGamma" Grid.Row="3" Grid.Column="1" Style="{StaticResource ParamValue}"/>
+                                <TextBlock Grid.Row="4" Grid.Column="0" Style="{StaticResource ParamLabel}" Text="Digital Shift"/>
+                                <TextBox x:Name="TbDigitalShift" Grid.Row="4" Grid.Column="1" Style="{StaticResource ParamValue}"/>
+                            </Grid>
+                            <Rectangle Height="1" Fill="#DDD" Margin="0,6"/>
+
+                            <!-- ═══ Image Format Controls ═══ -->
+                            <TextBlock Style="{StaticResource SectionHeader}" Text="Image Format Controls"/>
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition/><RowDefinition/><RowDefinition/>
+                                </Grid.RowDefinitions>
+                                <TextBlock Grid.Row="0" Grid.Column="0" Style="{StaticResource ParamLabel}" Text="Pixel Format"/>
+                                <ComboBox x:Name="CbPixelFormat" Grid.Row="0" Grid.Column="1" Style="{StaticResource ParamValue}"/>
+                                <TextBlock Grid.Row="1" Grid.Column="0" Style="{StaticResource ParamLabel}" Text="Reverse X"/>
+                                <CheckBox x:Name="ChkReverseX" Grid.Row="1" Grid.Column="1" VerticalAlignment="Center" Margin="4,2"/>
+                                <TextBlock Grid.Row="2" Grid.Column="0" Style="{StaticResource ParamLabel}" Text="Reverse Y"/>
+                                <CheckBox x:Name="ChkReverseY" Grid.Row="2" Grid.Column="1" VerticalAlignment="Center" Margin="4,2"/>
+                            </Grid>
+                            <Rectangle Height="1" Fill="#DDD" Margin="0,6"/>
+
+                            <!-- ═══ AOI Controls ═══ -->
+                            <TextBlock Style="{StaticResource SectionHeader}" Text="AOI Controls"/>
+                            <Grid x:Name="GridAoi">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/>
+                                </Grid.RowDefinitions>
+                                <TextBlock Grid.Row="0" Grid.Column="0" Style="{StaticResource ParamLabel}" Text="Width"/>
+                                <TextBox x:Name="TbWidth" Grid.Row="0" Grid.Column="1" Style="{StaticResource ParamValue}"/>
+                                <TextBlock Grid.Row="1" Grid.Column="0" Style="{StaticResource ParamLabel}" Text="Height"/>
+                                <TextBox x:Name="TbHeight" Grid.Row="1" Grid.Column="1" Style="{StaticResource ParamValue}"/>
+                                <TextBlock Grid.Row="2" Grid.Column="0" Style="{StaticResource ParamLabel}" Text="Offset X"/>
+                                <TextBox x:Name="TbOffsetX" Grid.Row="2" Grid.Column="1" Style="{StaticResource ParamValue}"/>
+                                <TextBlock Grid.Row="3" Grid.Column="0" Style="{StaticResource ParamLabel}" Text="Offset Y"/>
+                                <TextBox x:Name="TbOffsetY" Grid.Row="3" Grid.Column="1" Style="{StaticResource ParamValue}"/>
+                            </Grid>
+                            <Rectangle Height="1" Fill="#DDD" Margin="0,6"/>
+
+                            <!-- ═══ Acquisition Controls ═══ -->
+                            <TextBlock Style="{StaticResource SectionHeader}" Text="Acquisition Controls"/>
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/>
+                                    <RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/>
+                                    <RowDefinition/>
+                                </Grid.RowDefinitions>
+                                <TextBlock Grid.Row="0" Grid.Column="0" Style="{StaticResource ParamLabel}" Text="Trigger Selector"/>
+                                <ComboBox x:Name="CbTriggerSelector" Grid.Row="0" Grid.Column="1" Style="{StaticResource ParamValue}"/>
+                                <TextBlock Grid.Row="1" Grid.Column="0" Style="{StaticResource ParamLabel}" Text="Trigger Mode"/>
+                                <ComboBox x:Name="CbTriggerMode" Grid.Row="1" Grid.Column="1" Style="{StaticResource ParamValue}"/>
+                                <TextBlock Grid.Row="2" Grid.Column="0" Style="{StaticResource ParamLabel}" Text="Trigger Source"/>
+                                <ComboBox x:Name="CbTriggerSource" Grid.Row="2" Grid.Column="1" Style="{StaticResource ParamValue}"/>
+                                <TextBlock Grid.Row="3" Grid.Column="0" Style="{StaticResource ParamLabel}" Text="Trigger Activation"/>
+                                <ComboBox x:Name="CbTriggerActivation" Grid.Row="3" Grid.Column="1" Style="{StaticResource ParamValue}"/>
+                                <TextBlock Grid.Row="4" Grid.Column="0" Style="{StaticResource ParamLabel}" Text="Trigger Delay [µs]"/>
+                                <TextBox x:Name="TbTriggerDelay" Grid.Row="4" Grid.Column="1" Style="{StaticResource ParamValue}"/>
+                                <TextBlock Grid.Row="5" Grid.Column="0" Style="{StaticResource ParamLabel}" Text="Exposure Mode"/>
+                                <ComboBox x:Name="CbExposureMode" Grid.Row="5" Grid.Column="1" Style="{StaticResource ParamValue}"/>
+                                <TextBlock Grid.Row="6" Grid.Column="0" Style="{StaticResource ParamLabel}" Text="Exposure Auto"/>
+                                <ComboBox x:Name="CbExposureAuto" Grid.Row="6" Grid.Column="1" Style="{StaticResource ParamValue}"/>
+                                <TextBlock Grid.Row="7" Grid.Column="0" Style="{StaticResource ParamLabel}" Text="Exposure Time [µs]"/>
+                                <TextBox x:Name="TbExposureTime" Grid.Row="7" Grid.Column="1" Style="{StaticResource ParamValue}"/>
+                                <TextBlock Grid.Row="8" Grid.Column="0" Style="{StaticResource ParamLabel}" Text="Shutter Mode"/>
+                                <ComboBox x:Name="CbShutterMode" Grid.Row="8" Grid.Column="1" Style="{StaticResource ParamValue}"/>
+                            </Grid>
+                            <Rectangle Height="1" Fill="#DDD" Margin="0,6"/>
+
+                            <!-- ═══ Digital I/O Controls ═══ -->
+                            <TextBlock Style="{StaticResource SectionHeader}" Text="Digital I/O Controls"/>
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/>
+                                    <RowDefinition/>
+                                </Grid.RowDefinitions>
+                                <TextBlock Grid.Row="0" Grid.Column="0" Style="{StaticResource ParamLabel}" Text="Line Selector"/>
+                                <ComboBox x:Name="CbLineSelector" Grid.Row="0" Grid.Column="1" Style="{StaticResource ParamValue}"/>
+                                <TextBlock Grid.Row="1" Grid.Column="0" Style="{StaticResource ParamLabel}" Text="Line Mode"/>
+                                <ComboBox x:Name="CbLineMode" Grid.Row="1" Grid.Column="1" Style="{StaticResource ParamValue}"/>
+                                <TextBlock Grid.Row="2" Grid.Column="0" Style="{StaticResource ParamLabel}" Text="Line Format"/>
+                                <ComboBox x:Name="CbLineFormat" Grid.Row="2" Grid.Column="1" Style="{StaticResource ParamValue}"/>
+                                <TextBlock Grid.Row="3" Grid.Column="0" Style="{StaticResource ParamLabel}" Text="Line Inverter"/>
+                                <CheckBox x:Name="ChkLineInverter" Grid.Row="3" Grid.Column="1" VerticalAlignment="Center" Margin="4,2"/>
+                                <TextBlock Grid.Row="4" Grid.Column="0" Style="{StaticResource ParamLabel}" Text="Debouncer Time [µs]"/>
+                                <TextBox x:Name="TbLineDebouncerTime" Grid.Row="4" Grid.Column="1" Style="{StaticResource ParamValue}"/>
+                            </Grid>
+                            <Rectangle Height="1" Fill="#DDD" Margin="0,6"/>
+
+                            <!-- ═══ Configuration Sets ═══ -->
+                            <TextBlock Style="{StaticResource SectionHeader}" Text="Configuration Sets"/>
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/>
+                                </Grid.RowDefinitions>
+                                <TextBlock Grid.Row="0" Grid.Column="0" Style="{StaticResource ParamLabel}" Text="User Set Selector"/>
+                                <ComboBox x:Name="CbUserSetSelector" Grid.Row="0" Grid.Column="1" Style="{StaticResource ParamValue}"/>
+                                <TextBlock Grid.Row="1" Grid.Column="0" Style="{StaticResource ParamLabel}" Text="User Set Load"/>
+                                <Button x:Name="BtnUserSetLoad" Grid.Row="1" Grid.Column="1" Content="Execute"
+                                        Margin="4,2" Height="24" Click="BtnUserSetLoad_Click" IsEnabled="False"/>
+                                <TextBlock Grid.Row="2" Grid.Column="0" Style="{StaticResource ParamLabel}" Text="User Set Save"/>
+                                <Button x:Name="BtnUserSetSave" Grid.Row="2" Grid.Column="1" Content="Execute"
+                                        Margin="4,2" Height="24" Click="BtnUserSetSave_Click" IsEnabled="False"/>
+                                <TextBlock Grid.Row="3" Grid.Column="0" Style="{StaticResource ParamLabel}" Text="Default Startup Set"/>
+                                <ComboBox x:Name="CbDefaultStartupSet" Grid.Row="3" Grid.Column="1" Style="{StaticResource ParamValue}"/>
+                            </Grid>
+
+                            <!-- Bottom spacer -->
+                            <Rectangle Height="20"/>
+                        </StackPanel>
+                    </ScrollViewer>
+                </DockPanel>
+            </Border>
+        </Grid>
+    </DockPanel>
+</Window>
