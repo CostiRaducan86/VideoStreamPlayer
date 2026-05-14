@@ -155,7 +155,6 @@ namespace VilsSharpX
         private LsmCanDiagCapture? _canDiagCapture;
         private readonly LsmCanDiagStore _canDiagStore = new(32768);
         private readonly ObservableCollection<CanDiagRowView> _canDiagRows = [];
-        private const int CanDiagPageSize = 14;
         private int _canDiagCurrentPage = 1;
         private int _canDiagTotalPages = 1;
         private DateTime _canDiagLastRefresh = DateTime.MinValue;
@@ -1436,12 +1435,13 @@ namespace VilsSharpX
                 ordered = ordered.Reverse();
 
             var pageSource = ordered.ToList();
-            _canDiagTotalPages = Math.Max(1, (int)Math.Ceiling(pageSource.Count / (double)CanDiagPageSize));
+            int pageSize = CurrentCanPageSize;
+            _canDiagTotalPages = Math.Max(1, (int)Math.Ceiling(pageSource.Count / (double)pageSize));
             _canDiagCurrentPage = Math.Max(1, Math.Min(_canDiagCurrentPage, _canDiagTotalPages));
 
             var pageItems = pageSource
-                .Skip((_canDiagCurrentPage - 1) * CanDiagPageSize)
-                .Take(CanDiagPageSize)
+                .Skip((_canDiagCurrentPage - 1) * pageSize)
+                .Take(pageSize)
                 .ToList();
 
             _canDiagRows.Clear();
@@ -1514,7 +1514,8 @@ namespace VilsSharpX
             if (e.OriginalSource is not GridViewColumnHeader header || header.Column == null)
                 return;
 
-            string? headerText = header.Column.Header?.ToString();
+            // Strip any existing sort glyph from the header text
+            string? headerText = header.Column.Header?.ToString()?.TrimEnd(' ', '▲', '▼', '△', '▽');
             if (string.IsNullOrEmpty(headerText)) return;
 
             // Toggle direction if same column, otherwise default to ascending
@@ -1537,17 +1538,20 @@ namespace VilsSharpX
         {
             // Remove glyph from previous header
             if (_canLastSortHeader != null)
-                _canLastSortHeader.Column.Header = _canLastSortHeader.Column.Header?.ToString()?.TrimEnd(' ', '▲', '▼');
+                _canLastSortHeader.Column.Header = _canLastSortHeader.Column.Header?.ToString()?.TrimEnd(' ', '▲', '▼', '△', '▽');
 
             if (activeHeader?.Column == null) return;
 
-            string baseText = activeHeader.Column.Header?.ToString()?.TrimEnd(' ', '▲', '▼') ?? "";
-            activeHeader.Column.Header = baseText + (_canSortAscending ? " ▲" : " ▼");
+            string baseText = activeHeader.Column.Header?.ToString()?.TrimEnd(' ', '▲', '▼', '△', '▽') ?? "";
+            activeHeader.Column.Header = baseText + (_canSortAscending ? " △" : " ▽");
             _canLastSortHeader = activeHeader;
         }
 
         private bool _canMonitorExpanded;
-        private GridLength _sidebarInfoRowHeight = new(3, GridUnitType.Star); // saved height for restore
+        private const int CanDiagPageSizeNormal = 14;
+        private const int CanDiagPageSizeExpanded = 32;
+
+        private int CurrentCanPageSize => _canMonitorExpanded ? CanDiagPageSizeExpanded : CanDiagPageSizeNormal;
 
         private void BtnCanExpandCollapse_Click(object sender, RoutedEventArgs e)
         {
@@ -1559,8 +1563,9 @@ namespace VilsSharpX
                 SidebarCan.SetValue(Grid.RowSpanProperty, 5);
                 SidebarInfo.Visibility = Visibility.Collapsed;
 
-                // Update icon to "collapse" arrows pointing inward
-                PathExpandIcon.Data = Geometry.Parse("M 0,0 L 5,5 L 10,0 M 0,15 L 5,10 L 10,15");
+                // Update icon: arrows pointing inward (collapse)
+                PathExpandTop.Data = Geometry.Parse("M 4,2 L 8,6 L 12,2");
+                PathExpandBottom.Data = Geometry.Parse("M 4,14 L 8,10 L 12,14");
                 BtnCanExpandCollapse.ToolTip = "Collapse CAN Monitor";
             }
             else
@@ -1569,10 +1574,15 @@ namespace VilsSharpX
                 SidebarCan.SetValue(Grid.RowSpanProperty, 2);
                 SidebarInfo.Visibility = Visibility.Visible;
 
-                // Update icon to "expand" arrows pointing outward
-                PathExpandIcon.Data = Geometry.Parse("M 0,5 L 5,0 L 10,5 M 0,10 L 5,15 L 10,10");
+                // Update icon: arrows pointing outward (expand)
+                PathExpandTop.Data = Geometry.Parse("M 4,6 L 8,2 L 12,6");
+                PathExpandBottom.Data = Geometry.Parse("M 4,10 L 8,14 L 12,10");
                 BtnCanExpandCollapse.ToolTip = "Expand CAN Monitor";
             }
+
+            // Recalculate page with new page size
+            _canDiagCurrentPage = 1;
+            RefreshCanDiagView();
         }
 
         private void BtnCanClear_Click(object sender, RoutedEventArgs e)
@@ -1586,12 +1596,19 @@ namespace VilsSharpX
 
         private void BtnCanRecord_Click(object sender, RoutedEventArgs e)
         {
-            // Tell Aurix to start diagnostic sniffing
+            // Force a STOP→START sequence to guarantee a 0→1 transition on the Aurix.
+            // If a previous C# session left g_diagSniffEnabled=1 (e.g. app crash or close
+            // without Stop), the firmware's 0→1 guard would skip the reset and never
+            // emit diagnostic packets.  Sending STOP first clears the flag.
             try
             {
                 string? txDev = GetTxPcapDeviceNameOrNull();
                 if (!string.IsNullOrWhiteSpace(txDev))
+                {
+                    DiagSniffCommand.Send(txDev, start: false, AppendDiagLog);
+                    System.Threading.Thread.Sleep(50);  // brief pause so Aurix processes STOP
                     DiagSniffCommand.Send(txDev, start: true, AppendDiagLog);
+                }
             }
             catch (Exception ex) { AppendDiagLog($"[cmd] DiagSniff start: {ex.Message}"); }
 
@@ -1672,6 +1689,210 @@ namespace VilsSharpX
             e.Handled = true;
         }
 
+        // ── CAN/UART Trace: Save (.rply) ───────────────────────────────────────
+
+        private static string GetCanUartTracesDirectory()
+        {
+            string? root = RecordingManager.FindRepoRootWithDocs(AppContext.BaseDirectory)
+                           ?? RecordingManager.FindRepoRootWithDocs(Directory.GetCurrentDirectory());
+            string baseDir = root ?? Directory.GetCurrentDirectory();
+            string outDir = System.IO.Path.Combine(baseDir, "docs", "outputs", "canUartTraces");
+            Directory.CreateDirectory(outDir);
+            return outDir;
+        }
+
+        private void BtnCanSaveTrace_Click(object sender, RoutedEventArgs e)
+        {
+            var snapshot = _canDiagStore.SnapshotNewestFirst(0);
+            if (snapshot.Count == 0)
+            {
+                MessageBox.Show("No records to save.", "Save Trace", MessageBoxButton.OK, MessageBoxImage.Information);
+                return;
+            }
+
+            string dir = GetCanUartTracesDirectory();
+            string defaultName = $"trace_{DateTime.Now:yyyyMMdd_HHmmss}.rply";
+
+            var dlg = new SaveFileDialog
+            {
+                Title = "Save UART/CAN trace",
+                Filter = "Replay trace (*.rply)|*.rply",
+                InitialDirectory = dir,
+                FileName = defaultName,
+            };
+
+            if (dlg.ShowDialog(this) != true)
+                return;
+
+            try
+            {
+                // Write oldest-first (chronological order)
+                var ordered = snapshot.OrderBy(r => r.Sequence).ToList();
+                using var sw = new StreamWriter(dlg.FileName, false, System.Text.Encoding.UTF8);
+                sw.WriteLine($"// VilsSharpX CAN/UART trace – {DateTime.Now:yyyy-MM-dd HH:mm:ss}");
+                sw.WriteLine($"// Records: {ordered.Count}");
+                sw.WriteLine("// Seq;Timestamp;Device;Op;Address;Value;Status;RspDelayUs;IfDelayUs;RawHex");
+
+                foreach (var r in ordered)
+                {
+                    string ts = r.ReceivedUtc.ToString("yyyy-MM-dd HH:mm:ss.fff", CultureInfo.InvariantCulture);
+                    string hex = r.RawLength > 0
+                        ? BitConverter.ToString(r.RawPayload, 0, Math.Min(r.RawLength, r.RawPayload.Length)).Replace("-", "")
+                        : "";
+                    sw.WriteLine(string.Join(";",
+                        r.Sequence.ToString(CultureInfo.InvariantCulture),
+                        ts,
+                        r.DeviceName,
+                        r.OperationName,
+                        $"0x{r.Address:X4}",
+                        $"0x{r.Value:X8}",
+                        r.Status.ToString(),
+                        r.ResponseDelayUs.ToString(CultureInfo.InvariantCulture),
+                        r.InterFrameDelayUs.ToString(CultureInfo.InvariantCulture),
+                        hex));
+                }
+
+                AppendDiagLog($"[trace] Saved {ordered.Count} records to {dlg.FileName}");
+                if (LblCanMonitorStatus != null)
+                    LblCanMonitorStatus.Text = $"Trace saved: {System.IO.Path.GetFileName(dlg.FileName)} ({ordered.Count} records)";
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Save failed: {ex.Message}", "Save Trace", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        }
+
+        // ── CAN/UART Trace: Open (.rply) ───────────────────────────────────────
+
+        private void BtnCanOpenTraceFolder_Click(object sender, RoutedEventArgs e)
+        {
+            string dir = GetCanUartTracesDirectory();
+
+            var dlg = new OpenFileDialog
+            {
+                Title = "Open UART/CAN trace",
+                Filter = "Replay trace (*.rply)|*.rply|All files (*.*)|*.*",
+                InitialDirectory = dir,
+            };
+
+            if (dlg.ShowDialog(this) != true)
+                return;
+
+            try
+            {
+                var records = ParseRplyFile(dlg.FileName);
+                if (records.Count == 0)
+                {
+                    MessageBox.Show("No valid records found in the file.", "Open Trace", MessageBoxButton.OK, MessageBoxImage.Warning);
+                    return;
+                }
+
+                // Clear existing data and load trace
+                _canDiagStore.Clear();
+                _rawCanLines.Clear();
+                if (TblRawCan != null) TblRawCan.Text = string.Empty;
+                _canDiagRecording = false;
+                UpdateCanDiagRecordingButtons();
+
+                // Add records oldest-first (store prepends, so last added = newest on top)
+                foreach (var r in records)
+                    _canDiagStore.Append(r);
+
+                _canDiagCurrentPage = 1;
+                RefreshCanDiagView();
+
+                AppendDiagLog($"[trace] Loaded {records.Count} records from {dlg.FileName}");
+                if (LblCanMonitorStatus != null)
+                    LblCanMonitorStatus.Text = $"Trace loaded: {System.IO.Path.GetFileName(dlg.FileName)} ({records.Count} records)";
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Load failed: {ex.Message}", "Open Trace", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        }
+
+        private static List<LsmCanDiagRecord> ParseRplyFile(string path)
+        {
+            var records = new List<LsmCanDiagRecord>();
+
+            foreach (var line in File.ReadLines(path))
+            {
+                if (string.IsNullOrWhiteSpace(line) || line.StartsWith("//"))
+                    continue;
+
+                var parts = line.Split(';');
+                if (parts.Length < 9)
+                    continue;
+
+                try
+                {
+                    ushort seq = ushort.Parse(parts[0].Trim(), CultureInfo.InvariantCulture);
+                    DateTime ts = DateTime.ParseExact(parts[1].Trim(), "yyyy-MM-dd HH:mm:ss.fff",
+                        CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.AssumeUniversal);
+
+                    byte deviceId = parts[2].Trim() switch
+                    {
+                        "OSRAM" => 1,
+                        "NICHIA" => 0,
+                        _ => byte.TryParse(parts[2].Trim().Replace("DEV", ""), System.Globalization.NumberStyles.HexNumber, null, out byte d) ? d : (byte)255,
+                    };
+
+                    LsmCanDiagOperation op = parts[3].Trim() switch
+                    {
+                        "W" => LsmCanDiagOperation.Write,
+                        "R" => LsmCanDiagOperation.Read,
+                        "CAN" => LsmCanDiagOperation.CanRaw,
+                        _ => LsmCanDiagOperation.Read,
+                    };
+
+                    ushort addr = Convert.ToUInt16(parts[4].Trim().Replace("0x", ""), 16);
+                    uint value = Convert.ToUInt32(parts[5].Trim().Replace("0x", ""), 16);
+
+                    LsmCanDiagStatus status = Enum.TryParse<LsmCanDiagStatus>(parts[6].Trim(), true, out var s)
+                        ? s : LsmCanDiagStatus.Ok;
+
+                    ushort rspDelay = ushort.Parse(parts[7].Trim(), CultureInfo.InvariantCulture);
+                    ushort ifDelay = ushort.Parse(parts[8].Trim(), CultureInfo.InvariantCulture);
+
+                    byte[] rawPayload = [];
+                    byte rawLen = 0;
+                    if (parts.Length > 9 && !string.IsNullOrWhiteSpace(parts[9]))
+                    {
+                        string hex = parts[9].Trim();
+                        rawPayload = new byte[hex.Length / 2];
+                        for (int i = 0; i < rawPayload.Length; i++)
+                            rawPayload[i] = Convert.ToByte(hex.Substring(i * 2, 2), 16);
+                        rawLen = (byte)Math.Min(rawPayload.Length, 255);
+                    }
+
+                    records.Add(new LsmCanDiagRecord
+                    {
+                        Sequence = seq,
+                        RecordType = LsmCanDiagRecord.RegisterIoRecordType,
+                        SourceTimestamp = 0,
+                        Address = addr,
+                        ResponseDelayUs = rspDelay,
+                        InterFrameDelayUs = ifDelay,
+                        Value = value,
+                        Checksum = 0,
+                        DeviceId = deviceId,
+                        Operation = op,
+                        Status = status,
+                        RawLength = rawLen,
+                        RawPayload = rawPayload,
+                        ReceivedUtc = ts,
+                    });
+                }
+                catch
+                {
+                    // Skip malformed lines
+                    continue;
+                }
+            }
+
+            return records;
+        }
+
         // ── CAN Monitor: tab switching ──────────────────────────────────────────
 
         private enum CanTab { Monitor, RawCan, UartTransaction }
@@ -1695,6 +1916,17 @@ namespace VilsSharpX
             ApplyCanTabStyle(BtnCanTabMonitor,  tab == CanTab.Monitor);
             ApplyCanTabStyle(BtnCanTabRawCan,   tab == CanTab.RawCan);
             ApplyCanTabStyle(BtnCanTabUart,     tab == CanTab.UartTransaction);
+
+            // Update centered title
+            if (LblCanTabTitle != null)
+            {
+                LblCanTabTitle.Text = tab switch
+                {
+                    CanTab.RawCan => "CAN-UART",
+                    CanTab.UartTransaction => "UART Transaction",
+                    _ => "UART Monitor",
+                };
+            }
 
             if (tab == CanTab.RawCan)
                 FlushRawCanText();
@@ -2131,6 +2363,14 @@ namespace VilsSharpX
             SaveUiSettings();
             if (_recordingManager.IsRecording) StopRecording();
             StopAll();
+            // Send STOP to Aurix so g_diagSniffEnabled is cleared for the next C# session
+            try
+            {
+                string? txDev = GetTxPcapDeviceNameOrNull();
+                if (!string.IsNullOrWhiteSpace(txDev))
+                    DiagSniffCommand.Send(txDev, start: false, null);
+            }
+            catch { /* ignore */ }
             try { StopCanDiagCapture(); } catch { /* ignore */ }
             try { StopNichiaEthCapture(); } catch { /* ignore */ }
             try { StopOsramEthCapture(); } catch { /* ignore */ }

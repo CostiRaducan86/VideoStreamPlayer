@@ -210,12 +210,23 @@
 
                         <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center">
                             <Button x:Name="BtnCanExpandCollapse" Click="BtnCanExpandCollapse_Click"
-                                    Padding="2" Width="28" Height="28" Background="Transparent" BorderBrush="Transparent"
+                                    Padding="0" Width="28" Height="28" Background="Transparent" BorderBrush="Transparent"
                                     ToolTip="Expand/Collapse CAN Monitor">
-                                <Path x:Name="PathExpandIcon" Fill="#6F6F6F" Data="M 0,5 L 5,0 L 10,5 M 0,10 L 5,15 L 10,10" Stretch="Uniform" Width="14" Height="14"/>
+                                <Canvas Width="16" Height="16">
+                                    <!-- Top arrow (pointing up = expand outward) -->
+                                    <Path x:Name="PathExpandTop" Fill="#6F6F6F" Data="M 4,6 L 8,2 L 12,6" Stroke="#6F6F6F" StrokeThickness="1.2"/>
+                                    <!-- Center bar -->
+                                    <Line X1="3" Y1="8" X2="13" Y2="8" Stroke="#6F6F6F" StrokeThickness="1.5"/>
+                                    <!-- Bottom arrow (pointing down = expand outward) -->
+                                    <Path x:Name="PathExpandBottom" Fill="#6F6F6F" Data="M 4,10 L 8,14 L 12,10" Stroke="#6F6F6F" StrokeThickness="1.2"/>
+                                </Canvas>
                             </Button>
-                            <TextBlock FontFamily="Segoe MDL2 Assets" FontSize="12" Text="&#xE8A7;" Foreground="#6F6F6F" VerticalAlignment="Center" Margin="6,0,0,0"/>
                         </StackPanel>
+
+                        <!-- Centered tab title -->
+                        <TextBlock x:Name="LblCanTabTitle" Grid.Column="1" Text="UART Monitor"
+                                   FontWeight="Bold" FontSize="13" Foreground="#333333"
+                                   HorizontalAlignment="Center" VerticalAlignment="Center"/>
 
                         <StackPanel Grid.Column="2" Orientation="Horizontal" HorizontalAlignment="Right">
                             <Button x:Name="BtnCanTabRawCan" Content="RawCan"
@@ -301,6 +312,11 @@
                     <TextBox x:Name="TxtCanPageJump" Width="50" Padding="4,2"
                              VerticalAlignment="Center" HorizontalContentAlignment="Center"
                              KeyDown="TxtCanPageJump_KeyDown"/>
+                    <Rectangle Width="1" Height="22" Fill="Gray" Margin="10,0,10,0" VerticalAlignment="Center"/>
+                    <Button x:Name="BtnCanSaveTrace" Content="💾 Save" Click="BtnCanSaveTrace_Click" Padding="10,4" Margin="0,0,6,0"
+                            ToolTip="Save trace to .rply file"/>
+                    <Button x:Name="BtnCanOpenTraceFolder" Content="📂" Click="BtnCanOpenTraceFolder_Click" Padding="8,4" Margin="0,0,0,0"
+                            ToolTip="Open .rply trace file"/>
                 </StackPanel>
 
                 <!-- Status info -->
@@ -379,9 +395,11 @@
                 <CheckBox x:Name="ChkLoopPlaying" Content="🔄 Loop Playback" VerticalAlignment="Center" Margin="12,0,0,0"
                           Visibility="Collapsed" IsChecked="False" Checked="ChkLoopPlaying_Changed" Unchecked="ChkLoopPlaying_Changed" />
 
+                <Rectangle Width="1" Height="26" Fill="Gray" Margin="12,0,12,0" VerticalAlignment="Center" />
+
                 <TextBlock x:Name="LblSaveFeedback"
                            Text=""
-                           Margin="10,0,0,0"
+                           Margin="0,0,0,0"
                            VerticalAlignment="Center"
                            Foreground="DimGray"
                            TextTrimming="CharacterEllipsis"
