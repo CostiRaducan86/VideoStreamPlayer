@@ -1463,6 +1463,7 @@ boolean frame_eth_send_can_diag_pending(void)
 /* ==================== Ethernet RX — command processing ==================== */
 
 #include "device_mode.h"   /* device_mode_set() */
+#include "adapter_ctrl.h"  /* adapter_ctrl_set_mode/can_uart/apply() */
 
 void frame_eth_poll_rx(void)
 {
@@ -1513,6 +1514,19 @@ void frame_eth_poll_rx(void)
                         can_diag_reset();             /* clear send queue + stats     */
                     }
                     g_diagSniffEnabled = newState;
+                }
+                else if (cmdId == FE_CMD_SET_ADAPTER)
+                {
+                    /* Payload: [17] = control_mode (0=ECU, 1=Direct)
+                     *          [18] = can_uart_mode (0=ECU, 1=Direct, 2=External) */
+                    uint8 ctrlMode = cmdPayload;       /* byte [17] */
+                    uint8 canMode  = pRxBuf[18];       /* byte [18] */
+                    adapter_control_mode_t ctrlEnum = (ctrlMode != 0u)
+                        ? ADAPTER_MODE_DIRECT : ADAPTER_MODE_ECU;
+                    adapter_can_uart_mode_t canEnum = CAN_UART_ECU;
+                    if (canMode == 1u) canEnum = CAN_UART_DIRECT;
+                    else if (canMode == 2u) canEnum = CAN_UART_EXTERNAL;
+                    adapter_ctrl_apply(ctrlEnum, canEnum);
                 }
             }
         }

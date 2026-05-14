@@ -276,6 +276,9 @@ namespace VilsSharpX
             if (TxtDiffThr != null) TxtDiffThr.Text = "0";
 
             _settingsManager.IsLoading = false;
+
+            // Apply hardware constraints after settings are loaded
+            ApplyModeConstraints();
         }
 
         /// <summary>
@@ -1107,7 +1110,9 @@ namespace VilsSharpX
         {
             if (_settingsManager.IsLoading || !IsLoaded) return;
             _controlMode = CmbControlMode?.SelectedIndex ?? 0;
+            ApplyModeConstraints();
             SaveUiSettings();
+            SendAdapterModeCommand();
         }
 
         private void CmbCanUartMode_SelectionChanged(object sender, System.Windows.Controls.SelectionChangedEventArgs e)
@@ -1115,6 +1120,49 @@ namespace VilsSharpX
             if (_settingsManager.IsLoading || !IsLoaded) return;
             _canUartMode = CmbCanUartMode?.SelectedIndex ?? 0;
             SaveUiSettings();
+            SendAdapterModeCommand();
+        }
+
+        /// <summary>
+        /// Enforces hardware constraints between Control Mode and CAN UART Mode.
+        /// Direct mode: ECU CAN UART invalid (ECU is physically disconnected).
+        /// LVDS Mode is independent — ECU mode can also use Generator (TTL_SEL=LOW, TTL_FROM_LOCAL).
+        /// </summary>
+        private void ApplyModeConstraints()
+        {
+            if (CmbCanUartMode == null) return;
+
+            bool isDirect = _controlMode == 1;
+
+            // CAN UART Mode constraints
+            if (CmbCanUartMode.Items.Count >= 3)
+            {
+                // Direct → ECU CAN UART (index 0) invalid
+                ((System.Windows.Controls.ComboBoxItem)CmbCanUartMode.Items[0]).IsEnabled = !isDirect;
+
+                // If Direct and currently on ECU CAN UART, switch to Direct CAN UART
+                if (isDirect && CmbCanUartMode.SelectedIndex == 0)
+                {
+                    CmbCanUartMode.SelectedIndex = 1;
+                    _canUartMode = 1;
+                }
+            }
+        }
+
+        /// <summary>
+        /// Sends the current adapter mode (control + CAN UART) to the Aurix ECU via Ethernet.
+        /// </summary>
+        private void SendAdapterModeCommand()
+        {
+            try
+            {
+                string? txDev = GetTxPcapDeviceNameOrNull();
+                if (!string.IsNullOrWhiteSpace(txDev))
+                    AdapterModeCommand.SendAdapterMode(txDev, _controlMode, _canUartMode, AppendDiagLog);
+                else
+                    AppendDiagLog("[cmd] No NIC selected — adapter-mode command not sent");
+            }
+            catch (Exception ex) { AppendDiagLog($"[cmd] {ex.Message}"); }
         }
 
         private void TxtAvtpHeader_TextChanged(object sender, System.Windows.Controls.TextChangedEventArgs e)
