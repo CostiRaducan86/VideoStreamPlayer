@@ -1504,10 +1504,13 @@ void frame_eth_poll_rx(void)
                 }
                 else if (cmdId == FE_CMD_DIAG_SNIFF)
                 {
-                    /* Only reset on 0→1 transition; ignore redundant starts
-                     * (PC sends 3× for reliability — don't wipe seq mid-stream). */
+                    /* Always reset on START regardless of current state.
+                     * This guarantees a clean session even if the previous
+                     * C# instance crashed without sending STOP (leaving
+                     * g_diagSniffEnabled stuck at 1).  The PC sends 3× for
+                     * reliability — three consecutive resets are harmless. */
                     uint8 newState = (cmdPayload != 0u) ? 1u : 0u;
-                    if (newState && !g_diagSniffEnabled)
+                    if (newState)
                     {
                         s_diagSeq = 0u;               /* restart Nr from 0     */
                         diag_uart_reset_state();      /* zero counters + flush parser */

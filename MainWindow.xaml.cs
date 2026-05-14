@@ -1596,19 +1596,14 @@ namespace VilsSharpX
 
         private void BtnCanRecord_Click(object sender, RoutedEventArgs e)
         {
-            // Force a STOP→START sequence to guarantee a 0→1 transition on the Aurix.
-            // If a previous C# session left g_diagSniffEnabled=1 (e.g. app crash or close
-            // without Stop), the firmware's 0→1 guard would skip the reset and never
-            // emit diagnostic packets.  Sending STOP first clears the flag.
+            // Tell Aurix to start diagnostic sniffing.
+            // Firmware always resets on START (no 0→1 guard), so this works
+            // even if g_diagSniffEnabled was already 1 from a previous session.
             try
             {
                 string? txDev = GetTxPcapDeviceNameOrNull();
                 if (!string.IsNullOrWhiteSpace(txDev))
-                {
-                    DiagSniffCommand.Send(txDev, start: false, AppendDiagLog);
-                    System.Threading.Thread.Sleep(50);  // brief pause so Aurix processes STOP
                     DiagSniffCommand.Send(txDev, start: true, AppendDiagLog);
-                }
             }
             catch (Exception ex) { AppendDiagLog($"[cmd] DiagSniff start: {ex.Message}"); }
 
