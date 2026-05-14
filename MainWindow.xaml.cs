@@ -162,6 +162,9 @@ namespace VilsSharpX
         private bool _canDiagRefreshPending;
         private bool _canDiagRecording;  // starts false — user presses Record to begin
         private static readonly TimeSpan CanDiagRefreshInterval = TimeSpan.FromMilliseconds(200);
+        private string _canSortColumn = "Nr";     // column header text used for sorting
+        private bool _canSortAscending = true;     // true = ascending, false = descending
+        private GridViewColumnHeader? _canLastSortHeader;  // last clicked header for glyph tracking
 
         private Frame? _latestA;
         private Frame? _latestB;
@@ -1409,9 +1412,6 @@ namespace VilsSharpX
 
         private void RefreshCanDiagView()
         {
-            string orderBy = GetSelectedComboContent(CmbCanOrderBy);
-            string sort = GetSelectedComboContent(CmbCanSort);
-
             // Sequential log: show all stored records in arrival order.
             var snapshot = _canDiagStore.SnapshotNewestFirst(0);  // 0 = all
             var filtered = snapshot
@@ -1419,13 +1419,20 @@ namespace VilsSharpX
                 .Select(CanDiagRowView.FromRecord)
                 .ToList();
 
-            IEnumerable<CanDiagRowView> ordered = orderBy switch
+            IEnumerable<CanDiagRowView> ordered = _canSortColumn switch
             {
                 "Time" => filtered.OrderBy(row => row.RawReceivedUtc),
-                _ => filtered.OrderBy(row => row.RawSequence),
+                "Name" => filtered.OrderBy(row => row.Name, StringComparer.OrdinalIgnoreCase),
+                "Address" => filtered.OrderBy(row => row.RawAddress),
+                "MemoryType" => filtered.OrderBy(row => row.MemoryType, StringComparer.OrdinalIgnoreCase),
+                "Device" => filtered.OrderBy(row => row.Device, StringComparer.OrdinalIgnoreCase),
+                "R/W" => filtered.OrderBy(row => row.Operation, StringComparer.OrdinalIgnoreCase),
+                "Value" => filtered.OrderBy(row => row.Value, StringComparer.OrdinalIgnoreCase),
+                "Error" => filtered.OrderBy(row => row.Error, StringComparer.OrdinalIgnoreCase),
+                _ => filtered.OrderBy(row => row.RawSequence),  // "Nr" default
             };
 
-            if (!string.Equals(sort, "asc", StringComparison.OrdinalIgnoreCase))
+            if (!_canSortAscending)
                 ordered = ordered.Reverse();
 
             var pageSource = ordered.ToList();
@@ -1456,32 +1463,8 @@ namespace VilsSharpX
 
         private bool MatchesCanDiagFilter(LsmCanDiagRecord record)
         {
-            string deviceFilter = GetSelectedComboContent(CmbCanDeviceFilter);
-            string opFilter = GetSelectedComboContent(CmbCanOpFilter);
-            string statusFilter = GetSelectedComboContent(CmbCanStatusFilter);
-
-            bool deviceOk = deviceFilter switch
-            {
-                "OSRAM" => record.DeviceId == 1,
-                "NICHIA" => record.DeviceId == 0,
-                _ => true,
-            };
-
-            bool opOk = opFilter switch
-            {
-                "R" => record.Operation == LsmCanDiagOperation.Read,
-                "W" => record.Operation == LsmCanDiagOperation.Write,
-                _ => true,
-            };
-
-            bool statusOk = statusFilter switch
-            {
-                "OK" => record.Status == LsmCanDiagStatus.Ok,
-                "Error" => record.Status != LsmCanDiagStatus.Ok,
-                _ => true,
-            };
-
-            return deviceOk && opOk && statusOk;
+            // All filter combos removed — show all records.
+            return true;
         }
 
         private void UpdateCanDiagStatusText()
@@ -1524,6 +1507,72 @@ namespace VilsSharpX
 
             _canDiagCurrentPage = 1;
             RefreshCanDiagView();
+        }
+
+        private void LvCanDiag_ColumnHeaderClick(object sender, RoutedEventArgs e)
+        {
+            if (e.OriginalSource is not GridViewColumnHeader header || header.Column == null)
+                return;
+
+            string? headerText = header.Column.Header?.ToString();
+            if (string.IsNullOrEmpty(headerText)) return;
+
+            // Toggle direction if same column, otherwise default to ascending
+            if (string.Equals(headerText, _canSortColumn, StringComparison.Ordinal))
+                _canSortAscending = !_canSortAscending;
+            else
+            {
+                _canSortColumn = headerText;
+                _canSortAscending = true;
+            }
+
+            // Update sort indicator glyph on column headers
+            UpdateCanSortGlyph(header);
+
+            _canDiagCurrentPage = 1;
+            RefreshCanDiagView();
+        }
+
+        private void UpdateCanSortGlyph(GridViewColumnHeader? activeHeader)
+        {
+            // Remove glyph from previous header
+            if (_canLastSortHeader != null)
+                _canLastSortHeader.Column.Header = _canLastSortHeader.Column.Header?.ToString()?.TrimEnd(' ', '▲', '▼');
+
+            if (activeHeader?.Column == null) return;
+
+            string baseText = activeHeader.Column.Header?.ToString()?.TrimEnd(' ', '▲', '▼') ?? "";
+            activeHeader.Column.Header = baseText + (_canSortAscending ? " ▲" : " ▼");
+            _canLastSortHeader = activeHeader;
+        }
+
+        private bool _canMonitorExpanded;
+        private GridLength _sidebarInfoRowHeight = new(3, GridUnitType.Star); // saved height for restore
+
+        private void BtnCanExpandCollapse_Click(object sender, RoutedEventArgs e)
+        {
+            _canMonitorExpanded = !_canMonitorExpanded;
+
+            if (_canMonitorExpanded)
+            {
+                // Expand: CAN monitor takes full right column, hide LVDS Info + Status
+                SidebarCan.SetValue(Grid.RowSpanProperty, 5);
+                SidebarInfo.Visibility = Visibility.Collapsed;
+
+                // Update icon to "collapse" arrows pointing inward
+                PathExpandIcon.Data = Geometry.Parse("M 0,0 L 5,5 L 10,0 M 0,15 L 5,10 L 10,15");
+                BtnCanExpandCollapse.ToolTip = "Collapse CAN Monitor";
+            }
+            else
+            {
+                // Collapse: restore original layout
+                SidebarCan.SetValue(Grid.RowSpanProperty, 2);
+                SidebarInfo.Visibility = Visibility.Visible;
+
+                // Update icon to "expand" arrows pointing outward
+                PathExpandIcon.Data = Geometry.Parse("M 0,5 L 5,0 L 10,5 M 0,10 L 5,15 L 10,10");
+                BtnCanExpandCollapse.ToolTip = "Expand CAN Monitor";
+            }
         }
 
         private void BtnCanClear_Click(object sender, RoutedEventArgs e)
@@ -1733,6 +1782,7 @@ namespace VilsSharpX
             public string Value { get; init; } = string.Empty;
             public string Error { get; init; } = string.Empty;
             public ushort RawSequence { get; init; }
+            public ushort RawAddress { get; init; }
             public DateTime RawReceivedUtc { get; init; }
             public LsmCanDiagRecord? Record { get; init; }
 
@@ -1776,6 +1826,7 @@ namespace VilsSharpX
                         _ => "Error",
                     },
                     RawSequence = record.Sequence,
+                    RawAddress = record.Address,
                     RawReceivedUtc = record.ReceivedUtc,
                     Record = record,
                 };
@@ -2206,11 +2257,14 @@ namespace VilsSharpX
         {
             try
             {
-                string dir = RecordingManager.GetFrameSnapshotsOutputDirectory();
+                // Open the parent outputs folder (contains frameSnapshots, videoRecords, etc.)
+                string snapshotDir = RecordingManager.GetFrameSnapshotsOutputDirectory();
+                string outputsDir = System.IO.Path.GetDirectoryName(snapshotDir) ?? snapshotDir;
+                Directory.CreateDirectory(outputsDir);
                 var psi = new ProcessStartInfo
                 {
                     FileName = "explorer.exe",
-                    Arguments = $"\"{dir}\"",
+                    Arguments = $"\"{outputsDir}\"",
                     UseShellExecute = true
                 };
                 Process.Start(psi);
