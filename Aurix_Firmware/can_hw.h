@@ -44,6 +44,7 @@ typedef struct
     /* ASCLIN error tracking */
     volatile uint32 framingErrors;   /* ASCLIN FE flag count                   */
     volatile uint32 parityErrors;    /* ASCLIN PE flag count                   */
+    volatile uint32 fifoOverflows;   /* ASCLIN RFO flag count (RXFIFO overflow)*/
 
     /* Status */
     volatile uint32 synced;          /* 1 = bytes flowing on diagnostic bus    */
@@ -106,5 +107,8 @@ boolean diag_uart_try_receive(DiagUartFrame *out);
 /** Reset all soft counters and parser state (does NOT re-init ASCLIN9/DMA).
  *  Call on sniff-start so a new recording session starts from zero. */
 void diag_uart_reset_state(void);
+
+/** Return the current DMA completion count (for recovery watchdog). */
+uint32 diag_uart_get_completion_count(void);
 
 #endif /* CAN_HW_H */

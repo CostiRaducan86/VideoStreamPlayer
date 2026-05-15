@@ -340,7 +340,42 @@ void diag_uart_init_for_device(uint8 deviceId)
 
     IfxCpu_disableInterrupts();
 
+    /* ── Safe recovery sequence (no kernel reset) ─────────────────────
+     * IfxAsclin_resetModule caused DAE traps (Class 4, TIN 3) because
+     * at boot ASCLIN9 may not be fully initialized.  Instead we:
+     *   1. Stop DMA channel (no more reads from ASCLIN9.RXDATA)
+     *   2. Ensure ASCLIN9 module clock is on (safe register access)
+     *   3. Disable SRC trigger routing
+     *   4. Flush RXFIFO + clear all error/status flags
+     *   5. Let diag_asclin9_configure → IfxAsclin_Asc_initModule
+     *      internally cycle CSR.CLKSEL (0 → init mode → reconfigure
+     *      → re-enable), which restarts the receiver state machine.
+     * This recovers from stuck error states without kernel reset.     */
+
+    /* 1. Stop DMA channel — prevent bus reads from ASCLIN9 */
+    {
+        Ifx_DMA_TSR tsr;
+        tsr.U     = 0;
+        tsr.B.DCH = 1;   /* Disable Channel Hardware Transfer Request */
+        MODULE_DMA.TSR[DIAG_DMA_CHANNEL_ID].U = tsr.U;
+    }
+
+    /* 2. Ensure module clock is on before accessing ASCLIN9 registers */
     IfxAsclin_enableModule(&MODULE_ASCLIN9);
+
+    /* 3. Disable SRC routing (ASCLIN9 RX → DMA trigger) */
+    {
+        volatile Ifx_SRC_SRCR *rxSrc = IfxAsclin_getSrcPointerRx(&MODULE_ASCLIN9);
+        IfxSrc_disable(rxSrc);
+    }
+
+    /* 4. Quiesce ASCLIN9: disable flags, flush FIFO, clear all flags */
+    MODULE_ASCLIN9.FLAGSENABLE.U = 0u;
+    IfxAsclin_flushRxFifo(&MODULE_ASCLIN9);
+    IfxAsclin_clearAllFlags(&MODULE_ASCLIN9);
+
+    /* 5. Full reconfigure: initModule sets CSR.CLKSEL=0 (stops state
+     *    machine), reconfigures all registers, then restarts clock.  */
     IfxAsclin_setSuspendMode(&MODULE_ASCLIN9, IfxAsclin_SuspendMode_none);
 
     diag_asclin9_configure(s_diagDeviceId);
@@ -455,6 +490,12 @@ boolean diag_uart_is_synced(void)
 }
 
 /* ================================================================ */
+uint32 diag_uart_get_completion_count(void)
+{
+    return s_diagCompletionCount;
+}
+
+/* ================================================================ */
 boolean diag_uart_tick(void)
 {
     g_diagUartStats.pollCount++;
@@ -498,11 +539,15 @@ boolean diag_uart_tick(void)
      * On a half-duplex bus through TLE9251V, ASCLIN generates continuous
      * framing errors from bus turnaround noise during idle periods.
      * To keep the counter meaningful, only count FE/PE once per DMA
-     * completion (per 2560 received bytes).  Always clear sticky flags
-     * to prevent accumulation.                                          */
+     * completion (per 2560 received bytes).  Always clear ALL sticky flags
+     * — including RFO (bit 8, RX FIFO Overflow) which, if left set,
+     * stops the ASCLIN receiver permanently.                              */
     {
         uint32 flags = MODULE_ASCLIN9.FLAGS.U;
-        uint32 errs  = flags & 0x3Fu;
+
+        /* Mask covers: TH(0) TR(1) RH(2) RR(3) PE(4) FE(5) HT(6) RT(7)
+         *              RFO(8) RFU(9) TFO(10) TFU(11)                     */
+        uint32 allSticky = flags & 0xFFFu;
 
         /* Count errors only on DMA completion edges (real data received) */
         {
@@ -510,19 +555,24 @@ boolean diag_uart_tick(void)
             if (curDma != s_prevDmaCountForErrors)
             {
                 s_prevDmaCountForErrors = curDma;
-                if (errs != 0u)
-                {
-                    if (flags & (1u << 5))   /* FE - framing error */
-                        g_diagUartStats.framingErrors++;
-                    if (flags & (1u << 4))   /* PE - parity error */
-                        g_diagUartStats.parityErrors++;
-                }
+                if (flags & (1u << 5))   /* FE - framing error */
+                    g_diagUartStats.framingErrors++;
+                if (flags & (1u << 4))   /* PE - parity error */
+                    g_diagUartStats.parityErrors++;
             }
         }
 
-        /* Always clear sticky error flags regardless of counting */
-        if (errs != 0u)
-            MODULE_ASCLIN9.FLAGSCLEAR.U = errs;
+        /* RX FIFO Overflow recovery: flush FIFO so receiver can resume.
+         * Without this, ASCLIN9 permanently stops accepting bytes.        */
+        if (flags & (1u << 8))   /* RFO */
+        {
+            g_diagUartStats.fifoOverflows++;
+            IfxAsclin_flushRxFifo(&MODULE_ASCLIN9);
+        }
+
+        /* Always clear ALL sticky flags regardless of counting */
+        if (allSticky != 0u)
+            MODULE_ASCLIN9.FLAGSCLEAR.U = allSticky;
     }
 
     /* GPIO P20.7 level */

@@ -95,6 +95,22 @@ static uint64 s_lvdsLastRecoveryTick;
 static uint32 s_lvdsLastProgress;
 static FrameEthDevice s_lvdsLastDevice = FE_DEVICE_NICHIA;
 
+/* ── Diagnostic UART DMA recovery watchdog ──────────────────────
+ * If ASCLIN9/DMA stalls (no new DMA completions for N seconds),
+ * reinitialize the hardware.  Without this, the diagnostic capture
+ * dies silently and only an Aurix reset brings it back.
+ * Recovery only fires after DMA was once active (count > 0),
+ * with a cooldown to avoid hammering the hardware.                */
+#define DIAG_RECOVERY_TIMEOUT_MS   5000u
+#define DIAG_RECOVERY_COOLDOWN_MS 30000u
+static uint64 s_diagRecoveryTimeoutTicks;
+static uint64 s_diagRecoveryCooldownTicks;
+static uint64 s_diagLastCompletionTick;
+static uint64 s_diagLastRecoveryTick;
+static uint32 s_diagLastCompletionCount;
+static uint8  s_diagEverActive;          /* set once DMA count > 0 */
+volatile uint32 g_diagRecoveryCount;
+
 static void fps_init(void)
 {
     fps_t0  = stm_now64();
@@ -192,6 +208,61 @@ static void lvds_recovery_tick(void)
     s_lvdsLastProgressTick = now;
 }
 
+/* ── Diagnostic UART recovery ─────────────────────────────────── */
+
+static void diag_recovery_init(void)
+{
+    s_diagRecoveryTimeoutTicks =
+        (uint64)IfxStm_getTicksFromMilliseconds(&MODULE_STM0, DIAG_RECOVERY_TIMEOUT_MS);
+    s_diagRecoveryCooldownTicks =
+        (uint64)IfxStm_getTicksFromMilliseconds(&MODULE_STM0, DIAG_RECOVERY_COOLDOWN_MS);
+    s_diagLastCompletionTick  = stm_now64();
+    s_diagLastRecoveryTick    = 0u;
+    s_diagLastCompletionCount = 0u;
+    s_diagEverActive          = 0u;
+    g_diagRecoveryCount       = 0u;
+}
+
+static void diag_recovery_tick(void)
+{
+    uint32 count = diag_uart_get_completion_count();
+    uint64 now   = stm_now64();
+
+    if (count != s_diagLastCompletionCount)
+    {
+        /* DMA is alive — update baseline */
+        s_diagLastCompletionCount = count;
+        s_diagLastCompletionTick  = now;
+        s_diagEverActive          = 1u;
+        return;
+    }
+
+    /* Don't recover if DMA was never active (no CAN/UART traffic on bus).
+     * This prevents spurious reinits at boot when nothing is connected.  */
+    if (s_diagEverActive == 0u)
+        return;
+
+    /* DMA stalled — check timeout */
+    if ((now - s_diagLastCompletionTick) < s_diagRecoveryTimeoutTicks)
+        return;
+
+    /* Cooldown: don't reinit more than once per 30 seconds */
+    if ((s_diagLastRecoveryTick != 0u) &&
+        ((now - s_diagLastRecoveryTick) < s_diagRecoveryCooldownTicks))
+        return;
+
+    /* Reinitialize diagnostic UART hardware (ASCLIN9 + DMA) */
+    diag_uart_init_for_device((uint8)device_mode_get());
+    can_diag_reset();
+    g_diagRecoveryCount++;
+
+    s_diagLastCompletionCount = 0u;
+    s_diagLastCompletionTick  = now;
+    s_diagLastRecoveryTick    = now;
+    /* Keep s_diagEverActive = 1 so future recovery attempts are allowed.
+     * If reinit doesn't fix it, we retry after cooldown.                */
+}
+
 /* User callback: feed appropriate parser based on device mode */
 static void consume_dma_buffer(const uint8 *data, uint32 len)
 {
@@ -236,6 +307,7 @@ void core0_main(void)
     /* FPS */
     fps_init();
     lvds_recovery_init();
+    diag_recovery_init();
 
     while (1)
     {
@@ -264,6 +336,9 @@ void core0_main(void)
         }
 
         lvds_recovery_tick();
+
+        /* Watchdog: reinit ASCLIN9+DMA if no DMA completions for 5 s */
+        diag_recovery_tick();
 
         /* Diagnostic UART sniffer: poll + decode + bridge to queue.
          * UART parsing runs ALWAYS to keep the DMA consumer and gap
