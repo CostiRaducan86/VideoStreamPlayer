@@ -215,6 +215,13 @@ void core0_main(void)
      */
     device_mode_init(FE_DEVICE_NICHIA);
 
+    /* Enable diagnostic sniffing at boot so CD packets flow immediately.
+     * The g_diagSniffEnabled flag now only gates Ethernet TX — UART parsing
+     * runs unconditionally in the main loop.  The PC's START command
+     * still resets counters for a clean trace, but is no longer required
+     * for data to flow (eliminates the persistent CD:0 bug).            */
+    g_diagSniffEnabled = 1u;
+
     /* SmartVisio Adapter: configure all GPIO selectors.
      * MUST be called early — pins default to LOW (floating),
      * which puts adapter in Direct mode and breaks ECU path. */
@@ -259,20 +266,20 @@ void core0_main(void)
         lvds_recovery_tick();
 
         /* Diagnostic UART sniffer: poll + decode + bridge to queue.
-         * Only active when PC has sent FE_CMD_DIAG_SNIFF start command.
-         * Process at most 1 frame per main-loop iteration to keep
-         * interrupt-disabled time (diag_refill) short and avoid
-         * starving the LVDS DMA buffer drain above.                  */
+         * UART parsing runs ALWAYS to keep the DMA consumer and gap
+         * detector "warm".  If parsing is paused for minutes while
+         * g_diagSniffEnabled=0, the DMA ping-pong overflows silently
+         * and the parser can't recover when re-enabled.
+         * Only the Ethernet TX of diagnostic records is gated by
+         * g_diagSniffEnabled — this is the lightweight on/off switch.
+         * CPU cost of always-parsing is negligible (~5 µs/loop).     */
         diag_uart_poll_idle();   /* detect inter-frame gaps via DMA position */
-        if (g_diagSniffEnabled)
+        diag_uart_tick();
         {
-            diag_uart_tick();
+            DiagUartFrame diagFrame;
+            if (diag_uart_try_receive(&diagFrame))
             {
-                DiagUartFrame diagFrame;
-                if (diag_uart_try_receive(&diagFrame))
-                {
-                    can_diag_bridge_uart_frame(&diagFrame, (uint8)device_mode_get());
-                }
+                can_diag_bridge_uart_frame(&diagFrame, (uint8)device_mode_get());
             }
         }
 

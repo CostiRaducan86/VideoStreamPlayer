@@ -721,10 +721,10 @@ static boolean diag_nichia_header_valid_at(uint16 offset)
 }
 
 /* ======================== Idle-gap polling ================================= */
-/* Called every main-loop iteration.  Reads the DMA channel 0 destination
- * address to detect when the UART line goes idle (no new bytes arriving).
- * When the idle period exceeds IDLE_THRESHOLD_US, the measured gap duration
- * is pushed to s_gapFifo for the frame parser to consume.
+/* Called every main-loop iteration UNCONDITIONALLY to keep DMA consumer and
+ * gap detector alive even when g_diagSniffEnabled=0.  This prevents the
+ * DMA ping-pong buffers from overflowing and the parser from going stale
+ * during long periods without recording.
  *
  * A ping-pong buffer swap (ISR) causes DADR to jump; we handle that via
  * s_diagBufSwapped so it doesn't produce a false gap-end event.            */
@@ -737,8 +737,9 @@ void diag_uart_poll_idle(void)
     uint32 gapUs;
     uint8  next;
 
-    if (!g_diagSniffEnabled)
-        return;
+    /* Guard removed — always poll to keep DMA consumer warm.
+     * The g_diagSniffEnabled flag now only gates Ethernet TX,
+     * not UART parsing. */
 
     /* Handle DMA buffer swap — DADR jumped to new buffer, not real data */
     if (s_diagBufSwapped)

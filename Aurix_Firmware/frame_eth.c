@@ -1503,16 +1503,15 @@ void frame_eth_poll_rx(void)
                 }
                 else if (cmdId == FE_CMD_DIAG_SNIFF)
                 {
-                    /* Always reset on START regardless of current state.
-                     * This guarantees a clean session even if the previous
-                     * C# instance crashed without sending STOP (leaving
-                     * g_diagSniffEnabled stuck at 1).  The PC sends 3× for
-                     * reliability — three consecutive resets are harmless. */
+                    /* START (payload != 0): reset counters + queue for a clean
+                     * trace and (re-)enable Ethernet TX of diagnostic records.
+                     * STOP (payload == 0): pause Ethernet TX only — the UART
+                     * parser runs unconditionally in the main loop to keep the
+                     * DMA consumer warm and prevent stale-state bugs.           */
                     uint8 newState = (cmdPayload != 0u) ? 1u : 0u;
                     if (newState)
                     {
                         s_diagSeq = 0u;               /* restart Nr from 0     */
-                        diag_uart_reset_state();      /* zero counters + flush parser */
                         can_diag_reset();             /* clear send queue + stats     */
                     }
                     g_diagSniffEnabled = newState;
