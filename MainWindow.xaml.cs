@@ -1321,6 +1321,11 @@ namespace VilsSharpX
             // Recording starts as false — user must press Record
             UpdateCanDiagRecordingButtons();
             UpdateCanDiagStatusText();
+
+            // Start Ethernet listener for diagnostic packets immediately.
+            // CAN capture is independent of the main Start/Stop cycle so the
+            // user can Record/Stop on the CAN monitor at any time.
+            StartCanDiagCapture();
         }
 
         private void StartCanDiagCapture()
@@ -1594,8 +1599,22 @@ namespace VilsSharpX
             RefreshCanDiagView();
         }
 
+        /// <summary>
+        /// Ensures the CAN diagnostic Ethernet listener is active.
+        /// Called from Record so capture works even if it was never started or was disposed.
+        /// </summary>
+        private void EnsureCanDiagCapture()
+        {
+            if (_canDiagCapture != null && _canDiagCapture.IsCapturing)
+                return;
+            StartCanDiagCapture();
+        }
+
         private void BtnCanRecord_Click(object sender, RoutedEventArgs e)
         {
+            // Ensure the Ethernet listener is running (independent of main Start/Stop)
+            EnsureCanDiagCapture();
+
             // Tell Aurix to start diagnostic sniffing.
             // Firmware always resets on START (no 0→1 guard), so this works
             // even if g_diagSniffEnabled was already 1 from a previous session.
@@ -2921,7 +2940,6 @@ namespace VilsSharpX
                 _avtpLiveDeviceHint = deviceHint;
 
                 _liveCapture.StartEthernetCapture(deviceHint);
-                StartCanDiagCapture();
             }
 
             // Pane B real LVDS over Ethernet (Aurix GETH), managed by Start/Stop.
@@ -3015,9 +3033,8 @@ namespace VilsSharpX
             if (LblAvtpInFps != null) LblAvtpInFps.Text = "";
             if (LblAvtpDropped != null) LblAvtpDropped.Text = "";
 
-            // Stop all live capture sources
+            // Stop all live capture sources (CAN diag capture is independent)
             _liveCapture.StopAll();
-            StopCanDiagCapture();
             StopNichiaEthCapture();
             StopOsramEthCapture();
             StopBaslerCapture();

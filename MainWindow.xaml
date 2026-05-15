@@ -287,9 +287,11 @@
                               VerticalScrollBarVisibility="Auto"
                               HorizontalScrollBarVisibility="Disabled"
                               Background="#1E1E1E">
-                    <TextBlock x:Name="TblRawCan" FontFamily="Consolas" FontSize="11"
+                    <TextBox x:Name="TblRawCan" FontFamily="Consolas" FontSize="11"
                                Foreground="#D4D4D4" Padding="8,6"
-                               TextWrapping="Wrap"/>
+                               TextWrapping="Wrap" IsReadOnly="True"
+                               Background="Transparent" BorderThickness="0"
+                               VerticalScrollBarVisibility="Disabled"/>
                 </ScrollViewer>
 
                 <!-- UartTransaction view (hidden by default) -->

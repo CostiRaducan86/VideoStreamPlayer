@@ -574,8 +574,7 @@ static void frame_eth_update_link_status(boolean force)
             frame_eth_recover_tx_ring(TRUE);
     }
 
-    /* Paranoia: ensure MAC transmitter is enabled.
-     * A debug-disconnect transient or OCDS event could clear MAC_CONFIGURATION.TE.
+    /* A debug-disconnect transient or OCDS event could clear MAC_CONFIGURATION.TE.
      * Re-enabling is harmless if it's already set. */
     if (newLink != 0u && s_macSynced != 0u)
     {
