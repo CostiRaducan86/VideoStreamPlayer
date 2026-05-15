@@ -160,6 +160,8 @@ namespace VilsSharpX
         private DateTime _canDiagLastRefresh = DateTime.MinValue;
         private bool _canDiagRefreshPending;
         private bool _canDiagRecording;  // starts false — user presses Record to begin
+        private DateTime _canRecordSessionStart = DateTime.MinValue; // filters stale Dispatcher-queued records
+        private DispatcherTimer? _canDiagRetryTimer; // resends START if CD stays 0
         private static readonly TimeSpan CanDiagRefreshInterval = TimeSpan.FromMilliseconds(200);
         private string _canSortColumn = "Nr";     // column header text used for sorting
         private bool _canSortAscending = true;     // true = ascending, false = descending
@@ -1366,6 +1368,12 @@ namespace VilsSharpX
             if (!_canDiagRecording)
                 return;
 
+            // Discard stale records from Dispatcher queue that were enqueued
+            // before the current Record session started (fixes duplicate Seqs
+            // leaking from a previous recording after Clear + Record).
+            if (record.ReceivedUtc < _canRecordSessionStart)
+                return;
+
             _canDiagStore.Append(record);
             AppendRawCanLine(record);
 
@@ -1615,16 +1623,14 @@ namespace VilsSharpX
             // Ensure the Ethernet listener is running (independent of main Start/Stop)
             EnsureCanDiagCapture();
 
+            // Mark session start BEFORE sending START — any records with ReceivedUtc
+            // earlier than this are stale leftovers from the Dispatcher queue.
+            _canRecordSessionStart = DateTime.UtcNow;
+
             // Tell Aurix to start diagnostic sniffing.
             // Firmware always resets on START (no 0→1 guard), so this works
             // even if g_diagSniffEnabled was already 1 from a previous session.
-            try
-            {
-                string? txDev = GetTxPcapDeviceNameOrNull();
-                if (!string.IsNullOrWhiteSpace(txDev))
-                    DiagSniffCommand.Send(txDev, start: true, AppendDiagLog);
-            }
-            catch (Exception ex) { AppendDiagLog($"[cmd] DiagSniff start: {ex.Message}"); }
+            SendDiagSniffStart();
 
             // Reset capture counters so Rx/CD/OS restart from 0
             _canDiagCapture?.ResetCounters();
@@ -1637,11 +1643,72 @@ namespace VilsSharpX
             _canDiagRecording = true;
             UpdateCanDiagRecordingButtons();
             RefreshCanDiagView();
+
+            // Start a retry timer: if CD stays 0 after 2 seconds, resend START.
+            // This handles the rare case where the initial START packet was lost
+            // or the firmware didn't process it in time.
+            StartDiagRetryTimer();
+        }
+
+        /// <summary>Sends DiagSniff START to Aurix (3× broadcast for reliability).</summary>
+        private void SendDiagSniffStart()
+        {
+            try
+            {
+                string? txDev = GetTxPcapDeviceNameOrNull();
+                if (!string.IsNullOrWhiteSpace(txDev))
+                    DiagSniffCommand.Send(txDev, start: true, AppendDiagLog);
+            }
+            catch (Exception ex) { AppendDiagLog($"[cmd] DiagSniff start: {ex.Message}"); }
+        }
+
+        /// <summary>
+        /// Periodically resends START until CD packets are received or recording stops.
+        /// Handles transient firmware/network issues that cause the initial START to be lost.
+        /// </summary>
+        private void StartDiagRetryTimer()
+        {
+            StopDiagRetryTimer();
+            _canDiagRetryTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(2) };
+            _canDiagRetryTimer.Tick += DiagRetryTimer_Tick;
+            _canDiagRetryTimer.Start();
+        }
+
+        private void StopDiagRetryTimer()
+        {
+            if (_canDiagRetryTimer != null)
+            {
+                _canDiagRetryTimer.Stop();
+                _canDiagRetryTimer = null;
+            }
+        }
+
+        private void DiagRetryTimer_Tick(object? sender, EventArgs e)
+        {
+            // Stop retrying if recording stopped or CD packets are flowing
+            if (!_canDiagRecording)
+            {
+                StopDiagRetryTimer();
+                return;
+            }
+
+            long cd = _canDiagCapture?.DiagMagicMatches ?? 0;
+            if (cd > 0)
+            {
+                StopDiagRetryTimer();
+                AppendDiagLog("[cmd] DiagSniff retry: CD packets received, stopping retries");
+                return;
+            }
+
+            // CD still 0 — resend START
+            AppendDiagLog("[cmd] DiagSniff retry: CD:0 — resending START");
+            SendDiagSniffStart();
         }
 
         private void BtnCanStopRecord_Click(object sender, RoutedEventArgs e)
         {
             _canDiagRecording = false;
+            StopDiagRetryTimer();
             UpdateCanDiagRecordingButtons();
 
             // Tell Aurix to stop diagnostic sniffing

@@ -421,6 +421,15 @@ void diag_uart_reset_state(void)
     s_dmaSrc       = NULL_PTR;
     s_dmaSrcRemain = 0u;
 
+    /* Discard any pending DMA completion buffer so diag_refill() does not
+     * pick up stale data from before the reset.  Must be done with
+     * interrupts disabled because the DMA ISR writes s_diagCompletedBuf. */
+    {
+        boolean intEnabled = IfxCpu_disableInterrupts();
+        s_diagCompletedBuf = NULL_PTR;
+        if (intEnabled) IfxCpu_enableInterrupts();
+    }
+
     /* Reset idle-gap detection state */
     s_awaitingResponse   = 0u;
     s_gapHead            = 0u;
