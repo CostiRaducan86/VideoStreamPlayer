@@ -4272,7 +4272,7 @@ namespace VilsSharpX
         private void MenuCameraConfig_Click(object sender, RoutedEventArgs e)
         {
             if (_cameraConfigWindow != null && _cameraConfigWindow.IsVisible) { _cameraConfigWindow.Activate(); return; }
-            _cameraConfigWindow = new CameraConfigWindow(AppendDiagLog) { Owner = this };
+            _cameraConfigWindow = new CameraConfigWindow(AppendDiagLog, _baslerCapture) { Owner = this };
             _cameraConfigWindow.Closed += (_, _) => _cameraConfigWindow = null;
             _cameraConfigWindow.Show();
         }

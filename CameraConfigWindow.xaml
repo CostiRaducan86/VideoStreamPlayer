@@ -130,6 +130,43 @@
 
                 <Rectangle Width="1" Fill="#CCCCCC" Margin="12,4"/>
 
+                <!-- Auto-Calibrate AOI -->
+                <Button x:Name="BtnAutoCalibAoi" Style="{StaticResource PylonToolbarBtn}"
+                        ToolTip="Auto-Calibrate AOI (detect LED matrix)" Click="BtnAutoCalibAoi_Click">
+                    <Viewbox Width="22" Height="22">
+                        <Canvas Width="24" Height="24">
+                            <!-- Crosshair/target icon -->
+                            <Ellipse Canvas.Left="4" Canvas.Top="4" Width="16" Height="16"
+                                     Stroke="#1E88C8" StrokeThickness="2" Fill="Transparent"/>
+                            <Ellipse Canvas.Left="9" Canvas.Top="9" Width="6" Height="6"
+                                     Fill="#1E88C8"/>
+                            <Line X1="12" Y1="0" X2="12" Y2="5" Stroke="#1E88C8" StrokeThickness="1.5"/>
+                            <Line X1="12" Y1="19" X2="12" Y2="24" Stroke="#1E88C8" StrokeThickness="1.5"/>
+                            <Line X1="0" Y1="12" X2="5" Y2="12" Stroke="#1E88C8" StrokeThickness="1.5"/>
+                            <Line X1="19" Y1="12" X2="24" Y2="12" Stroke="#1E88C8" StrokeThickness="1.5"/>
+                        </Canvas>
+                    </Viewbox>
+                </Button>
+
+                <!-- Reset AOI -->
+                <Button x:Name="BtnResetAoi" Style="{StaticResource PylonToolbarBtn}"
+                        ToolTip="Reset AOI to full sensor" Click="BtnResetAoi_Click">
+                    <Viewbox Width="22" Height="22">
+                        <Canvas Width="24" Height="24">
+                            <!-- Expand/maximize icon -->
+                            <Rectangle Canvas.Left="2" Canvas.Top="2" Width="20" Height="20"
+                                       Stroke="#555" StrokeThickness="1.5" Fill="Transparent" StrokeDashArray="3,2"/>
+                            <!-- Corner arrows -->
+                            <Polygon Points="2,2 8,2 2,8" Fill="#C04040"/>
+                            <Polygon Points="22,2 16,2 22,8" Fill="#C04040"/>
+                            <Polygon Points="2,22 8,22 2,16" Fill="#C04040"/>
+                            <Polygon Points="22,22 16,22 22,16" Fill="#C04040"/>
+                        </Canvas>
+                    </Viewbox>
+                </Button>
+
+                <Rectangle Width="1" Fill="#CCCCCC" Margin="12,4"/>
+
                 <!-- Zoom fit -->
                 <Button x:Name="BtnZoomFit" Style="{StaticResource PylonToolbarBtn}"
                         ToolTip="Fit to Window (Ctrl+Dbl-Click)" Click="BtnZoomFit_Click">

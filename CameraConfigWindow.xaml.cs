@@ -22,6 +22,7 @@ public partial class CameraConfigWindow : Window
     private readonly Action<string> _log;
     private string? _loadedPfsPath;
     private PfsConfigParser? _loadedPfs;
+    private BaslerCameraCapture? _sharedCapture; // non-null = camera already open from MainWindow
 
     // Zoom state
     private bool _isFitMode = true;
@@ -41,11 +42,68 @@ public partial class CameraConfigWindow : Window
     private double _fpsEma;
     private long _frameCount;
 
-    public CameraConfigWindow(Action<string> log)
+    public CameraConfigWindow(Action<string> log, BaslerCameraCapture? sharedCapture = null)
     {
         InitializeComponent();
         _log = log;
+        _sharedCapture = sharedCapture;
         PopulateComboDefaults();
+
+        // If camera is already running from MainWindow, enter shared mode
+        if (_sharedCapture != null && _sharedCapture.IsCapturing)
+        {
+            Loaded += (_, _) => EnterSharedMode();
+        }
+    }
+
+    /// <summary>
+    /// Shared mode: camera is already open via BaslerCameraCapture (MainWindow).
+    /// We borrow its Camera object for parameter reading — no new Open() needed.
+    /// Connect/Play/Stop are disabled; user controls capture from MainWindow.
+    /// Preview is fed by subscribing to the shared capture's OnFrameReady.
+    /// </summary>
+    private void EnterSharedMode()
+    {
+        _camera = _sharedCapture!.InternalCamera;
+        if (_camera == null)
+        {
+            _log("[camcfg] Shared camera not available");
+            return;
+        }
+
+        BtnConnectToggle.IsChecked = true;
+        BtnConnectToggle.IsEnabled = false; // can't disconnect externally managed camera
+
+        string model = _camera.CameraInfo[CameraInfoKey.ModelName] ?? "?";
+        string serial = _camera.CameraInfo[CameraInfoKey.SerialNumber] ?? "?";
+        TxtStatus.Text = $"Connected (external): {model} ({serial})";
+        _log($"[camcfg] Shared mode: {model} (S/N {serial})");
+
+        _isGrabbing = true; // grab is running externally
+
+        // Read params in background to avoid blocking the UI
+        Task.Run(() =>
+        {
+            try
+            {
+                // Read while camera is grabbing — some params may be unavailable
+                Dispatcher.BeginInvoke(ReadParametersFromCamera);
+            }
+            catch { /* ignore */ }
+        });
+
+        // Subscribe to shared capture for live preview
+        _sharedCapture.OnFrameReady += OnSharedFrameReady;
+        TxtNoPreview.Visibility = Visibility.Collapsed;
+
+        UpdateButtonStates();
+        SetGrabbingParamsEnabled(false); // can't change AOI while grabbing
+    }
+
+    private void OnSharedFrameReady(byte[] frame, int w, int h)
+    {
+        // This fires on Pylon's grab thread — marshal to UI
+        Dispatcher.BeginInvoke(() => RenderPreview(frame, w, h));
     }
 
     // ═══════════════════════════════════════════════════════════════
@@ -54,14 +112,44 @@ public partial class CameraConfigWindow : Window
 
     private void BtnConnectToggle_Checked(object sender, RoutedEventArgs e)
     {
+        // In shared mode, connection is already established via EnterSharedMode()
+        if (_sharedCapture != null) return;
         ConnectCamera();
         if (_camera == null)
             BtnConnectToggle.IsChecked = false; // revert if failed
     }
 
-    private void BtnConnectToggle_Unchecked(object sender, RoutedEventArgs e) => DisconnectCamera();
-    private void BtnContinuousShot_Click(object sender, RoutedEventArgs e) => StartGrabbing();
-    private void BtnStop_Click(object sender, RoutedEventArgs e) => StopGrabbing();
+    private void BtnConnectToggle_Unchecked(object sender, RoutedEventArgs e)
+    {
+        // In shared mode, cannot disconnect
+        if (_sharedCapture != null) return;
+        DisconnectCamera();
+    }
+    private void BtnContinuousShot_Click(object sender, RoutedEventArgs e)
+    {
+        if (_sharedCapture != null)
+        {
+            _sharedCapture.StartGrab();
+            _isGrabbing = true;
+            SetGrabbingParamsEnabled(false);
+            UpdateButtonStates();
+            return;
+        }
+        StartGrabbing();
+    }
+
+    private void BtnStop_Click(object sender, RoutedEventArgs e)
+    {
+        if (_sharedCapture != null)
+        {
+            _sharedCapture.StopGrab();
+            _isGrabbing = false;
+            SetGrabbingParamsEnabled(true);
+            UpdateButtonStates();
+            return;
+        }
+        StopGrabbing();
+    }
     private void BtnZoomFit_Click(object sender, RoutedEventArgs e) => ResetZoomToFit();
     private void BtnLoadPfs_Click(object sender, RoutedEventArgs e) => LoadPfsFile();
     private void BtnSavePfs_Click(object sender, RoutedEventArgs e) => SavePfsFile();
@@ -632,11 +720,150 @@ public partial class CameraConfigWindow : Window
     {
         bool connected = _camera != null;
         bool grabbing = _isGrabbing;
+        bool isSharedMode = _sharedCapture != null;
+        bool canCalibrate = connected || (isSharedMode && _sharedCapture!.IsCapturing);
 
+        // Play/Stop: enabled in both local and shared mode
         BtnContinuousShot.IsEnabled = connected && !grabbing;
         BtnStop.IsEnabled = connected && grabbing;
         BtnUserSetLoad.IsEnabled = connected && !grabbing;
         BtnUserSetSave.IsEnabled = connected && !grabbing;
+        BtnAutoCalibAoi.IsEnabled = canCalibrate;
+        BtnResetAoi.IsEnabled = canCalibrate;
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    //  Auto-Calibration AOI
+    // ═══════════════════════════════════════════════════════════════
+
+    private async void BtnAutoCalibAoi_Click(object sender, RoutedEventArgs e)
+    {
+        // Prefer shared capture (MainWindow's live camera) for calibration
+        if (_sharedCapture != null && _sharedCapture.IsCapturing)
+        {
+            BtnAutoCalibAoi.IsEnabled = false;
+            BtnResetAoi.IsEnabled = false;
+            TxtStatus.Text = "Auto-calibrating...";
+
+            var result = await Task.Run(() => _sharedCapture.RunAutoCalibration());
+
+            ShowCalibrationResult(result);
+            // Refresh displayed AOI parameters
+            if (_camera != null) ReadParametersFromCamera();
+            TxtStatus.Text = _camera != null
+                ? $"Connected (external): {_camera.CameraInfo[CameraInfoKey.ModelName]} ({_camera.CameraInfo[CameraInfoKey.SerialNumber]})"
+                : "Disconnected";
+            UpdateButtonStates();
+            return;
+        }
+
+        // Fallback: use local camera connection
+        if (_camera == null)
+        {
+            MessageBox.Show("Camera is not connected. Connect the camera or start capture from the main window first.",
+                "Auto-Calibrate", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+
+        // Must stop grabbing to change AOI
+        bool wasGrabbing = _isGrabbing;
+        if (wasGrabbing) StopGrabbing();
+
+        // Reset AOI to full sensor, grab one frame, detect, apply
+        BaslerAutoCalibration.ResetAoi(_camera, _log);
+
+        try
+        {
+            _camera.StreamGrabber.Start(1, GrabStrategy.OneByOne, GrabLoop.ProvidedByUser);
+            var grabResult = _camera.StreamGrabber.RetrieveResult(5000, TimeoutHandling.Return);
+            if (grabResult == null || !grabResult.GrabSucceeded)
+            {
+                _log("[camcfg-cal] Failed to grab calibration frame");
+                MessageBox.Show("Failed to grab a frame for calibration.", "Auto-Calibrate",
+                    MessageBoxButton.OK, MessageBoxImage.Warning);
+                if (wasGrabbing) StartGrabbing();
+                return;
+            }
+
+            int w = grabResult.Width, h = grabResult.Height;
+            byte[]? pixels = grabResult.PixelData as byte[];
+            if (pixels == null || pixels.Length < w * h)
+            {
+                grabResult.Dispose();
+                if (wasGrabbing) StartGrabbing();
+                return;
+            }
+            var frame = new byte[w * h];
+            Buffer.BlockCopy(pixels, 0, frame, 0, frame.Length);
+            grabResult.Dispose();
+
+            var cal = new BaslerAutoCalibration();
+            var result = cal.DetectMatrixRegion(frame, w, h);
+            if (result != null)
+                BaslerAutoCalibration.ApplyToCamera(_camera, result, _log);
+
+            ShowCalibrationResult(result);
+            ReadParametersFromCamera();
+        }
+        catch (Exception ex)
+        {
+            _log($"[camcfg-cal] Error: {ex.Message}");
+            MessageBox.Show($"Calibration error: {ex.Message}", "Auto-Calibrate",
+                MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+
+        if (wasGrabbing) StartGrabbing();
+    }
+
+    private async void BtnResetAoi_Click(object sender, RoutedEventArgs e)
+    {
+        // Prefer shared capture
+        if (_sharedCapture != null && _sharedCapture.IsCapturing)
+        {
+            BtnAutoCalibAoi.IsEnabled = false;
+            BtnResetAoi.IsEnabled = false;
+            TxtStatus.Text = "Resetting AOI...";
+
+            await Task.Run(() => _sharedCapture.ResetCalibration());
+
+            _log("[camcfg-cal] AOI reset via shared capture");
+            if (_camera != null) ReadParametersFromCamera();
+            TxtStatus.Text = _camera != null
+                ? $"Connected (external): {_camera.CameraInfo[CameraInfoKey.ModelName]} ({_camera.CameraInfo[CameraInfoKey.SerialNumber]})"
+                : "Disconnected";
+            UpdateButtonStates();
+            return;
+        }
+
+        if (_camera == null) return;
+
+        bool wasGrabbing = _isGrabbing;
+        if (wasGrabbing) StopGrabbing();
+
+        BaslerAutoCalibration.ResetAoi(_camera, _log);
+        ReadParametersFromCamera();
+
+        if (wasGrabbing) StartGrabbing();
+    }
+
+    private void ShowCalibrationResult(BaslerAutoCalibration.CalibrationResult? result)
+    {
+        if (result != null)
+        {
+            MessageBox.Show($"Auto-calibration succeeded.\n\n" +
+                $"Detected LED matrix:\n" +
+                $"  Offset: ({result.OffsetX}, {result.OffsetY})\n" +
+                $"  Size: {result.Width} × {result.Height}\n" +
+                $"  Threshold: {result.ThresholdUsed}\n" +
+                $"  Bright pixels: {result.BrightPixelCount}",
+                "Auto-Calibrate", MessageBoxButton.OK, MessageBoxImage.Information);
+        }
+        else
+        {
+            MessageBox.Show("No LED matrix detected.\n\nMake sure a bright pattern (e.g. all-white) " +
+                "is displayed on the LSM and the camera can see it clearly.",
+                "Auto-Calibrate", MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
     }
 
     /// <summary>
@@ -664,7 +891,16 @@ public partial class CameraConfigWindow : Window
 
     protected override void OnClosed(EventArgs e)
     {
-        DisconnectCamera();
+        // Unsubscribe from shared capture frames
+        if (_sharedCapture != null)
+            _sharedCapture.OnFrameReady -= OnSharedFrameReady;
+
+        // Only disconnect if we own the camera (not shared mode)
+        if (_sharedCapture == null || !_sharedCapture.IsCapturing)
+            DisconnectCamera();
+        else
+            _camera = null; // release reference without closing
+
         base.OnClosed(e);
     }
 

@@ -1,0 +1,132 @@
+===== COMPUTER / WINDOWS =====
+
+
+CsName                     : ROD0300676
+WindowsProductName         : Windows 10 Enterprise
+WindowsEditionId           : Enterprise
+WindowsVersion             : 2009
+OsName                     : Microsoft Windows 11 Enterprise
+OsVersion                  : 10.0.22631
+OsBuildNumber              : 22631
+OsHardwareAbstractionLayer : 10.0.22621.6489
+OsArchitecture             : 64-bit
+BiosSeralNumber            : CZC234BRKD
+
+
+
+===== WINVER REGISTRY DETAILS =====
+
+
+ProductName      : Windows 10 Enterprise
+DisplayVersion   : 23H2
+ReleaseId        : 2009
+CurrentBuild     : 22631
+UBR              : 7079
+BuildLabEx       : 22621.1.amd64fre.ni_release.220506-1250
+EditionID        : Enterprise
+InstallationType : Client
+
+
+
+===== INSTALLED WINDOWS UPDATES / HOTFIXES =====
+
+HotFixID  Description     InstalledOn           InstalledBy        
+--------  -----------     -----------           -----------        
+KB5087420 Security Update 5/16/2026 12:00:00 AM NT AUTHORITY\SYSTEM
+KB5087058 Update          5/16/2026 12:00:00 AM NT AUTHORITY\SYSTEM
+KB5086307 Security Update 4/22/2026 12:00:00 AM NT AUTHORITY\SYSTEM
+KB5027397 Update          7/11/2025 12:00:00 AM NT AUTHORITY\SYSTEM
+KB5019178 Update          7/7/2025 12:00:00 AM  NT AUTHORITY\SYSTEM
+KB5012170 Security Update 7/3/2025 12:00:00 AM  NT AUTHORITY\SYSTEM
+
+
+===== DISM PACKAGES: ROLLUP / KB =====
+Package_for_KB5012170~31bf3856ad364e35~amd64~~22621.372.1.1                                             | Installed  | Security Update | 7/3/2025 2:48 PM  
+Package_for_KB5019178~31bf3856ad364e35~amd64~~22621.1341.1.1                                            | Installed  | Update          | 7/7/2025 6:05 AM  
+Package_for_KB5027397~31bf3856ad364e35~amd64~~22621.2355.1.1                                            | Installed  | Update          | 7/11/2025 5:32 AM 
+Package_for_RollupFix~31bf3856ad364e35~amd64~~22621.6936.1.17                                           | Superseded | Security Update | 4/23/2026 2:56 PM 
+Package_for_RollupFix~31bf3856ad364e35~amd64~~22621.7079.1.12                                           | Installed  | Security Update | 5/16/2026 7:39 PM 
+===== VECTOR / CODEMETER / SECURITY APPS =====
+
+DisplayName                                                                         DisplayVersion                     
+-----------                                                                         --------------                     
+Binary Tree Migrator Pro for Active Directory Agent                                 20.11.0100                         
+CodeMeter Runtime Kit v8.30a                                                        8.30.6885.501                      
+Cybereason ActiveProbe                                                              23.1.283.1                         
+Cybereason Sensor                                                                   23.1.283.1                         
+Cybereason Sensor                                                                   23.1.283.1                         
+DSWibuKey.msi                                                                       6.50.2.13                          
+Vector Aerospace Message Editor                                                     3.3.0.0                            
+Vector Application Updater                                                          1.39.9                             
+Vector ASAP2 Studio Viewer 19.0                                                     19.0.20.60                         
+Vector ASAP2 Studio Viewer 2.4                                                      2.4.34.10885                       
+Vector ASAP2 Studio Viewer 20.0                                                     20.0.1.246                         
+Vector AUTOSAR Explorer 2.3                                                         2.3.36                             
+Vector CANdb++ 3.1                                                                  3.1.30                             
+Vector CANdelaPersistors 23                                                         23.0.00100                         
+Vector CANdelaStudio 17 SP1                                                         17.0.01100                         
+Vector CANdelaStudio 20 P7                                                          20.0.0.7                           
+Vector CANdelaStudio 21 P1                                                          21.0.0.1                           
+Vector CANdelaStudio 23 P2                                                          23.0.23                            
+Vector CANoe 16                                                                     16.7.5                             
+Vector CANoe 19                                                                     19.4.10                            
+Vector CANoe CANalyzer Scope                                                        2.0.0                              
+Vector CANoe Family 18                                                              18.5.31                            
+Vector CANoe Sample Configurations                                                  16.7.5                             
+Vector CANoe Sample Configurations                                                  19.4.10                            
+Vector CANoe Sample Configurations                                                  16.6.2                             
+Vector CANoe Sample Configurations                                                  18.5.31                            
+Vector CANoe Sample Configurations                                                  19.2.76                            
+Vector CANoe Test Report Viewer 16 SP3                                              16.3.10                            
+Vector CANoe Test Report Viewer 18 SP3                                              18.3.18                            
+Vector CANoe Test Report Viewer 19                                                  19.0.16                            
+Vector CANoe Test Report Viewer 19 SP3                                              19.3.10                            
+Vector CANoe Test Report Viewer DiVa API Assemblies                                 19.3.10                            
+Vector CANoe Test Report Viewer Selector                                            19.3.10                            
+Vector DAG Security Add-On                                                          3.10.7.0                           
+Vector Daimler Modeling Add-On                                                      4.1.0                              
+Vector DiagnosticDataModifier                                                       29.0.0                             
+Vector FIBEX Explorer 3.4                                                           3.4.7                              
+Vector Hardware Configuration Tools                                                 22.20.28                           
+Vector Hardware Manager                                                             23.20.20                           
+Vector Help Framework                                                               3.9.2                              
+Vector LDF Explorer 1.6                                                             1.6.9                              
+Vector License Client                                                               9.2.16                             
+Vector Modeling Base Add-On                                                         4.1.8                              
+Vector Modeling Components Add-On                                                   4.1.9                              
+Vector ODXStudio 11 SP2                                                             11.0.2100                          
+Vector ODXStudio 12 SP2                                                             12.2.0                             
+Vector ODXStudio 9 P4                                                               9.0.0104                           
+Vector Platform Manager                                                             7.3.68                             
+Vector PVCDI Migrator 1.0                                                           1.0.10000.0                        
+Vector Security Manager                                                             3.10.7.0                           
+Vector SIL Kit 5.0.1                                                                5.0.1                              
+Vector SmartCharging Components Add-On                                              3.2.38                             
+Vector Support Assistant                                                            3.9.1                              
+Vector Tool Manager                                                                 1.35.0                             
+Vector VIO System Configuration Tool                                                6.3.0                              
+Vector VT System Driver (64 bit)                                                    5.60.22                            
+Vector VT System Tools                                                              1.14.0                             
+Vector vTESTstudio Viewer 10                                                        10.3.96.0                          
+VectorShellExtensions32                                                             6.0.15794                          
+VectorShellExtensions64                                                             6.0.15794                          
+WibuKey Setup (WibuKey Remove)                                                      Version 6.50a of 2019-Jan-17 (Bu...
+Windows Driver Package - Cybereason CrDrv ContentScreener  (06/21/2023 9.27.22.472) 06/21/2023 9.27.22.472             
+ZenZefi                                                                             25.44                              
+
+
+===== IMPORTANT FILE VERSIONS =====
+C:\Windows\Microsoft.NET\Framework64\v4.0.30319\clr.dll | FileVersion=4.8.9332.0 built by: NET481REL1LAST_B | ProductVersion=4.8.9332.0
+C:\Windows\System32\ucrtbase.dll | FileVersion=10.0.22621.6931 (WinBuild.160101.0800) | ProductVersion=10.0.22621.6931
+C:\Program Files\Vector CANoe 16\Exec64\CANoe64.exe | FileVersion=16.7.5 | ProductVersion=16.7
+===== VECTOR SERVICES =====
+
+Name                                     DisplayName                    State   StartMode PathName                     
+----                                     -----------                    -----   --------- --------                     
+CodeMeter.exe                            CodeMeter Runtime Server       Running Auto      "c:\Program Files\CodeMete...
+ShellHWDetection                         Shell Hardware Detection       Running Auto      C:\WINDOWS\System32\svchos...
+Vector.Common.ShellExtensionsService.x64 Vector ShellExtensions Service Running Auto      "c:\Program Files (x86)\Ve...
+VectorSilKitRegistry                     Vector SIL Kit Registry        Running Auto      "c:\Program Files\Vector S...
+vHardwareService                         Vector Hardware Service        Running Auto      "c:\Program Files (x86)\Ve...
+
+
