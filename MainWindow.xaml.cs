@@ -177,6 +177,11 @@ namespace VilsSharpX
         /// <summary>Persistent flag: true when LVDS signal timed out, cleared when a new LVDS frame arrives.</summary>
         private bool _lvdsSignalLost;
 
+        /// <summary>UTC time when the last Basler camera frame arrived (for signal-lost detection).</summary>
+        private DateTime _lastBaslerFrameUtc = DateTime.MinValue;
+        /// <summary>Persistent flag: true when Basler signal timed out (no trigger from ECU), cleared on new frame.</summary>
+        private bool _baslerSignalLost;
+
         // Snapshot used while paused so overlays/inspectors match the frozen image.
         private Frame? _pausedA;
         private Frame? _pausedB;
@@ -451,6 +456,8 @@ namespace VilsSharpX
             }
             _lastLvdsFrameUtc = DateTime.MinValue;
             _lvdsSignalLost = false;
+            _lastBaslerFrameUtc = DateTime.MinValue;
+            _baslerSignalLost = false;
         }
 
         private void ApplyNoSignalUiState(bool noSignal)
@@ -1286,6 +1293,13 @@ namespace VilsSharpX
         {
             // While paused or stopped, keep the frozen frame — don't update pane C.
             if (_playback.IsPaused || _playback.Cts == null) return;
+
+            // If LVDS signal is lost (ECU off), any camera frame is a spurious trigger
+            // from noise on the trigger line — discard it.
+            if (_lvdsSignalLost) return;
+
+            _lastBaslerFrameUtc = DateTime.UtcNow;
+            _baslerSignalLost = false;
 
             // Resize _wbC if the camera resolution changed
             if (_wbC.PixelWidth != w || _wbC.PixelHeight != h)
@@ -3027,6 +3041,8 @@ namespace VilsSharpX
 
             // Pane C: Basler USB3 camera live capture
             StartBaslerCapture();
+            _lastBaslerFrameUtc = DateTime.UtcNow;
+            _baslerSignalLost = false;
 
 
         }
@@ -3092,6 +3108,8 @@ namespace VilsSharpX
             }
             _lastLvdsFrameUtc = DateTime.MinValue;
             _lvdsSignalLost = false;
+            _lastBaslerFrameUtc = DateTime.MinValue;
+            _baslerSignalLost = false;
             ResetSyncState();
 
             StopRenderLoops();
@@ -3548,8 +3566,6 @@ namespace VilsSharpX
                 && !_playback.IsPaused
                 && !_lvdsSignalLost
                 && _lastLvdsFrameUtc != DateTime.MinValue
-                && ((_nichiaEthCapture != null && _nichiaEthCapture.IsCapturing)
-                 || (_osramEthCapture != null && _osramEthCapture.IsCapturing))
                 && (DateTime.UtcNow - _lastLvdsFrameUtc) > TimeSpan.FromSeconds(LiveSignalLostTimeoutSec))
             {
                 _lvdsSignalLost = true;
@@ -3558,6 +3574,18 @@ namespace VilsSharpX
                     _latestB = null;
                     _matchedAForDiff = null;
                 }
+            }
+
+            // Basler camera: if ECU powers off, no LVDS → no trigger → no camera frames.
+            // Detect timeout and show "Signal not available" on pane C.
+            if (_playback.IsRunning
+                && !_playback.IsPaused
+                && !_baslerSignalLost
+                && _lastBaslerFrameUtc != DateTime.MinValue
+                && _baslerCapture != null && _baslerCapture.IsCapturing
+                && (DateTime.UtcNow - _lastBaslerFrameUtc) > TimeSpan.FromSeconds(LiveSignalLostTimeoutSec))
+            {
+                _baslerSignalLost = true;
             }
 
             // In AVTP Live mode, while waiting for the first frame, keep showing "Signal not available".
@@ -3608,7 +3636,7 @@ namespace VilsSharpX
             bool hasRealEthB = (_nichiaEthCapture != null && _nichiaEthCapture.IsCapturing && _nichiaEthCapture.FramesCompleted > 0)
                             || (_osramEthCapture != null && _osramEthCapture.IsCapturing && _osramEthCapture.FramesCompleted > 0);
 
-            if (_modeOfOperation == ModeOfOperation.AvtpLiveMonitor && !_playback.IsPaused)
+            if (_modeOfOperation == ModeOfOperation.AvtpLiveMonitor && !_playback.IsPaused && !_lvdsSignalLost)
             {
                 if (hasRealEthB)
                 {
@@ -3677,6 +3705,17 @@ namespace VilsSharpX
             {
                 ApplyNoSignalUiState(noSignal: false);
             }
+
+            // Pane C (Basler camera): independent signal-lost overlay
+            if (_baslerSignalLost)
+            {
+                if (NoSignalC != null) NoSignalC.Visibility = Visibility.Visible;
+            }
+            else if (_baslerCapture != null && _baslerCapture.IsCapturing)
+            {
+                if (NoSignalC != null) NoSignalC.Visibility = Visibility.Collapsed;
+            }
+
             UpdateFpsLabels();
         }
 
@@ -3734,6 +3773,8 @@ namespace VilsSharpX
                     LblRunInfoC.Text = "";
                 else if (isPaused)
                     LblRunInfoC.Text = "Paused";
+                else if (_baslerSignalLost)
+                    LblRunInfoC.Text = "";
                 else if (paneCFps > 0.0)
                     LblRunInfoC.Text = $"Running @: {paneCFps:F1} fps";
                 else
