@@ -20,6 +20,7 @@
 #include "osram_frame.h"
 #include "osram_crc32.h"
 #include "frame_eth.h"
+#include "camera_trigger.h"
 #include <string.h>   /* memcpy */
 
 /* ==================== State machine ==================== */
@@ -122,6 +123,12 @@ static void emit_frame(boolean crcOk)
 
     /* Mark frame_eth assembly buffer as ready for TX (swaps double-buffer) */
     frame_eth_mark_osram_ready();
+
+    /* Fire camera trigger synchronised to LVDS frame completion.
+     * In SYNC mode this generates a rising edge on P23.1 → camera starts exposure
+     * at the exact moment new pixel data was sent to the Osram ASIC.
+     * In FREERUN mode this is a no-op (trigger runs from STM timer). */
+    camera_trigger_fire_sync();
 }
 
 void osram_frame_feed(const uint8 *data, uint32 len)

@@ -300,8 +300,12 @@ void core0_main(void)
 
     /* Basler trigger on P23.1 -> camera Pin 3 (Line3), GND -> Pin 6 */
     camera_trigger_init();
-    /* First try: 50 fps trigger, 200 us pulse width */
+    /* SYNC mode: trigger fires on each LVDS frame-complete (from osram_frame.c).
+     * Pulse width 200µs is enough for the camera to detect rising edge.
+     * Camera should be in Timed mode with ExposureTimeRaw = 16100 µs
+     * (= one full Osram LED scan cycle, eliminates checkerboard flicker). */
     camera_trigger_set_period_us(20000U, 200U);
+    camera_trigger_set_mode(CAM_TRIG_SYNC);
     camera_trigger_start();
 
     /* FPS */

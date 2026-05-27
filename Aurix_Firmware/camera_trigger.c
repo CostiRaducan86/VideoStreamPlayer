@@ -25,6 +25,7 @@ static volatile uint32 g_camTrigPeriodTicks = 0U;
 static volatile uint32 g_camTrigHighTicks   = 0U;
 static volatile uint32 g_camTrigLowTicks    = 0U;
 static volatile boolean g_camTrigPinHigh    = FALSE;
+static volatile CamTrigMode g_camTrigMode   = CAM_TRIG_FREERUN;
 
 /* TASKING is happier with literal priority here */
 IFX_INTERRUPT(camera_trigger_isr, 0, 20);
@@ -78,6 +79,11 @@ void camera_trigger_set_period_us(uint32 periodUs, uint32 pulseWidthUs)
     }
 }
 
+void camera_trigger_set_mode(CamTrigMode mode)
+{
+    g_camTrigMode = mode;
+}
+
 void camera_trigger_init(void)
 {
     IfxPort_setPinModeOutput(CAM_TRIG_PORT,
@@ -102,7 +108,32 @@ void camera_trigger_start(void)
     IfxPort_setPinLow(CAM_TRIG_PORT, CAM_TRIG_PIN);
     g_camTrigPinHigh = FALSE;
 
+    if (g_camTrigMode == CAM_TRIG_SYNC)
+    {
+        /* In sync mode, don't start the periodic timer.
+         * Trigger will be fired externally via camera_trigger_fire_sync(). */
+        return;
+    }
+
     g_camTrigCmpCfg.ticks = g_camTrigLowTicks;
+    IfxStm_initCompare(CAM_TRIG_STM, &g_camTrigCmpCfg);
+}
+
+void camera_trigger_fire_sync(void)
+{
+    if (g_camTrigMode != CAM_TRIG_SYNC)
+        return;
+
+    /* Avoid re-triggering while previous pulse is still HIGH */
+    if (g_camTrigPinHigh)
+        return;
+
+    /* Rising edge → camera starts exposure (Timed mode: ExposureTimeRaw µs) */
+    IfxPort_setPinHigh(CAM_TRIG_PORT, CAM_TRIG_PIN);
+    g_camTrigPinHigh = TRUE;
+
+    /* Schedule falling edge after pulseWidth ticks via STM comparator ISR */
+    g_camTrigCmpCfg.ticks = g_camTrigHighTicks;
     IfxStm_initCompare(CAM_TRIG_STM, &g_camTrigCmpCfg);
 }
 
@@ -110,6 +141,7 @@ void camera_trigger_isr(void)
 {
     if (g_camTrigPinHigh == FALSE)
     {
+        /* Rising edge (free-run mode only) */
         IfxPort_setPinHigh(CAM_TRIG_PORT, CAM_TRIG_PIN);
         g_camTrigPinHigh = TRUE;
 
@@ -119,9 +151,17 @@ void camera_trigger_isr(void)
     }
     else
     {
+        /* Falling edge — always handle (both modes) */
         IfxPort_setPinLow(CAM_TRIG_PORT, CAM_TRIG_PIN);
         g_camTrigPinHigh = FALSE;
 
+        if (g_camTrigMode == CAM_TRIG_SYNC)
+        {
+            /* Single-shot done. Don't re-arm — wait for next fire_sync() call. */
+            return;
+        }
+
+        /* Free-run: schedule next rising edge */
         IfxStm_increaseCompare(CAM_TRIG_STM,
                                CAM_TRIG_COMPARATOR,
                                g_camTrigLowTicks);
