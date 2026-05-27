@@ -248,14 +248,14 @@ static uint32 ui_lvds_frame_counter(void)
 }
 
 /* Initialise the local FPS measurement window.
- * Uses a 500 ms sliding window driven by the STM timer. The frame count
+ * Uses a 1000 ms sliding window driven by the STM timer. The frame count
  * comes from LVDS assembly telemetry, so the TFT can show whether the
  * local LVDS receiver is alive even when Ethernet TX is unavailable.
  */
 static void ui_fps_init(void)
 {
     s_fpsTickPrev    = ui_stm_now64();
-    s_fpsWindowTicks = (uint64)IfxStm_getTicksFromMilliseconds(IFXSTM_DEFAULT_TIMER, 500);
+    s_fpsWindowTicks = (uint64)IfxStm_getTicksFromMilliseconds(IFXSTM_DEFAULT_TIMER, 1000);
     s_fpsFramesPrev  = ui_lvds_frame_counter();
     s_uiFpsX10       = 0u;
 }
@@ -296,9 +296,19 @@ static void ui_fps_update(void)
     uint32 framesNow;
     uint32 framesDelta;
     uint64 num;
+    uint32 rawFpsX10;
 
     if (s_runState != UI_RUN_RUNNING)
     {
+        return;
+    }
+
+    /* If signal is lost, reset FPS to 0 immediately */
+    if (ui_signal_is_recent() == 0u)
+    {
+        s_uiFpsX10      = 0u;
+        s_fpsTickPrev   = ui_stm_now64();
+        s_fpsFramesPrev = ui_lvds_frame_counter();
         return;
     }
 
@@ -315,7 +325,17 @@ static void ui_fps_update(void)
     ticksPerSec = (uint64)IfxStm_getTicksFromMilliseconds(IFXSTM_DEFAULT_TIMER, 1000);
 
     num = ((uint64)framesDelta * 10ULL * ticksPerSec) + (dt / 2ULL);
-    s_uiFpsX10 = (uint32)(num / dt);
+    rawFpsX10 = (uint32)(num / dt);
+
+    /* EMA smoothing: 70% old + 30% new (reduces residual jitter) */
+    if (s_uiFpsX10 == 0u)
+    {
+        s_uiFpsX10 = rawFpsX10;
+    }
+    else
+    {
+        s_uiFpsX10 = (s_uiFpsX10 * 7u + rawFpsX10 * 3u) / 10u;
+    }
 
     s_fpsTickPrev   = now;
     s_fpsFramesPrev = framesNow;
