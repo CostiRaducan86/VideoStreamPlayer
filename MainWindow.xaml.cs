@@ -182,6 +182,12 @@ namespace VilsSharpX
         /// <summary>Persistent flag: true when Basler signal timed out (no trigger from ECU), cleared on new frame.</summary>
         private bool _baslerSignalLost;
 
+        // ─── Pane C displayed-FPS tracking (only counts frames actually rendered) ───
+        private readonly Stopwatch _baslerDispFpsSw = Stopwatch.StartNew();
+        private long _baslerDispLastTicks;
+        private double _baslerDispFpsEma;
+        private int _baslerDispFrameCount;
+
         // Snapshot used while paused so overlays/inspectors match the frozen image.
         private Frame? _pausedA;
         private Frame? _pausedB;
@@ -458,6 +464,9 @@ namespace VilsSharpX
             _lvdsSignalLost = false;
             _lastBaslerFrameUtc = DateTime.MinValue;
             _baslerSignalLost = false;
+            _baslerDispFrameCount = 0;
+            _baslerDispFpsEma = 0;
+            _baslerDispLastTicks = _baslerDispFpsSw.ElapsedTicks;
         }
 
         private void ApplyNoSignalUiState(bool noSignal)
@@ -1300,6 +1309,19 @@ namespace VilsSharpX
 
             _lastBaslerFrameUtc = DateTime.UtcNow;
             _baslerSignalLost = false;
+
+            // Displayed-FPS EMA (only counts frames that actually get rendered)
+            long nowTicks = _baslerDispFpsSw.ElapsedTicks;
+            double dtSec = (nowTicks - _baslerDispLastTicks) / (double)Stopwatch.Frequency;
+            _baslerDispLastTicks = nowTicks;
+            if (dtSec > 0.001 && dtSec < 5.0)
+            {
+                double instantFps = 1.0 / dtSec;
+                _baslerDispFpsEma = _baslerDispFrameCount == 0
+                    ? instantFps
+                    : _baslerDispFpsEma * (1.0 - FpsEmaAlpha) + instantFps * FpsEmaAlpha;
+            }
+            _baslerDispFrameCount++;
 
             // Resize _wbC if the camera resolution changed
             if (_wbC.PixelWidth != w || _wbC.PixelHeight != h)
@@ -3110,6 +3132,9 @@ namespace VilsSharpX
             _lvdsSignalLost = false;
             _lastBaslerFrameUtc = DateTime.MinValue;
             _baslerSignalLost = false;
+            _baslerDispFrameCount = 0;
+            _baslerDispFpsEma = 0;
+            _baslerDispLastTicks = _baslerDispFpsSw.ElapsedTicks;
             ResetSyncState();
 
             StopRenderLoops();
@@ -3586,6 +3611,9 @@ namespace VilsSharpX
                 && (DateTime.UtcNow - _lastBaslerFrameUtc) > TimeSpan.FromSeconds(LiveSignalLostTimeoutSec))
             {
                 _baslerSignalLost = true;
+                _baslerDispFrameCount = 0;
+                _baslerDispFpsEma = 0;
+                _baslerDispLastTicks = _baslerDispFpsSw.ElapsedTicks;
             }
 
             // In AVTP Live mode, while waiting for the first frame, keep showing "Signal not available".
@@ -3765,10 +3793,10 @@ namespace VilsSharpX
                 LblRunInfoB.Text = StatusFormatter.FormatRunInfoB(isRunning, isPaused, bNoSignal, paneBFps);
             }
 
-            // Pane C: Basler camera FPS
+            // Pane C: Basler camera FPS (use displayed-FPS EMA, not raw grab EMA)
             if (LblRunInfoC != null)
             {
-                double paneCFps = _baslerCapture != null && _baslerCapture.IsCapturing ? _baslerCapture.FpsEma : 0.0;
+                double paneCFps = _baslerDispFrameCount > 0 ? _baslerDispFpsEma : 0.0;
                 if (!isRunning)
                     LblRunInfoC.Text = "";
                 else if (isPaused)
