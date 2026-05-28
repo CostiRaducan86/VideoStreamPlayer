@@ -95,7 +95,7 @@ namespace VilsSharpX
 
         private volatile bool _zeroZeroIsWhite = false;
 
-        /// <summary>Comparison mode: 0=AVTP vs LVDS (default), 1=AVTP vs LSM, 2=LVDS vs LSM</summary>
+        /// <summary>Comparison mode: 0=LVDS-AVTP (default), 1=LVDS-LSM, 2=AVTP-LSM</summary>
         private volatile int _comparisonMode = 0;
 
         // Live AVTP capture settings (Ethernet via SharpPcap)
@@ -1335,6 +1335,13 @@ namespace VilsSharpX
             _latestC = new Frame(w, h, frame, DateTime.UtcNow);
             BitmapUtils.Blit(_wbC, frame, w);
 
+            // Pre-compute downscaled camera frame for comparison modes (avoids redundant work in RenderAll)
+            if (_comparisonMode > 0)
+            {
+                _downscaledCameraFrame = FrameDownscaler.DownscaleBlockAverage(
+                    frame, w, h, _currentWidth, _currentHeight, _downscaledCameraFrame);
+            }
+
             // Enqueue pane C frame for recording
             if (_recordingManager.IsRecording)
                 _recordingManager.TryEnqueueFrameC(frame);
@@ -2431,7 +2438,7 @@ namespace VilsSharpX
             RenderAll();
         }
 
-        private static readonly string[] ComparisonModeLabels = { "LVDS-AVTP", "LSM-LVDS", "LSM-AVTP" };
+        private static readonly string[] ComparisonModeLabels = { "LVDS-AVTP", "LVDS-LSM", "AVTP-LSM" };
 
         private void CmbComparisonMode_SelectionChanged(object sender, System.Windows.Controls.SelectionChangedEventArgs e)
         {
@@ -3700,40 +3707,36 @@ namespace VilsSharpX
             BitmapUtils.Blit(_wbB, b.Data, b.Stride);
 
             // Select comparison operands based on _comparisonMode:
-            // 0 = LVDS-AVTP (B vs A), 1 = LSM-LVDS (C↓ vs B), 2 = LSM-AVTP (C↓ vs A)
+            // 0 = LVDS-AVTP (A ref vs B measured), 1 = LVDS-LSM (B ref vs C↓ measured), 2 = AVTP-LSM (A ref vs C↓ measured)
             byte[] diffLeft;
             byte[] diffRight;
             int cmpMode = _comparisonMode;
 
             if (cmpMode == 1 || cmpMode == 2)
             {
-                // Modes involving camera: downscale C to LVDS resolution
-                var camFrame = _latestC;
-                byte[]? downscaled = null;
-                if (camFrame != null && camFrame.Data.Length > 0 && !_baslerSignalLost)
-                {
-                    _downscaledCameraFrame = FrameDownscaler.DownscaleBlockAverage(
-                        camFrame.Data, camFrame.Width, camFrame.Height,
-                        _currentWidth, _currentHeight, _downscaledCameraFrame);
-                    downscaled = _downscaledCameraFrame;
-                }
+                // Modes involving camera: use pre-computed downscaled buffer from HandleBaslerFrameReady
+                byte[] cameraData = (_downscaledCameraFrame != null
+                    && _downscaledCameraFrame.Length == _currentWidth * _currentHeight
+                    && !_baslerSignalLost)
+                    ? _downscaledCameraFrame
+                    : _noSignalGrayFrame;
 
                 if (cmpMode == 1)
                 {
-                    // LSM-LVDS: downscaled camera vs LVDS
-                    diffLeft = downscaled ?? _noSignalGrayFrame;
-                    diffRight = b.Data;
+                    // LVDS-LSM: LVDS is reference (A), downscaled camera is measured (B)
+                    diffLeft = b.Data;
+                    diffRight = cameraData;
                 }
                 else
                 {
-                    // LSM-AVTP: downscaled camera vs AVTP
-                    diffLeft = downscaled ?? _noSignalGrayFrame;
-                    diffRight = diffARef;
+                    // AVTP-LSM: AVTP is reference (A), downscaled camera is measured (B)
+                    diffLeft = diffARef;
+                    diffRight = cameraData;
                 }
             }
             else
             {
-                // Default: LVDS-AVTP (A vs B)
+                // Default: LVDS-AVTP (A ref vs B measured)
                 diffLeft = diffARef;
                 diffRight = b.Data;
             }
