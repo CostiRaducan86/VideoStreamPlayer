@@ -188,6 +188,9 @@ namespace VilsSharpX
         private int _baslerDispWindowFrames;
         private double _baslerDispFps;
 
+        /// <summary>Reusable buffer for downscaled camera frame (sized to _currentWidth*_currentHeight).</summary>
+        private byte[]? _downscaledCameraFrame;
+
         // Snapshot used while paused so overlays/inspectors match the frozen image.
         private Frame? _pausedA;
         private Frame? _pausedB;
@@ -3695,7 +3698,47 @@ namespace VilsSharpX
 
             BitmapUtils.Blit(_wbA, a.Data, a.Stride);
             BitmapUtils.Blit(_wbB, b.Data, b.Stride);
-            DiffRenderer.RenderCompareToBgr(_diffBgr, diffARef, b.Data, _currentWidth, _currentHeight, _diffThreshold,
+
+            // Select comparison operands based on _comparisonMode:
+            // 0 = LVDS-AVTP (B vs A), 1 = LSM-LVDS (C↓ vs B), 2 = LSM-AVTP (C↓ vs A)
+            byte[] diffLeft;
+            byte[] diffRight;
+            int cmpMode = _comparisonMode;
+
+            if (cmpMode == 1 || cmpMode == 2)
+            {
+                // Modes involving camera: downscale C to LVDS resolution
+                var camFrame = _latestC;
+                byte[]? downscaled = null;
+                if (camFrame != null && camFrame.Data.Length > 0 && !_baslerSignalLost)
+                {
+                    _downscaledCameraFrame = FrameDownscaler.DownscaleBlockAverage(
+                        camFrame.Data, camFrame.Width, camFrame.Height,
+                        _currentWidth, _currentHeight, _downscaledCameraFrame);
+                    downscaled = _downscaledCameraFrame;
+                }
+
+                if (cmpMode == 1)
+                {
+                    // LSM-LVDS: downscaled camera vs LVDS
+                    diffLeft = downscaled ?? _noSignalGrayFrame;
+                    diffRight = b.Data;
+                }
+                else
+                {
+                    // LSM-AVTP: downscaled camera vs AVTP
+                    diffLeft = downscaled ?? _noSignalGrayFrame;
+                    diffRight = diffARef;
+                }
+            }
+            else
+            {
+                // Default: LVDS-AVTP (A vs B)
+                diffLeft = diffARef;
+                diffRight = b.Data;
+            }
+
+            DiffRenderer.RenderCompareToBgr(_diffBgr, diffLeft, diffRight, _currentWidth, _currentHeight, _diffThreshold,
                 _zeroZeroIsWhite,
                 out var minDiff, out var maxDiff, out _,
                 out _, out var meanAbsDiff, out var aboveDeadband,
