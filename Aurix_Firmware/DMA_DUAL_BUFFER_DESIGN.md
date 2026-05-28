@@ -1,6 +1,6 @@
 # DMA Dual-Buffer Design - Aurix TC397
 
-**Last updated:** 2026-04-30
+**Last updated:** 2026-05-28
 
 ## Overview
 
@@ -9,7 +9,7 @@ Two independent DMA ping-pong pipelines run in parallel on TC397:
 | Channel | ASCLIN | Pin | DMA Ch | ISR Prio | Buffer | Baudrate | Purpose |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | LVDS | ASCLIN1 | P14.8 | 1 | 14 | 2 x 2560 B | 20M/12.5M | Pixel frames |
-| Diagnostic | ASCLIN9 | P20.7 | 0 | 13 | 2 x 2560 B | 2M 8O2 | Osram diagnostic UART |
+| Diagnostic | ASCLIN9 | P20.7 | 0 | 13 | 2 x 2560 B | 2M 8O2/8N1 | Osram/Nichia diagnostic UART |
 
 The diagnostic path uses CAN transceivers as a differential PHY, but the bytes are handled as UART.
 
@@ -39,13 +39,10 @@ ASCLIN9 RX (P20.7, via TLE9251V)
   -> frame_eth TX (0x4344)
 ```
 
-`diag_uart_try_receive()` is currently implemented for the Osram diagnostic UART frame format:
+`diag_uart_try_receive()` dispatches by device mode:
 
-```text
-[0x80][0xA5][HCTRL][HADR] + data + CRC16
-```
-
-The next parser extension is Nichia.
+- Osram: `[0x80][0xA5][HCTRL][HADR] + data + CRC16`
+- Nichia: `[0x55][MasterRequest][DLC/FUN][address][data][CRC8/ACK]`
 
 ## Key Design Decisions
 

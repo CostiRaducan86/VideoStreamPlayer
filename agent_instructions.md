@@ -34,9 +34,12 @@ These rules apply to every session and every chat. Re-read this file at the star
 
 - Follow existing patterns in the codebase.
 - Marshal background-thread callbacks to UI thread via `Dispatcher.Invoke/BeginInvoke`.
+- Basler camera frames arrive on a Pylon grab thread — always Dispatcher-marshal.
+- Comparison mode logic: `_comparisonMode` 0=LVDS-AVTP, 1=LVDS-LSM, 2=AVTP-LSM.
 
 ## General
 
 - Read `/docs/LSM_CAN_Docs/` reference material (UART_Protocol.csv, EEPROM maps, classic VILS screenshots) before making protocol changes.
 - Preserve protocol compatibility in `RvfProtocol.cs`, `AvtpRvfParser.cs`, `RvfReassembler.cs`.
 - Keep frame dimension constants consistent: W=320, active height 80, LVDS height 84.
+- Four display panes: A (AVTP), B (LVDS), C (LSM Camera), D (Comparison).

@@ -1,6 +1,6 @@
 # Completion Checklist - Aurix Firmware
 
-**Last updated:** 2026-04-30
+**Last updated:** 2026-05-28
 
 ## Milestone 1: Synthetic Diagnostic Transport
 
@@ -61,6 +61,52 @@
 - [ ] Check for missing request/response pairs
 - [ ] Update `LsmRegisterMap` or add a Nichia-specific map if needed
 
+## Milestone 4: Camera Trigger & Adapter Control
+
+### Firmware_v2
+
+- [x] `camera_trigger.c/h` — STM0 timer on P23.1
+- [x] Free-running mode (configurable period/pulse)
+- [x] Frame-synced mode (single-shot on LVDS complete)
+- [x] `adapter_ctrl.c/h` — GPIO control for SmartVisio adapter
+- [x] ECU mode / direct mode switching
+- [x] CAN/UART routing (ECU / Direct / External)
+- [x] Ethernet command handling in `frame_eth.c`
+
+### C# GUI_v2
+
+- [x] `AdapterModeCommand.cs` — SET_ADAPTER_MODE Ethernet command
+- [x] `DeviceModeCommand.cs` — SET_DEVICE_MODE Ethernet command
+- [x] Hardware Config UI (Control Mode, CAN UART Mode dropdowns)
+
+## Milestone 5: Basler Camera & Multi-Mode Comparison
+
+### C# GUI_v3
+
+- [x] `BaslerCameraCapture.cs` — Pylon SDK camera capture
+- [x] `CameraConfigWindow.xaml.cs` — live preview, parameter editing, .pfs import
+- [x] Auto-calibration AOI detection
+- [x] Pane C (LSM Camera) display with independent FPS
+- [x] `FrameDownscaler.cs` — block-average downscaler (camera→LVDS resolution)
+- [x] Multi-mode comparison: LVDS-AVTP, LVDS-LSM, AVTP-LSM
+- [x] `DiffRenderer.cs` — color-coded comparison with zeroThreshold
+- [x] Mode-specific tooltip labels (AVTP/LVDS/LSM)
+- [x] Overlay frame selection per comparison mode
+
+## Milestone 2 Bug Fix: CD:0 Stall
+
+- [x] RFO recovery (mask 0xFFF, flush FIFO + clear on overflow)
+- [x] Recovery watchdog (5s timeout, 30s cooldown, gated by `s_diagEverActive`)
+- [x] Safe reinit sequence (no resetModule — causes DAE trap)
+
+## LVDS Pixel Pipeline_v2
+
+- [x] `asclin1_dma.c/h` ASCLIN1/P14.8/DMA ch1
+- [x] `lvds_frame_mode.h` frame mode enum
+- [x] `device_mode.c` Osram/Nichia switching
+- [x] Osram hardware validation completed in prior sessions
+- [ ] Nichia fresh validation with camera connected
+
 ## Final Status
 
-The Osram diagnostic UART path remains validated. The Nichia diagnostic UART path is implemented and alive end-to-end, with semantic message validation and delay analysis left for the next session.
+The Osram diagnostic UART path remains validated (including CD:0 stall fix). The Nichia diagnostic UART path is implemented end-to-end with semantic validation pending. Camera trigger, adapter control, and multi-mode camera comparison are fully implemented and validated.

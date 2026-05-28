@@ -4328,7 +4328,13 @@ namespace VilsSharpX
             int idx = (y * refFrame.Stride) + x;
             byte av = (a != null && idx < a.Data.Length) ? a.Data[idx] : (byte)0;
             byte bv = (b != null && idx < b.Data.Length) ? b.Data[idx] : (byte)0;
-            lbl.Text = PixelInspector.FormatDiffInfo(x, y, av, bv, refFrame.Width);
+
+            // Select labels matching the active comparison mode
+            string labelA, labelB;
+            if (cmpMode == 1) { labelA = "LVDS"; labelB = "LSM"; }
+            else if (cmpMode == 2) { labelA = "AVTP"; labelB = "LSM"; }
+            else { labelA = "AVTP"; labelB = "LVDS"; }
+            lbl.Text = PixelInspector.FormatDiffInfo(x, y, av, bv, refFrame.Width, labelA, labelB);
         }
 
         /// <summary>

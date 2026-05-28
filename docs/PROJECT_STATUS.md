@@ -1,44 +1,48 @@
-# VilsSharpX - Comprehensive Project Status (Last Updated: 2026-04-30)
+# VilsSharpX - Comprehensive Project Status (Last Updated: 2026-05-28)
 
 **Read this file first after any VS Code restart or session interruption.**
 
 ---
 
-## 0. Current Baseline (2026-04-30)
+## 0. Current Baseline (2026-05-28)
 
 This section is the current source of truth for session recovery. Some older sections below are kept for historical context and may describe earlier milestones.
 
 ### Application Baseline
 
-- The WPF application builds cleanly on .NET 8 with `dotnet build .\VilsSharpX.csproj` (last confirmed after analyzer cleanup: 0 warnings, 0 errors).
-- The IDE Problems panel was cleaned across the C# codebase by applying analyzer-safe refactors only: collection expressions, primary constructors, `ThrowIf*`, `StringComparison`, generated regexes, range syntax, static helpers, and readonly fields.
-- Runtime behavior was manually revalidated after each analyzer-fix batch; no functional regression was observed by the maintainer.
-- `MainWindow.xaml.cs` remains the main orchestrator, but several supporting classes are now cleaner and easier to extract from later.
+- The WPF application builds cleanly on .NET 8 with `dotnet build .\VilsSharpX.csproj` (0 warnings, 0 errors).
+- The app now has **4 display panes**: A (AVTP/Generator), B (LVDS from Aurix), C (LSM Camera — Basler), D (Comparison).
+- **Three comparison modes** selectable via ComboBox: LVDS-AVTP (default), LVDS-LSM, AVTP-LSM.
+- **Basler camera integration** via Pylon SDK with auto-calibration, .pfs config import, and live preview.
+- **FrameDownscaler** block-averages camera frames to LVDS resolution for pixel-accurate comparison.
+- **SmartVisio Adapter** control: Ethernet commands to switch between ECU mode and direct mode.
+- **Camera trigger sync**: Aurix drives P23.1 in sync with LVDS frame-complete for Basler external trigger.
+- FPS display is stable and accurate (EMA-based, separate for each pane).
 
 ### Implemented Data Paths
 
-- AVTP/RVF live capture and PCAP replay are implemented through SharpPcap, `AvtpRvfParser`, and `RvfReassembler`.
-- Scene, sequence, PGM/BMP, and uncompressed AVI playback are implemented as file sources.
-- A/B/D rendering, diff calculation, dark-pixel reporting/compensation, snapshots, AVI recording, and AVTP TX remain active functionality.
-- The CAN/UART monitor is no longer just a placeholder: Monitor, RawCan, filters, paging, detail popup, capture counters, and start/stop sniff commands are implemented.
+- AVTP/RVF live capture and PCAP replay via SharpPcap, `AvtpRvfParser`, and `RvfReassembler`.
+- LVDS pixel capture from Aurix via Ethernet fragments (`OsramEthCapture`, `NichiaEthCapture`).
+- Basler camera capture via `BaslerCameraCapture` (Pylon SDK, LatestImageOnly strategy).
+- Scene, sequence, PGM/BMP, and uncompressed AVI playback as file sources.
+- A/B/C/D rendering, multi-mode comparison, dark-pixel reporting/compensation, snapshots, AVI recording, and AVTP TX.
+- CAN/UART diagnostic monitor: Monitor, RawCan, filters, paging, detail popup, capture counters, start/stop sniff commands.
 
-### AURIX / Diagnostic UART Baseline
+### AURIX / Firmware Baseline
 
-- The current embedded platform is AURIX TC397. Pico/RP2040 is no longer the active hardware direction.
-- LVDS pixel capture runs on ASCLIN1/P14.8 with DMA channel 1.
-- Diagnostic "CAN" traffic is treated as UART through CAN transceivers used as differential PHY only; MCMCAN is not used for this path.
-- Current diagnostic sniffing code uses ASCLIN9/P20.7 and DMA channel 0. Osram uses 2 Mbaud 8O2; Nichia/TLD816K uses 2 Mbaud 8N1.
-- `diag_uart_try_receive()` dispatches by active LSM device mode. The Osram path parses `[0x80][0xA5][HCTRL][HADR] + data + CRC16`; the Nichia path parses `[0x55][MasterRequest][DLC/FUN][address][data][CRC8/ACK]`.
-- The Nichia/TLD816K variant is implemented as an isolated parser/config path and has passed a first hardware smoke validation with live monitor records.
-- `can_diag_bridge_uart_frame()` converts parsed UART frames into protocol v2 `CanDiagRecord` values; `frame_eth_send_can_diag_pending()` forwards them over Ethernet with magic `0x4344` and ethertype `0x88B5`.
-- Diagnostic sniffing is controlled from the PC app using the `DIAG_SNIFF` command (`DiagSniffCommand.cs`, magic `0x434D`, command `0x02`).
+- Platform: AURIX TC397 TFT board.
+- LVDS pixel capture: ASCLIN1/P14.8, DMA channel 1 (Osram 20 Mbaud 8O1 / Nichia 12.5 Mbaud 8N1).
+- Diagnostic UART sniffer: ASCLIN9/P20.7, DMA channel 0 (2 Mbaud 8O2 through TLE9251V).
+- Camera trigger: STM0 timer on P23.1 (free-run or frame-synced modes).
+- SmartVisio Adapter GPIO control: `adapter_ctrl.c/h` (ECU mode / direct mode switching).
+- CD:0 stall bug fully resolved (RFO mask extended to 0xFFF + recovery watchdog).
 
 ### Known Gaps / Next Work
 
-- Nichia message semantic correctness, missing-response behavior, and response/inter-frame delay accuracy still need capture-based validation.
-- The `UartTransaction` tab is still a placeholder.
+- Nichia diagnostic semantic validation against captures still pending.
+- UartTransaction tab is still a placeholder.
 - CAN/UART monitor export/recording is still pending.
-- Some older documents still mention synthetic-only M1 or 1 Mbaud; the updated LSM/AURIX docs should be preferred for current implementation details.
+- Unit test coverage: 0% (no test project).
 
 ## 1. Project Overview & Mission
 
@@ -47,15 +51,21 @@ VilsSharpX is a **pixel-accurate inspection tool** for 8-bit grayscale video fra
 **Core Capabilities:**
 
 - Ingest frames from **AVTP/RVF** (Ethernet live capture or PCAP replay)
+- Receive real **LVDS frames** from Aurix (Osram 320×80 or Nichia 256×64) via Ethernet fragments
+- Capture frames from **Basler USB3 camera** (Pylon SDK) with auto-calibration AOI
 - Support **Scene mode** (loops through image files for A/B toggle testing)
 - Support **AVI playback** as input source (indexed, uncompressed only)
-- Visualize **A (AVTP/Generator)**, **B (LVDS)**, and **DIFF (|A−B|)** with pixel-perfect zoom/pan
-- Provide diagnostics (FPS, dropped frames, gaps, sequence tracking)
+- Visualize **A (AVTP/Generator)**, **B (LVDS)**, **C (LSM Camera)**, **D (Comparison)** with pixel-perfect zoom/pan
+- Multi-mode comparison: **LVDS-AVTP**, **LVDS-LSM**, **AVTP-LSM** with block-average downscaling
+- Provide diagnostics (FPS per pane, dropped frames, gaps, sequence tracking)
 - Record A/B/D video streams (AVI) and generate Excel compare reports (.xlsx)
 - Detect and report **dark pixels** (A>0 but ECU output B==0)
 - Optional **dark pixel compensation** (Cassandra-style kernel applied to B before render/record)
 - Transmit AVTP/RVF frames over Ethernet
 - One-click frame snapshot export (PNG + XLSX report)
+- CAN/UART diagnostic monitor with live register decoding
+- SmartVisio Adapter mode switching (ECU vs. direct mode)
+- Camera trigger synchronization with LVDS frame-complete
 
 **Target Users:** ECU validation engineers, test automation, visual regression testing
 
@@ -330,17 +340,24 @@ User clicks "Toggle TX"
 
 ### 6.1 Compare/DIFF Semantics (CRITICAL)
 
-**Deviation Definition:** **B − A** (ECU output minus input)
+**Deviation Definition:** **B − A** (measured minus reference)
+
+**Multi-Mode Comparison:**
+
+- Mode 0 (LVDS-AVTP): A = AVTP frame, B = LVDS frame
+- Mode 1 (LVDS-LSM): A = LVDS frame, B = downscaled camera frame
+- Mode 2 (AVTP-LSM): A = AVTP frame, B = downscaled camera frame
 
 **Consistency Across:**
 
-- DIFF pane rendering (|A−B| with threshold)
-- Numeric overlay labels
+- DIFF pane rendering (color-coded BGR24)
+- Numeric overlay labels (per-pixel values)
 - XLSX report columns (`PixelValue_A`, `PixelValue_B`, `Diff_B_A`)
+- Tooltip labels (mode-specific: AVTP/LVDS/LSM)
 
 **User-Facing Term:** "Deviation threshold" (formerly "deadband")
 
-**Implementation:** `DiffRenderer.ComputeDiff(a, b, threshold)` → grayscale visualization where diff below threshold is black, above threshold is scaled.
+**Implementation:** `DiffRenderer.ComparePixelToBgr(a, b, deadband, zeroZeroIsWhite, zeroThreshold)` → color-coded BGR visualization.
 
 ### 6.2 (0=0)→White Mapping
 
@@ -606,19 +623,24 @@ delayMs2 = 200
 - **`RvfReassembler.cs`** – line-based frame reassembly, gap tracking
 - **`RvfProtocol.cs`** – constants (W, H, ethertype, etc.)
 - **`PcapAvtpRvfReplay.cs`** – PCAP file playback
+- **`OsramEthCapture.cs`** – Osram LVDS Ethernet capture (magic "OS", ethertype 0x88B5)
+- **`NichiaEthCapture.cs`** – Nichia LVDS Ethernet capture (magic "NI", ethertype 0x88B5)
+- **`BaslerCameraCapture.cs`** – Pylon SDK camera capture (LatestImageOnly strategy)
 
 ### 12.3 Frame Processing
 
-- **`DiffRenderer.cs`** – compute |A−B| with threshold
+- **`DiffRenderer.cs`** – multi-mode comparison with color coding (BGR24 output)
+- **`FrameDownscaler.cs`** – block-average downscaler (camera→LVDS resolution)
 - **`DarkPixelCompensation.cs`** – Cassandra kernel implementation
 - **`BitmapUtils.cs`** – WriteableBitmap blitting (Gray8)
 - **`ImageUtils.cs`** – image conversion utilities
 
 ### 12.4 Rendering & UI
 
-- **`OverlayRenderer.cs`** – numeric overlays, pixel inspector
+- **`OverlayRenderer.cs`** – numeric overlays, pixel inspector, zeroThreshold support
 - **`ZoomPanManager.cs`** – per-pane zoom/pan state
-- **`PixelInspector.cs`** – hover tooltips, pixel_ID calculations
+- **`PixelInspector.cs`** – hover tooltips, pixel_ID calculations, mode-specific labels
+- **`CameraConfigWindow.xaml/.cs`** – Basler camera preview, parameter editing, .pfs import
 
 ### 12.5 Recording & Output
 
@@ -634,12 +656,15 @@ delayMs2 = 200
 - **`AviUncompressedVideoReader.cs`** – AVI parsing (idx1 required)
 - **`PgmLoader.cs`** – P2/P5 PGM file loading
 
-### 12.7 Transmit
+### 12.7 Transmit & Control
 
 - **`AvtpTransmitManager.cs`** – TX lifecycle orchestration
-- **`AvtpRvfTransmitter.cs`** – transmit loop
+- **`AvtpRvfTransmitter.cs`** – transmit loop (100fps cap, gateway MAC filtering)
 - **`AvtpPacketBuilder.cs`** – construct RVF packets from frame
 - **`AvtpEthernetSender.cs`** – SharpPcap send wrapper
+- **`AdapterModeCommand.cs`** – SmartVisio adapter Ethernet command (ECU/direct mode)
+- **`DeviceModeCommand.cs`** – LSM device type Ethernet command (Osram/Nichia)
+- **`DiagSniffCommand.cs`** – CAN diagnostic start/stop command
 
 ### 12.8 Managers & State
 
@@ -673,11 +698,17 @@ delayMs2 = 200
 
 - **`asclin1_dma.h/.c`** – LVDS pixel DMA (ASCLIN1, P14.8, DMA ch1)
 - **`lvds_frame_mode.h`** – LvdsFrameMode enum (8N1/8O1)
-- **`can_hw.h/.c`** – diagnostic UART sniffer (ASCLIN9, P20.7, DMA ch0) with device-specific UART config, idle-gap timing, and Osram/Nichia frame parsers
+- **`can_hw.h/.c`** – diagnostic UART sniffer (ASCLIN9, P20.7, DMA ch0) with device-specific UART config, idle-gap timing, RFO recovery, and Osram/Nichia frame parsers
 - **`can_diag.h/.c`** – protocol v2, ring queue, UART frame bridge
-- **`frame_eth.h/.c`** – pixel + diagnostic Ethernet TX
+- **`frame_eth.h/.c`** – pixel + diagnostic Ethernet TX, command RX
 - **`device_mode.c`** – ASCLIN1 reconfiguration, parser selection
-- **`Cpu0_Main.c`** – dual DMA drain + parsers + diag bridge in main loop
+- **`Cpu0_Main.c`** – dual DMA drain + parsers + diag bridge + recovery watchdog in main loop
+- **`camera_trigger.h/.c`** – Basler camera trigger (STM0, P23.1, free-run/sync modes)
+- **`adapter_ctrl.h/.c`** – SmartVisio adapter GPIO control (ECU/direct mode, CAN/UART routing)
+- **`osram_crc32.h/.c`** – CRC-32 for Osram LVDS frames (MSB-first, seed 0xDEADAFFE)
+- **`osram_frame.h/.c`** – Osram LVDS frame parser (header hunt + pixel assembly)
+- **`rxmon.h/.c`** – Nichia LVDS line parser
+- **`rx_crc.c`** – CRC-16 for Nichia/TLD816K protocol
 
 ---
 
@@ -1048,7 +1079,97 @@ See `docs/tehnical_docs/`:
 
 ---
 
-## 20. Appendix: External Dependencies
+## 20. Recent Features (2026-05 — Camera & Comparison)
+
+### 20.1 Basler Camera Integration (Pane C)
+
+**Purpose:** Capture real optical output from the LED matrix via Basler USB3 Vision camera for pixel-accurate comparison against electrical signals.
+
+**Implementation:**
+
+- `BaslerCameraCapture.cs` — Pylon SDK wrapper, LatestImageOnly grab strategy, FPS EMA tracking.
+- `CameraConfigWindow.xaml.cs` — Live preview, zoom/pan, parameter editing, .pfs config import, auto-calibration AOI.
+- Pane C in `MainWindow.xaml` displays camera frames independently of A/B.
+
+**Auto-Calibration:**
+
+- Finds optimal Area of Interest (AOI) that matches the LED matrix boundaries.
+- Result cached in settings for consistent frame-to-frame comparison.
+
+### 20.2 Camera Trigger Sync (Firmware)
+
+**Purpose:** Synchronize Basler camera exposure with LVDS frame-complete signal from Aurix.
+
+**Implementation:**
+
+- `camera_trigger.c/h` — STM0 timer on P23.1, two modes:
+  - `CAM_TRIG_FREERUN`: periodic trigger at configurable rate.
+  - `CAM_TRIG_SYNC`: single-shot pulse fired on LVDS frame-complete.
+- API: `camera_trigger_init()`, `camera_trigger_set_period_us()`, `camera_trigger_set_mode()`, `camera_trigger_start()`, `camera_trigger_fire_sync()`.
+
+### 20.3 Multi-Mode Comparison (Pane D)
+
+**Purpose:** Compare any two data sources pixel-by-pixel with color-coded visualization.
+
+**Modes (selectable via ComboBox):**
+
+- **LVDS-AVTP** (mode 0): Reference = AVTP (A), Measured = LVDS (B). Default mode.
+- **LVDS-LSM** (mode 1): Reference = LVDS (B), Measured = Camera (C). Compares real electrical with optical.
+- **AVTP-LSM** (mode 2): Reference = AVTP (A), Measured = Camera (C). Compares generator with optical.
+
+**FrameDownscaler:**
+
+- `FrameDownscaler.DownscaleBlockAverage()` — static utility that reduces camera resolution to LVDS resolution using block averaging.
+- Pre-computed in `HandleBaslerFrameReady` and cached in `_downscaledCameraFrame` to avoid per-render overhead.
+- Reuses pre-allocated buffer to minimize GC pressure.
+
+**DiffRenderer Color Coding:**
+
+- Green: within deadband (no significant deviation).
+- Yellow → Red: B > A (measured brighter than reference, intensity scales with deviation).
+- Turquoise → Blue: B < A (measured darker than reference).
+- Magenta: dark pixel (reference > 0, measured == 0).
+- White: optional "Flip" — reference is exactly 0 AND measured ≤ zeroThreshold.
+- Black: optional "Flip" — reference is exactly 255 AND measured ≥ (255 − zeroThreshold).
+
+**zeroThreshold Logic (camera modes):**
+
+- Only applies when Flip checkbox is enabled.
+- `zeroThreshold = 5` for camera modes (1, 2) to handle optical noise near black.
+- `zeroThreshold = 0` for mode 0 (digital comparison, exact match expected).
+- CRITICAL: Reference must be **exactly** 0 (or 255) for the threshold to activate. The threshold only relaxes the measured side. This prevents false whites on dim pixels (e.g., LVDS=5, camera=5 should be GREEN, not white).
+
+**Tooltip Labels (PixelInspector):**
+
+- Mode 0: "AVTP=X LVDS=Y diff(LVDS−AVTP)=Z"
+- Mode 1: "LVDS=X LSM=Y diff(LSM−LVDS)=Z"
+- Mode 2: "AVTP=X LSM=Y diff(LSM−AVTP)=Z"
+
+### 20.4 SmartVisio Adapter Control
+
+**Purpose:** Switch the SmartVisio adapter board between ECU passthrough mode and direct Aurix-to-LSM mode.
+
+**Implementation:**
+
+- `AdapterModeCommand.cs` — Sends SET_ADAPTER_MODE Ethernet command (ethertype 0x88B5, magic "CM", 3× for reliability).
+- `DeviceModeCommand.cs` — Sends SET_DEVICE_MODE command (Osram/Nichia switching).
+- `adapter_ctrl.c/h` (firmware) — GPIO control for relay switching, supports ECU mode, direct mode, and CAN/UART routing.
+
+### 20.5 FPS Stability Fixes
+
+- TFT display on Aurix shows stable FPS (Stopwatch-based measurement).
+- PC Pane C FPS uses displayed-frame EMA (not raw grab EMA) for accuracy.
+- Frame Statistics panel resets correctly on Start/Stop.
+
+### 20.6 CD:0 Stall Bug Resolution
+
+- **Root cause:** ASCLIN9 RFO (RX FIFO Overflow, FLAGS bit 8) never cleared because error mask was `0x3F`.
+- **Fix:** Extended mask to `0xFFF`, on RFO → flush RX FIFO + clear. Added recovery watchdog (5s timeout, 30s cooldown).
+- **Safe reinit:** Never call `IfxAsclin_resetModule()` on ASCLIN9 — causes DAE trap. Use safe sequence: stop DMA → enableModule → disable SRC → flush → clear → reconfigure.
+
+---
+
+## 21. Appendix: External Dependencies
 
 **NuGet Packages:**
 
@@ -1057,20 +1178,22 @@ See `docs/tehnical_docs/`:
 - **SharpAvi** – AVI file writer
 - **ClosedXML** – Excel file generation (.xlsx)
 - **DocumentFormat.OpenXml** – Office Open XML manipulation
+- **Basler.Pylon** – Basler camera SDK (.NET wrapper)
 
 **System Requirements:**
 
 - Windows 10/11 (WPF)
 - .NET 8 SDK
 - Npcap or WinPcap (for live capture)
+- Basler Pylon SDK (for camera capture, optional)
 
 **Optional:**
 
 - Wireshark (for PCAP analysis)
-- CANoe/CANalyzer (for CAN trace generation)
+- CANoe/CANalyzer (for AVTP/CAN trace generation)
 
 ---
 
 *For architecture details, see [ARCHITECTURE_DIAGRAM.md](tehnical_docs/ARCHITECTURE_DIAGRAM.md) and [ARCHITECTURE_REVIEW.md](tehnical_docs/ARCHITECTURE_REVIEW.md).*
 
-*Last updated: 2026-01-16 after UI layout optimization and documentation phase.*
+*Last updated: 2026-05-28 after camera integration and multi-mode comparison implementation.*

@@ -109,8 +109,9 @@ public static class DiffRenderer
         int diff = b - a;
         int ad = diff < 0 ? -diff : diff;
 
-        // Optional special case: black A (≤threshold) == black B (≤threshold) -> white D (255)
-        if (zeroZeroIsWhite && a <= zeroThreshold && b <= zeroThreshold)
+        // Optional special case: reference sends 0 (black) and measured is near-0 -> white D (255)
+        // zeroThreshold relaxes the check on the measured side only (for optical noise in camera modes)
+        if (zeroZeroIsWhite && a == 0 && b <= zeroThreshold)
         {
             bl = 255;
             g = 255;
@@ -118,8 +119,8 @@ public static class DiffRenderer
             return;
         }
 
-        // Optional special case: full brightness A (≥255-threshold) == full brightness B (≥255-threshold) -> black D (0)
-        if (zeroZeroIsWhite && a >= (255 - zeroThreshold) && b >= (255 - zeroThreshold))
+        // Optional special case: reference sends 255 (full) and measured is near-255 -> black D (0)
+        if (zeroZeroIsWhite && a == 255 && b >= (255 - zeroThreshold))
         {
             bl = 0;
             g = 0;

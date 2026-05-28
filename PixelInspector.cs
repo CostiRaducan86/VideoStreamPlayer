@@ -67,12 +67,12 @@ public static class PixelInspector
     /// <summary>
     /// Formats pixel info for diff pane (D).
     /// </summary>
-    public static string FormatDiffInfo(int x, int y, byte valueA, byte valueB, int width)
+    public static string FormatDiffInfo(int x, int y, byte valueA, byte valueB, int width,
+        string labelA = "AVTP", string labelB = "LVDS")
     {
         int diff = valueB - valueA;
-        //int absDiff = diff < 0 ? -diff : diff;
         int pixelId = (y * width) + x + 1;
-        return $"x={x} y={y} pixel_ID={pixelId} AVTP={valueA} LVDS={valueB} diff(LVDS−AVTP)={diff}";
+        return $"x={x} y={y} pixel_ID={pixelId} {labelA}={valueA} {labelB}={valueB} diff({labelB}−{labelA})={diff}";
     }
 
     /// <summary>

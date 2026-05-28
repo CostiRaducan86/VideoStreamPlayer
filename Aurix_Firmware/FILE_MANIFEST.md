@@ -1,15 +1,20 @@
 # Aurix Firmware - File Manifest
 
-**Last updated:** 2026-04-30
+**Last updated:** 2026-05-28
 
 ## Architecture Overview
 
-Two independent UART-like input channels run in parallel via DMA:
+Two independent UART-like input channels run in parallel via DMA, plus camera trigger and adapter GPIO control:
 
 | Channel | ASCLIN | Pin | Connector | DMA Ch | ISR Prio | Baudrate | Purpose |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | LVDS pixel | ASCLIN1 | P14.8 | X103 pin 7 | 1 | 14 | 20M/12.5M | Osram/Nichia camera frames |
-| Diagnostic | ASCLIN9 | P20.7 | TLE9251V to X202 | 0 | 13 | 2M 8O2 | Current Osram diagnostic UART |
+| Diagnostic | ASCLIN9 | P20.7 | TLE9251V to X202 | 0 | 13 | 2M 8O2 | Osram/Nichia diagnostic UART |
+
+Additional hardware:
+
+- **Camera trigger**: STM0 timer → P23.1 (Basler external trigger)
+- **SmartVisio Adapter GPIO**: Multiple pins for relay/selector control
 
 The diagnostic bus is routed through CAN transceivers used as a differential PHY. MCMCAN is not used for the current diagnostic sniffer path.
 
@@ -28,9 +33,23 @@ The diagnostic bus is routed through CAN transceivers used as a differential PHY
 | File | Role |
 | --- | --- |
 | `can_hw.h` | `DiagUartStats`, `DiagUartFrame`, sniffer API, sniff enable flag |
-| `can_hw.c` | ASCLIN9 RX on P20.7, DMA ch0, idle-gap timing, Osram UART parser |
+| `can_hw.c` | ASCLIN9 RX on P20.7, DMA ch0, idle-gap timing, Osram/Nichia UART parser, RFO recovery |
 | `can_diag.h` | `CanDiagRecord`, protocol constants, queue API, UART bridge API |
 | `can_diag.c` | Diagnostic queue, overrun counters, `can_diag_bridge_uart_frame()` |
+
+### Camera Trigger
+
+| File | Role |
+| --- | --- |
+| `camera_trigger.h` | API: init, set_period_us, set_mode, start, fire_sync; CamTrigMode enum |
+| `camera_trigger.c` | STM0 comparator ISR on P23.1, free-run and frame-sync modes |
+
+### SmartVisio Adapter Control
+
+| File | Role |
+| --- | --- |
+| `adapter_ctrl.h` | API: init, set_mode, set_can_uart, apply; enums for modes |
+| `adapter_ctrl.c` | GPIO pin configuration and relay control for ECU/direct switching |
 
 ### Device Mode / Orchestration
 
@@ -38,7 +57,7 @@ The diagnostic bus is routed through CAN transceivers used as a differential PHY
 | --- | --- |
 | `device_mode.h` | Device mode API and mode constants |
 | `device_mode.c` | Initializes LVDS, diagnostic queue, ASCLIN9 sniffer, and mode changes |
-| `Cpu0_Main.c` | Main loop: LVDS drain, diagnostic poll/decode/bridge, Ethernet TX |
+| `Cpu0_Main.c` | Main loop: LVDS drain, diagnostic poll/decode/bridge, Ethernet TX, recovery watchdog |
 
 ### Frame Parsers
 
@@ -46,13 +65,14 @@ The diagnostic bus is routed through CAN transceivers used as a differential PHY
 | --- | --- |
 | `rxmon.h/.c` | Nichia LVDS line parser |
 | `osram_frame.h/.c` | Osram LVDS frame parser |
-| `osram_crc32.h/.c` | Osram CRC-32 helper |
+| `osram_crc32.h/.c` | Osram CRC-32 helper (MSB-first, seed 0xDEADAFFE) |
+| `rx_crc.c` | Nichia CRC-16 (poly 0x1021) |
 
 ### Ethernet TX/RX
 
 | File | Role |
 | --- | --- |
-| `frame_eth.h/.c` | Unified Ethernet TX/RX for pixel frames, diagnostic records, and commands |
+| `frame_eth.h/.c` | Unified Ethernet TX/RX for pixel frames, diagnostic records, adapter/device commands |
 
 ### Support
 
@@ -85,10 +105,13 @@ Cpu0_Main.c
   -> can_diag.h
   -> frame_eth.h
   -> device_mode.h
+  -> camera_trigger.h
+  -> adapter_ctrl.h
 
 can_hw.c
   -> ASCLIN9 + DMA ch0
   -> DiagUartFrame
+  -> RFO recovery (mask 0xFFF)
 
 can_diag.c
   -> CanDiagRecord queue
@@ -98,6 +121,15 @@ frame_eth.c
   -> pixel frame Ethernet TX
   -> diagnostic Ethernet TX
   -> DIAG_SNIFF command RX
+  -> SET_ADAPTER_MODE command RX
+  -> SET_DEVICE_MODE command RX
+
+camera_trigger.c
+  -> STM0 comparator
+  -> P23.1 GPIO
+
+adapter_ctrl.c
+  -> GPIO pins (selectors, enables, relays)
 ```
 
 ## Removed / Historical Files

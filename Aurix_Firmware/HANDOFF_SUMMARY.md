@@ -1,10 +1,10 @@
-# Handoff Summary - Aurix Firmware v7
+# Handoff Summary - Aurix Firmware v8
 
-**Last updated:** 2026-04-30
+**Last updated:** 2026-05-28
 
 ## Architecture
 
-Two independent ASCLIN + DMA pipelines run in parallel:
+Two independent ASCLIN + DMA pipelines run in parallel, plus camera trigger and adapter control:
 
 ```text
 LVDS:
@@ -21,6 +21,14 @@ Diagnostic UART:
   -> diag_uart_try_receive()
   -> can_diag_bridge_uart_frame()
   -> Ethernet diagnostic TX
+
+Camera Trigger:
+  STM0 comparator -> P23.1 GPIO
+  -> Free-run or frame-synced trigger pulses
+
+SmartVisio Adapter:
+  GPIO pins -> relay/selector control
+  -> ECU mode / direct mode switching
 ```
 
 ## Critical Discovery
@@ -41,11 +49,13 @@ Older notes mentioning 1 Mbaud are historical and should not be used as the curr
 | File | Role |
 | --- | --- |
 | `asclin1_dma.h/.c` | LVDS pixel DMA (ASCLIN1, P14.8, DMA ch1) |
-| `can_hw.h/.c` | Diagnostic UART sniffer (ASCLIN9, P20.7, DMA ch0), idle-gap detection, Osram parser |
+| `can_hw.h/.c` | Diagnostic UART sniffer (ASCLIN9, P20.7, DMA ch0), idle-gap detection, Osram/Nichia parser, RFO recovery |
 | `can_diag.h/.c` | Diagnostic record queue and UART-frame bridge |
-| `frame_eth.h/.c` | Pixel TX, diagnostic TX, and command RX |
+| `frame_eth.h/.c` | Pixel TX, diagnostic TX, adapter/device command RX |
 | `device_mode.h/.c` | Device switching and initialization |
-| `Cpu0_Main.c` | Main loop: drain LVDS, poll/decode diagnostics, send Ethernet |
+| `camera_trigger.h/.c` | Basler camera trigger (STM0, P23.1, free-run/sync) |
+| `adapter_ctrl.h/.c` | SmartVisio adapter GPIO control |
+| `Cpu0_Main.c` | Main loop: drain LVDS, poll/decode diagnostics, send Ethernet, recovery watchdog |
 | `lvds_frame_mode.h` | Frame mode enum |
 
 ## PC Integration
@@ -85,16 +95,9 @@ payload   94 bytes
 - `g_canDiagStats.uartFramesBridged` increments.
 - PC Monitor/RawCan receives `CD` records with `ParseErr=0`.
 
-## Immediate Next Step
+## Immediate Next Steps
 
-Implement Nichia diagnostic UART support as a protocol variant while preserving the current Osram parser path.
-
-Before coding, capture or document:
-
-- Nichia sync/header bytes
-- frame length rules
-- address width and byte order
-- read/write semantics
-- data payload layout
-- CRC/checksum algorithm
-- expected timing interpretation
+- Validate Nichia diagnostic UART message semantic correctness against captures.
+- Investigate response delays and inter-frame delays.
+- Check for missing request/response pairs.
+- Re-run longer LVDS coexistence checks with Nichia camera connected.

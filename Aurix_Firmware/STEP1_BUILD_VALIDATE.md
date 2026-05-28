@@ -1,6 +1,6 @@
 # Firmware Build and Runtime Validate
 
-**Last updated:** 2026-04-30
+**Last updated:** 2026-05-28
 
 ## Goal
 
