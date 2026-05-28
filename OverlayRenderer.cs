@@ -188,7 +188,8 @@ public sealed class OverlayRenderer
         double pixelsPerDip,
         byte diffThreshold,
         bool zeroZeroIsWhite,
-        double fontScale = 1.0)
+        double fontScale = 1.0,
+        byte zeroThreshold = 0)
     {
         double aw = img.ActualWidth;
         double ah = img.ActualHeight;
@@ -270,7 +271,7 @@ public sealed class OverlayRenderer
                     byte bPx = frameB.Data[y * frameB.Stride + x];
                     int diff = bPx - aPx;
 
-                    DiffRenderer.ComparePixelToBgr(aPx, bPx, diffThreshold, zeroZeroIsWhite, out var bl, out var gg, out var rr);
+                    DiffRenderer.ComparePixelToBgr(aPx, bPx, diffThreshold, zeroZeroIsWhite, out var bl, out var gg, out var rr, zeroThreshold);
                     double lum = (0.2126 * rr) + (0.7152 * gg) + (0.0722 * bl);
                     bool white = lum < 128.0;
 

@@ -775,9 +775,34 @@ namespace VilsSharpX
                     fB = _pausedB ?? _latestB;
                 }
 
-                // D is rendered from A and *post-processed* B (forced dead pixel + optional dark pixel compensation).
-                if (fA != null && fB != null)
-                    fB = ApplyBPostProcessing(fA, fB);
+                // Select correct frames based on active comparison mode
+                int cmpMode = _comparisonMode;
+                if (cmpMode == 1 || cmpMode == 2)
+                {
+                    // Camera comparison modes: create Frame from downscaled buffer
+                    Frame? cameraFrame = null;
+                    var dsBuf = _downscaledCameraFrame;
+                    if (dsBuf != null && dsBuf.Length == _currentWidth * _currentHeight)
+                        cameraFrame = new Frame(_currentWidth, _currentHeight, dsBuf, DateTime.UtcNow);
+
+                    if (cmpMode == 1)
+                    {
+                        // LVDS-LSM: reference = LVDS (B), measured = camera
+                        fA = fB;
+                        fB = cameraFrame ?? fA;
+                    }
+                    else
+                    {
+                        // AVTP-LSM: reference = AVTP (A), measured = camera
+                        fB = cameraFrame ?? fA;
+                    }
+                }
+                else
+                {
+                    // LVDS-AVTP: apply post-processing to B
+                    if (fA != null && fB != null)
+                        fB = ApplyBPostProcessing(fA, fB);
+                }
                 fBase = fA;
             }
             else
@@ -809,7 +834,8 @@ namespace VilsSharpX
 
             if (pane == Pane.D && fA != null && fB != null)
             {
-                _overlayRenderer.RenderDiffOverlay(ovr, img, fA, fB, zoom.ScaleX, imgToOvr, pixelsPerDip, _diffThreshold, _zeroZeroIsWhite, fontScale);
+                byte overlayZeroThr = (byte)(_comparisonMode > 0 ? 5 : 0);
+                _overlayRenderer.RenderDiffOverlay(ovr, img, fA, fB, zoom.ScaleX, imgToOvr, pixelsPerDip, _diffThreshold, _zeroZeroIsWhite, fontScale, overlayZeroThr);
             }
             else
             {
@@ -3741,11 +3767,14 @@ namespace VilsSharpX
                 diffRight = b.Data;
             }
 
+            // For camera comparison modes, relax the zero-detection threshold (optical noise prevents exact 0)
+            byte zeroThr = (byte)(cmpMode > 0 ? 5 : 0);
+
             DiffRenderer.RenderCompareToBgr(_diffBgr, diffLeft, diffRight, _currentWidth, _currentHeight, _diffThreshold,
                 _zeroZeroIsWhite,
                 out var minDiff, out var maxDiff, out _,
                 out _, out var meanAbsDiff, out var aboveDeadband,
-                out var totalDarkPixels);
+                out var totalDarkPixels, zeroThr);
             BitmapUtils.Blit(_wbD, _diffBgr, _currentWidth * 3);
 
             // Record what we render (A/B in Gray8; D in Bgr24). Diff buffer is reused, so copy it.
@@ -4264,6 +4293,29 @@ namespace VilsSharpX
 
             var a = GetDisplayedFrameForPane(Pane.A);
             var b = GetDisplayedFrameForPane(Pane.B);
+
+            // Select correct reference/measured pair based on comparison mode
+            int cmpMode = _comparisonMode;
+            if (cmpMode == 1 || cmpMode == 2)
+            {
+                Frame? cameraFrame = null;
+                var dsBuf = _downscaledCameraFrame;
+                if (dsBuf != null && dsBuf.Length == _currentWidth * _currentHeight)
+                    cameraFrame = new Frame(_currentWidth, _currentHeight, dsBuf, DateTime.UtcNow);
+
+                if (cmpMode == 1)
+                {
+                    // LVDS-LSM: reference = LVDS (B), measured = camera
+                    a = b;
+                    b = cameraFrame;
+                }
+                else
+                {
+                    // AVTP-LSM: reference = AVTP (A), measured = camera
+                    b = cameraFrame;
+                }
+            }
+
             var refFrame = a ?? b;
             if (refFrame == null) { lbl.Text = ""; return; }
 

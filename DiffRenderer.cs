@@ -39,7 +39,7 @@ public static class DiffRenderer
         bool zeroZeroIsWhite,
         out int minDiff, out int maxDiff, out double meanDiff,
         out int maxAbsDiff, out double meanAbsDiff, out int aboveDeadband,
-        out int totalDarkPixels)
+        out int totalDarkPixels, byte zeroThreshold = 0)
     {
         long sumAbs = 0;
         long sumDiff = 0;
@@ -66,7 +66,7 @@ public static class DiffRenderer
             if (ad > deadband) above++;
             if (a > 0 && b == 0) dark++;
 
-            ComparePixelToBgr(a, b, deadband, zeroZeroIsWhite, out var bl, out var gg, out var rr);
+            ComparePixelToBgr(a, b, deadband, zeroZeroIsWhite, out var bl, out var gg, out var rr, zeroThreshold);
             dstBgr[p++] = bl;
             dstBgr[p++] = gg;
             dstBgr[p++] = rr;
@@ -103,14 +103,14 @@ public static class DiffRenderer
     /// <param name="bl">Output blue component.</param>
     /// <param name="g">Output green component.</param>
     /// <param name="r">Output red component.</param>
-    public static void ComparePixelToBgr(byte a, byte b, byte deadband, bool zeroZeroIsWhite, out byte bl, out byte g, out byte r)
+    public static void ComparePixelToBgr(byte a, byte b, byte deadband, bool zeroZeroIsWhite, out byte bl, out byte g, out byte r, byte zeroThreshold = 0)
     {
         // Deviation is ECU output minus input: B - A
         int diff = b - a;
         int ad = diff < 0 ? -diff : diff;
 
-        // Optional special case: black A (0) == black B (0) -> white D (255)
-        if (zeroZeroIsWhite && a == 0 && b == 0)
+        // Optional special case: black A (≤threshold) == black B (≤threshold) -> white D (255)
+        if (zeroZeroIsWhite && a <= zeroThreshold && b <= zeroThreshold)
         {
             bl = 255;
             g = 255;
@@ -118,8 +118,8 @@ public static class DiffRenderer
             return;
         }
 
-        // Optional special case: full brightness A (255) == full brightness B (255) -> black D (0)
-        if (zeroZeroIsWhite && a == 255 && b == 255)
+        // Optional special case: full brightness A (≥255-threshold) == full brightness B (≥255-threshold) -> black D (0)
+        if (zeroZeroIsWhite && a >= (255 - zeroThreshold) && b >= (255 - zeroThreshold))
         {
             bl = 0;
             g = 0;
