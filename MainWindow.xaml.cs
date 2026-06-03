@@ -23,7 +23,7 @@ namespace VilsSharpX
         private const double FpsEstimationWindowSec = 0.25;
         private const double FpsEmaAlpha = 0.30; // 0..1, higher = more responsive, lower = smoother
         private const double LiveSignalLostTimeoutSec = 0.625; // ~5 frames at 8fps
-        private const double NichiaLsmFpsDisplayOffset = 1.5; // display-only compensation to match LVDS monitor cadence
+        private const double NichiaLsmFpsDisplayOffset = 0.1; // display-only compensation to match LVDS monitor cadence
 
         private enum Pane
         {
@@ -383,6 +383,7 @@ namespace VilsSharpX
             ResetSyncState();
 
             RenderNoSignalFrames();
+            UpdateLvdsProtocolLabel();
         }
 
         private void InitializeDefaultPatterns()
@@ -859,6 +860,7 @@ namespace VilsSharpX
 
             // Startup should show "Signal not available".
             ApplyNoSignalUiState(noSignal: true);
+            UpdateLvdsProtocolLabel();
 
             // Default button states: Load Files + Start enabled; others disabled
             ApplyButtonStates(false);
@@ -1031,6 +1033,7 @@ namespace VilsSharpX
 
                 RefreshLiveNicList();
                 UpdateLiveUiEnabledState();
+                UpdateLvdsProtocolLabel();
 
                 RenderAll();
 
@@ -1112,6 +1115,7 @@ namespace VilsSharpX
             // Device type change affects resolution - reinitialize all resolution-dependent objects
             StopAll();
             ReinitializeForNewResolution();
+            UpdateLvdsProtocolLabel();
 
             // Send device-mode command to ECU firmware via Ethernet
             try
@@ -1125,6 +1129,26 @@ namespace VilsSharpX
             catch (Exception ex) { AppendDiagLog($"[cmd] {ex.Message}"); }
 
             LblStatus.Text = $"Device Type: {_currentDeviceType.GetDisplayName()} ({GetCurrentWidth()}x{GetCurrentHeight()}). Load a file or start live capture.";
+        }
+
+        private void UpdateLvdsProtocolLabel()
+        {
+            if (LblLvdsProtocol == null) return;
+
+            if (_currentDeviceType == LsmDeviceType.Nichia)
+            {
+                LblLvdsProtocol.Text = "Protocol: Nichia\n" +
+                                       "Baud: 12,500,000 bps | 8N1 | LSB-first\n" +
+                                       "Line: [0x5D][row+parity][256px][CRC16] = 260 B\n" +
+                                       "Frame: 64 lines = resolution 256×64";
+            }
+            else
+            {
+                LblLvdsProtocol.Text = $"Protocol: {_currentDeviceType.GetDisplayName()}\n" +
+                                       "Baud: 20,000,000 bps | 8O1 | LSB-first\n" +
+                                       "Frame: [0x80,0xA5,0xAA,0x55][25600px][CRC32] = 25608 B\n" +
+                                       "Frame: 80 lines = resolution 320×80";
+            }
         }
 
         private void CmbEcuVariant_SelectionChanged(object sender, System.Windows.Controls.SelectionChangedEventArgs e)
