@@ -23,6 +23,7 @@ namespace VilsSharpX
         private const double FpsEstimationWindowSec = 0.25;
         private const double FpsEmaAlpha = 0.30; // 0..1, higher = more responsive, lower = smoother
         private const double LiveSignalLostTimeoutSec = 0.625; // ~5 frames at 8fps
+        private const double NichiaLsmFpsDisplayOffset = 1.5; // display-only compensation to match LVDS monitor cadence
 
         private enum Pane
         {
@@ -3850,6 +3851,12 @@ namespace VilsSharpX
                     double paneCFps = (_baslerCapture != null && _baslerCapture.IsCapturing && _baslerCapture.FpsEma > 0.0)
                         ? _baslerCapture.FpsEma
                         : _baslerDispFps;
+
+                    // Nichia path: apply a small display-only offset so LSM monitor aligns
+                    // better with LVDS monitor reading (does not affect internal processing).
+                    if (_currentDeviceType == LsmDeviceType.Nichia && paneCFps > 0.0)
+                        paneCFps += NichiaLsmFpsDisplayOffset;
+
                     if (!isRunning)
                         LblRunInfoC.Text = "";
                     else if (isPaused)
