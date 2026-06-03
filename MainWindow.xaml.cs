@@ -3811,10 +3811,15 @@ namespace VilsSharpX
                 LblRunInfoB.Text = StatusFormatter.FormatRunInfoB(isRunning, isPaused, bNoSignal, paneBFps);
             }
 
-            // Pane C: Basler camera FPS (use displayed-FPS EMA, not raw grab EMA)
+            // Pane C: Basler camera FPS
+            // Prefer hardware grab-thread FPS (_baslerCapture.FpsEma), which tracks
+            // trigger cadence directly and is immune to UI dispatcher jitter.
+            // Keep UI-window FPS as fallback when camera object is temporarily null.
             if (LblRunInfoC != null)
             {
-                double paneCFps = _baslerDispFps;
+                double paneCFps = (_baslerCapture != null && _baslerCapture.IsCapturing && _baslerCapture.FpsEma > 0.0)
+                    ? _baslerCapture.FpsEma
+                    : _baslerDispFps;
                 if (!isRunning)
                     LblRunInfoC.Text = "";
                 else if (isPaused)
