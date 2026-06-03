@@ -185,6 +185,12 @@ namespace VilsSharpX
         private int _baslerDispWindowFrames;
         private double _baslerDispFps;
 
+        // ─── Run-info UI throttle (make AVTP/LSM cadence similar to LVDS label updates) ───
+        private readonly Stopwatch _runInfoUiSw = Stopwatch.StartNew();
+        private long _runInfoALastUpdateTicks;
+        private long _runInfoCLastUpdateTicks;
+        private const double RunInfoUiUpdatePeriodSec = 1.0;
+
         /// <summary>Reusable buffer for downscaled camera frame (sized to _currentWidth*_currentHeight).</summary>
         private byte[]? _downscaledCameraFrame;
 
@@ -2934,6 +2940,10 @@ namespace VilsSharpX
             // Init playback state and reset stats (includes CTS creation, running=true, paused=false)
             var ct = _playback.Start(fps);
 
+            // Force immediate first refresh for pane A/C run-info labels.
+            _runInfoALastUpdateTicks = 0;
+            _runInfoCLastUpdateTicks = 0;
+
             AppendDiagLog($"[start] mode={_modeOfOperation}, fps={fps}");
 
             // Reset runtime stats
@@ -3121,6 +3131,8 @@ namespace VilsSharpX
             _baslerDispWindowFrames = 0;
             _baslerDispFps = 0;
             _baslerDispWindowStartTicks = _baslerDispFpsSw.ElapsedTicks;
+            _runInfoALastUpdateTicks = 0;
+            _runInfoCLastUpdateTicks = 0;
             ResetSyncState();
 
             StopRenderLoops();
@@ -3772,6 +3784,19 @@ namespace VilsSharpX
             if (!_playback.TryUpdateFpsEstimates(out _, out _, out _))
                 return;
 
+            bool allowUiRefreshA = true;
+            bool allowUiRefreshC = true;
+            if (_playback.Cts != null && !_playback.IsPaused)
+            {
+                long nowTicks = _runInfoUiSw.ElapsedTicks;
+                double dtA = (nowTicks - _runInfoALastUpdateTicks) / (double)Stopwatch.Frequency;
+                double dtC = (nowTicks - _runInfoCLastUpdateTicks) / (double)Stopwatch.Frequency;
+                allowUiRefreshA = dtA >= RunInfoUiUpdatePeriodSec;
+                allowUiRefreshC = dtC >= RunInfoUiUpdatePeriodSec;
+                if (allowUiRefreshA) _runInfoALastUpdateTicks = nowTicks;
+                if (allowUiRefreshC) _runInfoCLastUpdateTicks = nowTicks;
+            }
+
             bool noSignal = ShouldShowNoSignalWhileRunning();
             bool isRunning = _playback.Cts != null;
             bool isPaused = _playback.IsPaused;
@@ -3785,9 +3810,12 @@ namespace VilsSharpX
 
             if (LblRunInfoA != null)
             {
-                double shownFps = noSignal ? 0.0 : GetShownFps(_playback.AvtpInFpsEma);
-                bool isAviZero = _lastLoaded == LoadedSource.Avi && shownFps <= 0.0;
-                LblRunInfoA.Text = StatusFormatter.FormatRunInfoA(isRunning, isPaused, shownFps, isAviZero);
+                if (allowUiRefreshA || !isRunning || isPaused)
+                {
+                    double shownFps = noSignal ? 0.0 : GetShownFps(_playback.AvtpInFpsEma);
+                    bool isAviZero = _lastLoaded == LoadedSource.Avi && shownFps <= 0.0;
+                    LblRunInfoA.Text = StatusFormatter.FormatRunInfoA(isRunning, isPaused, shownFps, isAviZero);
+                }
 
                 // Update lateSkip in status
                 if (isRunning && !isPaused && _playback.CountLateFramesSkipped > 0 && LblStatus != null)
@@ -3817,19 +3845,22 @@ namespace VilsSharpX
             // Keep UI-window FPS as fallback when camera object is temporarily null.
             if (LblRunInfoC != null)
             {
-                double paneCFps = (_baslerCapture != null && _baslerCapture.IsCapturing && _baslerCapture.FpsEma > 0.0)
-                    ? _baslerCapture.FpsEma
-                    : _baslerDispFps;
-                if (!isRunning)
-                    LblRunInfoC.Text = "";
-                else if (isPaused)
-                    LblRunInfoC.Text = "Paused";
-                else if (_baslerSignalLost)
-                    LblRunInfoC.Text = "";
-                else if (paneCFps > 0.0)
-                    LblRunInfoC.Text = $"Running @: {paneCFps:F1} fps";
-                else
-                    LblRunInfoC.Text = "Running";
+                if (allowUiRefreshC || !isRunning || isPaused)
+                {
+                    double paneCFps = (_baslerCapture != null && _baslerCapture.IsCapturing && _baslerCapture.FpsEma > 0.0)
+                        ? _baslerCapture.FpsEma
+                        : _baslerDispFps;
+                    if (!isRunning)
+                        LblRunInfoC.Text = "";
+                    else if (isPaused)
+                        LblRunInfoC.Text = "Paused";
+                    else if (_baslerSignalLost)
+                        LblRunInfoC.Text = "";
+                    else if (paneCFps > 0.0)
+                        LblRunInfoC.Text = $"Running @: {paneCFps:F1} fps";
+                    else
+                        LblRunInfoC.Text = "Running";
+                }
             }
         }
 
