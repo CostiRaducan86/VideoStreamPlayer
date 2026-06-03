@@ -15,6 +15,7 @@
  ******************************************************************************/
 
 #include "frame_eth.h"
+#include "camera_trigger.h"
 #include "can_diag.h"
 #include "Cpu/Std/IfxCpu_Intrinsics.h"
 #include "Geth/Eth/IfxGeth_Eth.h"
@@ -839,6 +840,7 @@ void frame_eth_push_nichia_row(uint8 row, const uint8 *pixels)
             s_frameReady = TRUE;
             g_feStats.nichiaFramesAssembled++;
             s_assembleIdx = (uint8)(1u - s_assembleIdx);
+            camera_trigger_fire_sync();
         }
 
         s_rowCount      = 0;
@@ -865,6 +867,7 @@ void frame_eth_push_nichia_row(uint8 row, const uint8 *pixels)
         s_assembleIdx = (uint8)(1u - s_assembleIdx);
         s_rowCount    = 0;
         s_nextRow     = 0;
+        camera_trigger_fire_sync();
     }
 }
 
