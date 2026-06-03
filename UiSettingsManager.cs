@@ -98,7 +98,6 @@ public sealed class UiSettingsManager(int width, int height)
         int vlanPriority = 5,
         string avtpEtherType = "0x22F0",
         string streamIdLastByte = "0x50",
-        string? lvdsPortHint = null,
         int lvdsMode = 0,
         int controlMode = 0,
         int canUartMode = 0)
@@ -122,7 +121,6 @@ public sealed class UiSettingsManager(int width, int height)
             VlanPriority = vlanPriority,
             AvtpEtherType = avtpEtherType,
             StreamIdLastByte = streamIdLastByte,
-            LvdsPortHint = lvdsPortHint,
             LvdsMode = lvdsMode,
             ControlMode = controlMode,
             CanUartMode = canUartMode

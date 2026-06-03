@@ -144,9 +144,6 @@ namespace VilsSharpX
 
         // Live NIC selector
 
-        // LVDS capture manager
-        private LvdsLiveManager _lvdsManager = null!;
-
         // Ethernet capture from Aurix GETH → raw ethertype 0x88B5 (pane B)
         private NichiaEthCapture? _nichiaEthCapture;
         private OsramEthCapture? _osramEthCapture;
@@ -336,7 +333,6 @@ namespace VilsSharpX
             _snapshotSaver = new FrameSnapshotSaver(w, h);
             _settingsManager = new UiSettingsManager(w, h);
             _txManager = new AvtpTransmitManager(w, h, AppendDiagLog);
-            _lvdsManager = new LvdsLiveManager(_currentDeviceType, LiveSignalLostTimeoutSec, AppendDiagLog);
         }
 
         /// <summary>
@@ -349,7 +345,6 @@ namespace VilsSharpX
             // This prevents stale resources (pcap devices, sockets, files) from causing issues.
             try { _txManager?.Dispose(); } catch { /* ignore */ }
             try { _liveCapture?.Dispose(); } catch { /* ignore */ }
-            try { _lvdsManager?.Dispose(); } catch { /* ignore */ }
             try { StopNichiaEthCapture(); } catch { /* ignore */ }
             try { StopOsramEthCapture(); } catch { /* ignore */ }
             try { _aviPlayer?.Dispose(); } catch { /* ignore */ }
@@ -360,13 +355,6 @@ namespace VilsSharpX
             // Re-subscribe to LiveCaptureManager events (since we recreated the instance)
             if (_liveCapture != null)
                 _liveCapture.OnFrameReady += (frame, meta) => Dispatcher.Invoke(() => HandleLiveFrameReady(frame, meta));
-
-            // Re-subscribe to LVDS manager events
-            if (_lvdsManager != null)
-                _lvdsManager.OnFrameReady += (frame, meta) => Dispatcher.BeginInvoke(() => HandleLvdsFrameReady(frame, meta));
-
-            // Update LVDS protocol info label
-            UpdateLvdsProtocolLabel();
 
             // Rebind bitmaps to UI
             if (ImgA != null) ImgA.Source = _wbA;
@@ -865,11 +853,6 @@ namespace VilsSharpX
             // Startup should show "Signal not available".
             ApplyNoSignalUiState(noSignal: true);
 
-            // Wire up LVDS manager frame ready event
-            _lvdsManager.OnFrameReady += (frame, meta) => Dispatcher.BeginInvoke(() => HandleLvdsFrameReady(frame, meta));
-
-            UpdateLvdsProtocolLabel();
-
             // Default button states: Load Files + Start enabled; others disabled
             ApplyButtonStates(false);
 
@@ -1042,8 +1025,6 @@ namespace VilsSharpX
                 RefreshLiveNicList();
                 UpdateLiveUiEnabledState();
 
-                UpdateLvdsProtocolLabel();
-
                 RenderAll();
 
                 // Update status text with the correct (possibly reinitialized) resolution
@@ -1066,7 +1047,7 @@ namespace VilsSharpX
                 _avtpLiveEnabled, _avtpLiveDeviceHint, (int)_modeOfOperation,
                 _srcMac, _dstMac, (int)_currentDeviceType,
                 _ecuVariant, _vlanId, _vlanPriority, _avtpEtherType, _streamIdLastByte,
-                null, CmbLvdsMode?.SelectedIndex ?? 0,
+                CmbLvdsMode?.SelectedIndex ?? 0,
                 _controlMode, _canUartMode);
             _settingsManager.TrySave(s);
         }
@@ -2329,32 +2310,6 @@ namespace VilsSharpX
             ApplyNoSignalUiState(noSignal: false);
         }
 
-        private void UpdateLvdsProtocolLabel()
-        {
-            if (LblLvdsProtocol == null) return;
-            var cfg = LvdsProtocol.GetUartConfig(_currentDeviceType);
-            string parityStr = cfg.Parity == System.IO.Ports.Parity.None ? "N" :
-                               cfg.Parity == System.IO.Ports.Parity.Odd ? "O" : "E";
-
-            string frameLine;
-            if (_currentDeviceType == LsmDeviceType.Nichia)
-            {
-                // Nichia: per-line LVDS packets
-                frameLine = $"Line: [0x5D][row][{cfg.FrameWidth}px][CRC{cfg.CrcLen * 8}] = {cfg.LinePacketLen} B";
-            }
-            else
-            {
-                // Osram: complete frame packets (header + pixels + CRC32)
-                int frameBytes = 4 + cfg.FrameWidth * cfg.ActiveHeight + 4; // 0x80,0xA5,0xAA,0x55 + 25600px + CRC32
-                frameLine = $"Frame: [0x80,0xA5,0xAA,0x55][{cfg.FrameWidth * cfg.ActiveHeight}px][CRC32] = {frameBytes} B";
-            }
-
-            LblLvdsProtocol.Text = $"Protocol: {_currentDeviceType.GetDisplayName()}\n" +
-                                   $"Baud: {cfg.BaudRate:N0} bps | {cfg.DataBits}{parityStr}1 | LSB-first\n" +
-                                   $"{frameLine}\n" +
-                                   $"Frame: {cfg.ActiveHeight} lines = resolution {cfg.FrameWidth}×{cfg.ActiveHeight}";
-        }
-
         /// <summary>
         /// Resets panes to "Signal not available" and clears stored LVDS frame data.
         /// Called when Stop is pressed.
@@ -2365,7 +2320,6 @@ namespace VilsSharpX
             {
                 _latestB = null;
             }
-            _lvdsManager.ClearFrame();
             RenderNoSignalFrames();
             ApplyNoSignalUiState(noSignal: true);
         }
@@ -2525,7 +2479,6 @@ namespace VilsSharpX
             try { StopNichiaEthCapture(); } catch { /* ignore */ }
             try { StopOsramEthCapture(); } catch { /* ignore */ }
             try { StopBaslerCapture(); } catch { /* ignore */ }
-            try { _lvdsManager?.Dispose(); } catch { /* ignore */ }
         }
 
         private void BtnStart_Click(object sender, RoutedEventArgs e)
@@ -3705,12 +3658,6 @@ namespace VilsSharpX
                     // B already comes from HandleLvdsFrameReady() via _latestB.
                     // Keep current b from frame cache (do not overwrite with mock data).
                 }
-                else if (_lvdsManager.IsCapturing && _lvdsManager.HasFrame)
-                {
-                    // Real LVDS frame for Pane B
-                    var lvdsData = ImageUtils.Copy(_lvdsManager.LvdsFrame);
-                    b = new Frame(_currentWidth, _currentHeight, lvdsData, _lvdsManager.LastFrameUtc);
-                }
                 else
                 {
                     // Fallback: mock LVDS (A + delta)
@@ -3857,8 +3804,6 @@ namespace VilsSharpX
                         paneBFps = _nichiaEthCapture.FpsEma;
                     else if (_osramEthCapture != null && _osramEthCapture.IsCapturing && _osramEthCapture.FpsEma > 0.0)
                         paneBFps = _osramEthCapture.FpsEma;
-                    else if (_lvdsManager.IsCapturing && _lvdsManager.FpsEma > 0.0)
-                        paneBFps = _lvdsManager.FpsEma;
                     else
                         paneBFps = _playback.BFpsEma;
                 }

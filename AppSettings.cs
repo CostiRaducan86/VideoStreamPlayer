@@ -43,9 +43,6 @@ public sealed class AppSettings
     public string AvtpEtherType { get; set; } = "0x22F0";
     public string StreamIdLastByte { get; set; } = "0x50";
 
-    // LVDS serial capture (Pico 2 board via USB CDC COM port)
-    public string? LvdsPortHint { get; set; } = null;
-
     // LVDS Mode (0 = Monitoring, 1 = Generator)
     public int LvdsMode { get; set; } = 0;
 
@@ -132,8 +129,6 @@ public static class AppSettingsStore
 
             if (settings.SettingsVersion < 8)
             {
-                // Migration: add LVDS serial capture port hint.
-                settings.LvdsPortHint = null;
                 settings.SettingsVersion = 8;
                 migrated = true;
             }

@@ -338,13 +338,6 @@
             <!-- LVDS Info -->
             <GroupBox Grid.Row="0" Header="LVDS Info" Padding="8" Margin="0,0,0,8" Background="#F0F0F0">
                 <StackPanel Orientation="Vertical">
-                    <!-- LVDS Protocol details (auto-detected from LSM device type) -->
-                    <TextBlock x:Name="LblLvdsProtocol" TextWrapping="Wrap" Foreground="DimGray" Margin="0,0,0,0"
-                               Text=""/>
-
-                    <!-- Separator (LVDS information) -->
-                    <Rectangle Height="1" Fill="Gray" Margin="0,8,0,8" HorizontalAlignment="Stretch"/>
-
                     <!-- Frame Statistics -->
                     <TextBlock Text="Frame Statistics" FontWeight="SemiBold" Margin="0,0,0,4"/>
                     <TextBlock x:Name="LblLvdsFrameCount" Text="Frames: 0" Foreground="DimGray"/>
