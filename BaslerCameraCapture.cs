@@ -14,9 +14,10 @@ namespace VilsSharpX;
 public sealed class BaslerCameraCapture : IDisposable
 {
     // ── FPS estimation ──────────────────────────────────────────────
-    private const double FpsEmaAlpha = 0.05;
+    private const double FpsAlpha = 0.3;
+    private const double FpsWindowSec = 0.5;
     private readonly Stopwatch _fpsSw = Stopwatch.StartNew();
-    private long _lastFrameTicks;
+    private int _fpsFrameCount;
 
     public double FpsEma { get; private set; }
     public long FramesCompleted { get; private set; }
@@ -103,7 +104,9 @@ public sealed class BaslerCameraCapture : IDisposable
         // Start grabbing with the internal grab-loop thread (LatestImages = always get freshest frame)
         _camera.StreamGrabber.Start(GrabStrategy.LatestImages, GrabLoop.ProvidedByStreamGrabber);
         IsCapturing = true;
-        _lastFrameTicks = _fpsSw.ElapsedTicks;
+        _fpsSw.Restart();
+        _fpsFrameCount = 0;
+        FpsEma = 0;
         _log("[basler] Grab started (LatestImages, ProvidedByStreamGrabber)");
     }
 
@@ -130,19 +133,8 @@ public sealed class BaslerCameraCapture : IDisposable
             var frame = new byte[w * h];
             Buffer.BlockCopy(srcPixels, 0, frame, 0, frame.Length);
 
-            // FPS estimation (EMA)
-            long now = _fpsSw.ElapsedTicks;
-            double dtSec = (now - _lastFrameTicks) / (double)Stopwatch.Frequency;
-            _lastFrameTicks = now;
-            if (dtSec > 0.0001)
-            {
-                double instantFps = 1.0 / dtSec;
-                FpsEma = FramesCompleted == 0
-                    ? instantFps
-                    : FpsEma * (1.0 - FpsEmaAlpha) + instantFps * FpsEmaAlpha;
-            }
-
             FramesCompleted++;
+            UpdateFps();
             FrameWidth = w;
             FrameHeight = h;
 
@@ -268,7 +260,9 @@ public sealed class BaslerCameraCapture : IDisposable
             if (!_camera.StreamGrabber.IsGrabbing)
             {
                 _camera.StreamGrabber.Start(GrabStrategy.LatestImages, GrabLoop.ProvidedByStreamGrabber);
-                _lastFrameTicks = _fpsSw.ElapsedTicks;
+                _fpsSw.Restart();
+                _fpsFrameCount = 0;
+                FpsEma = 0;
             }
         }
         catch (Exception ex)
@@ -304,13 +298,28 @@ public sealed class BaslerCameraCapture : IDisposable
         try
         {
             _camera.StreamGrabber.Start(GrabStrategy.LatestImages, GrabLoop.ProvidedByStreamGrabber);
-            _lastFrameTicks = _fpsSw.ElapsedTicks;
+            _fpsSw.Restart();
+            _fpsFrameCount = 0;
+            FpsEma = 0;
             IsCapturing = true;
             _log("[basler] Grab restarted (external)");
         }
         catch (Exception ex)
         {
             _log($"[basler] StartGrab error: {ex.Message}");
+        }
+    }
+
+    private void UpdateFps()
+    {
+        _fpsFrameCount++;
+        if (_fpsSw.Elapsed.TotalSeconds >= FpsWindowSec)
+        {
+            double sec = _fpsSw.Elapsed.TotalSeconds;
+            double instant = _fpsFrameCount / sec;
+            _fpsSw.Restart();
+            _fpsFrameCount = 0;
+            FpsEma = FpsEma <= 0 ? instant : FpsEma * (1.0 - FpsAlpha) + instant * FpsAlpha;
         }
     }
 
