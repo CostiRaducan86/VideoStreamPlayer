@@ -12,7 +12,7 @@ This section is the current source of truth for session recovery. Some older sec
 
 - The WPF application builds cleanly on .NET 8 with `dotnet build .\VilsSharpX.csproj` (0 warnings, 0 errors).
 - The app now has **4 display panes**: A (AVTP/Generator), B (LVDS from Aurix), C (LSM Camera — Basler), D (Comparison).
-- **Three comparison modes** selectable via ComboBox: LVDS-AVTP (default), LVDS-LSM, AVTP-LSM.
+- **Three comparison modes** selectable via ComboBox: LVDS-AVTP (default), LSM-LVDS, LSM-AVTP.
 - **Basler camera integration** via Pylon SDK with auto-calibration, .pfs config import, and live preview.
 - **FrameDownscaler** block-averages camera frames to LVDS resolution for pixel-accurate comparison.
 - **SmartVisio Adapter** control: Ethernet commands to switch between ECU mode and direct mode.
@@ -56,7 +56,7 @@ VilsSharpX is a **pixel-accurate inspection tool** for 8-bit grayscale video fra
 - Support **Scene mode** (loops through image files for A/B toggle testing)
 - Support **AVI playback** as input source (indexed, uncompressed only)
 - Visualize **A (AVTP/Generator)**, **B (LVDS)**, **C (LSM Camera)**, **D (Comparison)** with pixel-perfect zoom/pan
-- Multi-mode comparison: **LVDS-AVTP**, **LVDS-LSM**, **AVTP-LSM** with block-average downscaling
+- Multi-mode comparison: **LVDS-AVTP**, **LSM-LVDS**, **LSM-AVTP** with block-average downscaling
 - Provide diagnostics (FPS per pane, dropped frames, gaps, sequence tracking)
 - Record A/B/D video streams (AVI) and generate Excel compare reports (.xlsx)
 - Detect and report **dark pixels** (A>0 but ECU output B==0)
@@ -345,8 +345,8 @@ User clicks "Toggle TX"
 **Multi-Mode Comparison:**
 
 - Mode 0 (LVDS-AVTP): A = AVTP frame, B = LVDS frame
-- Mode 1 (LVDS-LSM): A = LVDS frame, B = downscaled camera frame
-- Mode 2 (AVTP-LSM): A = AVTP frame, B = downscaled camera frame
+- Mode 1 (LSM-LVDS): A = LVDS frame, B = downscaled camera frame
+- Mode 2 (LSM-AVTP): A = AVTP frame, B = downscaled camera frame
 
 **Consistency Across:**
 
@@ -1114,8 +1114,8 @@ See `docs/tehnical_docs/`:
 **Modes (selectable via ComboBox):**
 
 - **LVDS-AVTP** (mode 0): Reference = AVTP (A), Measured = LVDS (B). Default mode.
-- **LVDS-LSM** (mode 1): Reference = LVDS (B), Measured = Camera (C). Compares real electrical with optical.
-- **AVTP-LSM** (mode 2): Reference = AVTP (A), Measured = Camera (C). Compares generator with optical.
+- **LSM-LVDS** (mode 1): Reference = LVDS (B), Measured = Camera (C). Compares real electrical with optical.
+- **LSM-AVTP** (mode 2): Reference = AVTP (A), Measured = Camera (C). Compares generator with optical.
 
 **FrameDownscaler:**
 

@@ -190,8 +190,7 @@ public sealed class BaslerCameraCapture : IDisposable
 
             int w = grabResult.Width;
             int h = grabResult.Height;
-            byte[]? pixels = grabResult.PixelData as byte[];
-            if (pixels == null || pixels.Length < w * h)
+            if (grabResult.PixelData is not byte[] pixels || pixels.Length < w * h)
             {
                 grabResult.Dispose();
                 _log("[basler-cal] Invalid pixel data in calibration frame");

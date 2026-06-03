@@ -95,7 +95,7 @@ namespace VilsSharpX
 
         private volatile bool _zeroZeroIsWhite = false;
 
-        /// <summary>Comparison mode: 0=LVDS-AVTP (default), 1=LVDS-LSM, 2=AVTP-LSM</summary>
+        /// <summary>Comparison mode: 0=LVDS-AVTP (default), 1=LSM-LVDS, 2=LSM-AVTP</summary>
         private volatile int _comparisonMode = 0;
 
         // Live AVTP capture settings (Ethernet via SharpPcap)
@@ -323,8 +323,7 @@ namespace VilsSharpX
             _wbB = BitmapUtils.MakeGray8(w, h);
             // Pane C bitmap is sized to camera resolution, not LSM active area.
             // Initialised with a 1×1 placeholder; resized on first Basler frame.
-            if (_wbC == null)
-                _wbC = BitmapUtils.MakeGray8(1, 1);
+            _wbC ??= BitmapUtils.MakeGray8(1, 1);
             _wbD = BitmapUtils.MakeBgr24(w, h);
 
             // Helper classes that depend on resolution
@@ -787,13 +786,13 @@ namespace VilsSharpX
 
                     if (cmpMode == 1)
                     {
-                        // LVDS-LSM: reference = LVDS (B), measured = camera
+                        // LSM-LVDS: reference = LVDS (B), measured = camera
                         fA = fB;
                         fB = cameraFrame ?? fA;
                     }
                     else
                     {
-                        // AVTP-LSM: reference = AVTP (A), measured = camera
+                        // LSM-AVTP: reference = AVTP (A), measured = camera
                         fB = cameraFrame ?? fA;
                     }
                 }
@@ -2464,7 +2463,7 @@ namespace VilsSharpX
             RenderAll();
         }
 
-        private static readonly string[] ComparisonModeLabels = { "LVDS-AVTP", "LVDS-LSM", "AVTP-LSM" };
+        private static readonly string[] ComparisonModeLabels = ["LVDS-AVTP", "LSM-LVDS", "LSM-AVTP"];
 
         private void CmbComparisonMode_SelectionChanged(object sender, System.Windows.Controls.SelectionChangedEventArgs e)
         {
@@ -3733,7 +3732,7 @@ namespace VilsSharpX
             BitmapUtils.Blit(_wbB, b.Data, b.Stride);
 
             // Select comparison operands based on _comparisonMode:
-            // 0 = LVDS-AVTP (A ref vs B measured), 1 = LVDS-LSM (B ref vs C↓ measured), 2 = AVTP-LSM (A ref vs C↓ measured)
+            // 0 = LVDS-AVTP (A ref vs B measured), 1 = LSM-LVDS (B ref vs C↓ measured), 2 = LSM-AVTP (A ref vs C↓ measured)
             byte[] diffLeft;
             byte[] diffRight;
             int cmpMode = _comparisonMode;
@@ -3749,7 +3748,7 @@ namespace VilsSharpX
 
                 if (cmpMode == 1)
                 {
-                    // LVDS-LSM: LVDS is reference (A), downscaled camera is measured (B)
+                    // LSM-LVDS: LVDS is reference (A), downscaled camera is measured (B)
                     diffLeft = b.Data;
                     diffRight = cameraData;
                 }
@@ -4305,13 +4304,13 @@ namespace VilsSharpX
 
                 if (cmpMode == 1)
                 {
-                    // LVDS-LSM: reference = LVDS (B), measured = camera
+                    // LSM-LVDS: reference = LVDS (B), measured = camera
                     a = b;
                     b = cameraFrame;
                 }
                 else
                 {
-                    // AVTP-LSM: reference = AVTP (A), measured = camera
+                    // LSM-AVTP: reference = AVTP (A), measured = camera
                     b = cameraFrame;
                 }
             }

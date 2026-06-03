@@ -419,8 +419,8 @@
                 <TextBlock Text="Mode:" VerticalAlignment="Center" Margin="0,0,6,0"/>
                 <ComboBox x:Name="CmbComparisonMode" Width="130" SelectedIndex="0" SelectionChanged="CmbComparisonMode_SelectionChanged">
                     <ComboBoxItem Content="LVDS-AVTP"/>
-                    <ComboBoxItem Content="LVDS-LSM"/>
-                    <ComboBoxItem Content="AVTP-LSM"/>
+                    <ComboBoxItem Content="LSM-LVDS"/>
+                    <ComboBoxItem Content="LSM-AVTP"/>
                 </ComboBox>
 
                 <Rectangle Width="1" Height="22" Fill="#ABADB3" Margin="16,0,16,0" VerticalAlignment="Center"/>

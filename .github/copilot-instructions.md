@@ -3,7 +3,7 @@
 ## Project snapshot
 - WPF app targeting `net8.0-windows` (`UseWPF=true`) that visualizes 8-bit grayscale frames (Gray8) and computed comparisons.
 - Four panes in the UI: **A (AVTP/Generator)**, **B (LVDS from Aurix)**, **C (LSM Camera — Basler)**, **D (Comparison)** (see `MainWindow.xaml`).
-- Comparison modes selectable via ComboBox: **LVDS-AVTP** (default), **LVDS-LSM**, **AVTP-LSM**.
+- Comparison modes selectable via ComboBox: **LVDS-AVTP** (default), **LSM-LVDS**, **LSM-AVTP**.
 
 ## Big-picture data flow (most important)
 - Ethernet AVTP frame -> `AvtpLiveCapture` sniffs ethertype 0x22F0 -> `AvtpRvfParser.TryParseAvtpRvfEthernet` -> `RvfReassembler.Push()` copies lines into a 320×80 frame -> when `EndFrame` emits `OnFrameReady(outFrame, meta)`.
@@ -54,6 +54,6 @@
 - Keep constants consistent: `W=320`, active height `80`, LVDS height `84` with bottom 4 metadata lines cropped.
 - Preserve protocol compatibility in `RvfProtocol.cs`, `AvtpRvfParser.cs`, and `RvfReassembler.cs`.
 - If you refactor frame handling, mind that `Frame` clones buffers for safety today; avoid introducing shared-buffer race bugs.
-- Comparison mode logic: `_comparisonMode` 0=LVDS-AVTP, 1=LVDS-LSM, 2=AVTP-LSM. Always select correct reference/measured pair.
+- Comparison mode logic: `_comparisonMode` 0=LVDS-AVTP, 1=LSM-LVDS, 2=LSM-AVTP. Always select correct reference/measured pair.
 
 ---

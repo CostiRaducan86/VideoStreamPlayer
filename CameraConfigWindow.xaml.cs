@@ -22,7 +22,7 @@ public partial class CameraConfigWindow : Window
     private readonly Action<string> _log;
     private string? _loadedPfsPath;
     private PfsConfigParser? _loadedPfs;
-    private BaslerCameraCapture? _sharedCapture; // non-null = camera already open from MainWindow
+    private readonly BaslerCameraCapture? _sharedCapture; // non-null = camera already open from MainWindow
 
     // Zoom state
     private bool _isFitMode = true;
@@ -786,8 +786,7 @@ public partial class CameraConfigWindow : Window
             }
 
             int w = grabResult.Width, h = grabResult.Height;
-            byte[]? pixels = grabResult.PixelData as byte[];
-            if (pixels == null || pixels.Length < w * h)
+            if (grabResult.PixelData is not byte[] pixels || pixels.Length < w * h)
             {
                 grabResult.Dispose();
                 if (wasGrabbing) StartGrabbing();
@@ -846,7 +845,7 @@ public partial class CameraConfigWindow : Window
         if (wasGrabbing) StartGrabbing();
     }
 
-    private void ShowCalibrationResult(BaslerAutoCalibration.CalibrationResult? result)
+    private static void ShowCalibrationResult(BaslerAutoCalibration.CalibrationResult? result)
     {
         if (result != null)
         {

@@ -35,7 +35,7 @@ These rules apply to every session and every chat. Re-read this file at the star
 - Follow existing patterns in the codebase.
 - Marshal background-thread callbacks to UI thread via `Dispatcher.Invoke/BeginInvoke`.
 - Basler camera frames arrive on a Pylon grab thread — always Dispatcher-marshal.
-- Comparison mode logic: `_comparisonMode` 0=LVDS-AVTP, 1=LVDS-LSM, 2=AVTP-LSM.
+- Comparison mode logic: `_comparisonMode` 0=LVDS-AVTP, 1=LSM-LVDS, 2=LSM-AVTP.
 
 ## General
 

@@ -88,7 +88,7 @@
 - [x] Auto-calibration AOI detection
 - [x] Pane C (LSM Camera) display with independent FPS
 - [x] `FrameDownscaler.cs` — block-average downscaler (camera→LVDS resolution)
-- [x] Multi-mode comparison: LVDS-AVTP, LVDS-LSM, AVTP-LSM
+- [x] Multi-mode comparison: LVDS-AVTP, LSM-LVDS, LSM-AVTP
 - [x] `DiffRenderer.cs` — color-coded comparison with zeroThreshold
 - [x] Mode-specific tooltip labels (AVTP/LVDS/LSM)
 - [x] Overlay frame selection per comparison mode
