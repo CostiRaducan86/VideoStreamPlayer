@@ -95,10 +95,9 @@ public static class StatusFormatter
     /// </summary>
     public static string FormatAvtpRvfStatus(
         string src, uint frameId, uint seq, int linesWritten, int expectedHeight, int seqGaps,
-        int dropped, int gapFrames, int incomplete, int lateSkip)
+        int dropped)
     {
-        string late = lateSkip > 0 ? $" | lateSkip={lateSkip}" : "";
-        return $"AVTP RVF ({src}): frameId={frameId} seq={seq} lines={linesWritten}/{expectedHeight} gaps={seqGaps} | dropped={dropped} (gapFrames={gapFrames}, incomplete={incomplete}){late}";
+        return $"AVTP RVF ({src}): frameId={frameId} | seq={seq} | lines={linesWritten}/{expectedHeight} | gaps={seqGaps} | dropped={dropped}";
     }
 
     /// <summary>

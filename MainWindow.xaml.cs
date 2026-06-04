@@ -160,10 +160,25 @@ namespace VilsSharpX
         private bool _canDiagRecording;  // starts false — user presses Record to begin
         private DateTime _canRecordSessionStart = DateTime.MinValue; // filters stale Dispatcher-queued records
         private DispatcherTimer? _canDiagRetryTimer; // resends START if CD stays 0
+        private DispatcherTimer? _canDiagWatchdogTimer; // auto-heals long-run silent recording stalls
         private static readonly TimeSpan CanDiagRefreshInterval = TimeSpan.FromMilliseconds(200);
+        private static readonly TimeSpan CanDiagStallTimeout = TimeSpan.FromSeconds(6);
+        private DateTime _canDiagLastRecordUtc = DateTime.MinValue;
+        private bool _canDiagSessionHadTraffic;
+        private int _canDiagConsecutiveRestarts;
+        private bool _canDiagWatchdogRecovering;
         private string _canSortColumn = "Nr";     // column header text used for sorting
         private bool _canSortAscending = true;     // true = ascending, false = descending
         private GridViewColumnHeader? _canLastSortHeader;  // last clicked header for glyph tracking
+
+        /// <summary>
+        /// Formats comparison stats label based on active comparison mode and diff statistics.
+        /// </summary>
+        private string FormatComparisonStats(int maxDiff, int minDiff, double meanAbsDiff, int aboveDeadband, int totalDarkPixels)
+        {
+            string modeLabel = ComparisonModeLabels[Math.Clamp(_comparisonMode, 0, ComparisonModeLabels.Length - 1)];
+            return $"[{modeLabel}]: max_positive_dev={Math.Max(0, maxDiff)} | max_negative_dev={Math.Min(0, minDiff)} | average_pixels_dev={meanAbsDiff:F0} | total_pixels_dev={aboveDeadband} | total_dark_pixels={totalDarkPixels}";
+        }
 
         private Frame? _latestA;
         private Frame? _latestB;
@@ -937,10 +952,10 @@ namespace VilsSharpX
 
             // For display, clamp linesWritten to display height so Nichia shows "64/64" not "80/64".
             int displayLines = Math.Min(meta.LinesWritten, displayHeight);
+            // Keep previous wording and keep only dropped counter (without extra parentheses details)
             LblStatus.Text = StatusFormatter.FormatAvtpRvfStatus(
                 src, meta.FrameId, meta.Seq, displayLines, displayHeight, meta.SeqGaps,
-                _playback.CountAvtpDropped, _playback.CountAvtpSeqGapFrames,
-                _playback.CountAvtpIncomplete, _playback.CountLateFramesSkipped);
+                _playback.CountAvtpDropped);
         }
 
         private void LoadUiSettings()
@@ -1401,6 +1416,10 @@ namespace VilsSharpX
             _canDiagStatusTimer.Tick += (_, _) => UpdateCanDiagStatusText();
             _canDiagStatusTimer.Start();
 
+            _canDiagWatchdogTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
+            _canDiagWatchdogTimer.Tick += (_, _) => CanDiagWatchdogTick();
+            _canDiagWatchdogTimer.Start();
+
             // Recording starts as false — user must press Record
             UpdateCanDiagRecordingButtons();
             UpdateCanDiagStatusText();
@@ -1448,6 +1467,11 @@ namespace VilsSharpX
 
             if (!_canDiagRecording)
                 return;
+
+            _canDiagLastRecordUtc = DateTime.UtcNow;
+            _canDiagSessionHadTraffic = true;
+            _canDiagConsecutiveRestarts = 0;
+            _canDiagWatchdogRecovering = false;
 
             // Discard stale records from Dispatcher queue that were enqueued
             // before the current Record session started (fixes duplicate Seqs
@@ -1573,17 +1597,10 @@ namespace VilsSharpX
                 ? (_canDiagRecording ? "recording" : "monitoring")
                 : "stopped";
 
-            long magicMatches = _canDiagCapture?.DiagMagicMatches ?? 0;
-                        long niMatches = _canDiagCapture?.NiMagicMatches ?? 0;
-                        long osMatches = _canDiagCapture?.OsMagicMatches ?? 0;
-                        long other88b5 = _canDiagCapture?.Other88b5Matches ?? 0;
-                        string lastErr = _canDiagCapture?.LastParserError ?? string.Empty;
+            long cdMatches = _canDiagCapture?.DiagMagicMatches ?? 0;
+            string health = _canDiagWatchdogRecovering ? "recovering" : "ok";
 
-            LblCanMonitorStatus.Text = magicMatches == 0
-                                ? $"State: {state}. Stored: {stored}. Rx: {packets}. CD:{magicMatches} NI:{niMatches} OS:{osMatches} OTH:{other88b5} ParseErr:{parserErrors}" +
-                                    (string.IsNullOrWhiteSpace(lastErr) ? string.Empty : $" LastErr:{lastErr}")
-                                : $"State: {state}. Stored: {stored}. Rx: {packets}. CD:{magicMatches} NI:{niMatches} OS:{osMatches} OTH:{other88b5} ParseErr:{parserErrors}" +
-                                    (string.IsNullOrWhiteSpace(lastErr) ? string.Empty : $" LastErr:{lastErr}");
+            LblCanMonitorStatus.Text = $"State: {state} | Stored: {stored} | Rx: {packets} | CD: {cdMatches} | ParseErr: {parserErrors} | Health: {health}";
         }
 
         private static string GetSelectedComboContent(System.Windows.Controls.ComboBox? combo)
@@ -1707,6 +1724,10 @@ namespace VilsSharpX
             // Mark session start BEFORE sending START — any records with ReceivedUtc
             // earlier than this are stale leftovers from the Dispatcher queue.
             _canRecordSessionStart = DateTime.UtcNow;
+            _canDiagLastRecordUtc = _canRecordSessionStart;
+            _canDiagSessionHadTraffic = false;
+            _canDiagConsecutiveRestarts = 0;
+            _canDiagWatchdogRecovering = false;
 
             // Tell Aurix to start diagnostic sniffing.
             // Firmware always resets on START (no 0→1 guard), so this works
@@ -1786,9 +1807,68 @@ namespace VilsSharpX
             SendDiagSniffStart();
         }
 
+        private void CanDiagWatchdogTick()
+        {
+            if (!_canDiagRecording)
+                return;
+
+            if (_canDiagWatchdogRecovering)
+                return;
+
+            // Only recover sessions that had traffic and then went silent.
+            if (!_canDiagSessionHadTraffic)
+                return;
+
+            // Fresh data is still flowing.
+            if (_canDiagLastRecordUtc != DateTime.MinValue
+                && (DateTime.UtcNow - _canDiagLastRecordUtc) <= CanDiagStallTimeout)
+                return;
+
+            // If the user just pressed Record, give startup/retry path time before watchdog recovery.
+            if (_canDiagLastRecordUtc == DateTime.MinValue
+                || (DateTime.UtcNow - _canDiagLastRecordUtc) <= TimeSpan.FromSeconds(2))
+                return;
+
+            RecoverCanDiagRecording();
+        }
+
+        private void RecoverCanDiagRecording()
+        {
+            try
+            {
+                _canDiagWatchdogRecovering = true;
+                _canDiagConsecutiveRestarts++;
+
+                AppendDiagLog($"[can-watchdog] no records for {CanDiagStallTimeout.TotalSeconds:F0}s while recording; restarting capture (attempt {_canDiagConsecutiveRestarts})");
+
+                StopCanDiagCapture();
+                StartCanDiagCapture();
+
+                _canRecordSessionStart = DateTime.UtcNow;
+                _canDiagLastRecordUtc = _canRecordSessionStart;
+                _canDiagSessionHadTraffic = false;
+                _canDiagCapture?.ResetCounters();
+
+                // Re-arm firmware sniff mode after reopening capture.
+                SendDiagSniffStart();
+                StartDiagRetryTimer();
+            }
+            catch (Exception ex)
+            {
+                AppendDiagLog($"[can-watchdog] recovery failed: {ex.Message}");
+            }
+            finally
+            {
+                _canDiagWatchdogRecovering = false;
+            }
+        }
+
         private void BtnCanStopRecord_Click(object sender, RoutedEventArgs e)
         {
             _canDiagRecording = false;
+            _canDiagWatchdogRecovering = false;
+            _canDiagSessionHadTraffic = false;
+            _canDiagConsecutiveRestarts = 0;
             StopDiagRetryTimer();
             UpdateCanDiagRecordingButtons();
 
@@ -2260,7 +2340,6 @@ namespace VilsSharpX
 
             // Update LVDS stats labels
             LblLvdsFrameCount.Text = $"Frames: {meta.FrameId} ({meta.ValidLines}/{meta.LinesExpected} lines)";
-            LblLvdsBytesReceived.Text = $"Bytes: {meta.TotalBytes:N0}";
             LblLvdsSyncLoss.Text = $"Sync_error: {meta.SyncLosses}  CRC_error: {meta.CrcErrors}  Parity_error: {meta.ParityErrors}";
 
             // FPS from Ethernet capture
@@ -2336,7 +2415,7 @@ namespace VilsSharpX
             BitmapUtils.Blit(_wbD, _diffBgr, w * 3);
 
             if (LblDiffStats != null)
-                LblDiffStats.Text = StatusFormatter.FormatDiffStats(maxDiff, minDiff, meanAbsDiff, aboveDeadband, totalDarkPixels, _lastMatchNcc);
+                LblDiffStats.Text = FormatComparisonStats(maxDiff, minDiff, meanAbsDiff, aboveDeadband, totalDarkPixels);
 
             ApplyNoSignalUiState(noSignal: false);
         }
@@ -2506,6 +2585,8 @@ namespace VilsSharpX
                     DiagSniffCommand.Send(txDev, start: false, null);
             }
             catch { /* ignore */ }
+            try { StopDiagRetryTimer(); } catch { /* ignore */ }
+            try { _canDiagWatchdogTimer?.Stop(); } catch { /* ignore */ }
             try { StopCanDiagCapture(); } catch { /* ignore */ }
             try { StopNichiaEthCapture(); } catch { /* ignore */ }
             try { StopOsramEthCapture(); } catch { /* ignore */ }
@@ -3158,13 +3239,15 @@ namespace VilsSharpX
             _baslerDispWindowStartTicks = _baslerDispFpsSw.ElapsedTicks;
             _runInfoALastUpdateTicks = 0;
             _runInfoCLastUpdateTicks = 0;
+            _canDiagWatchdogRecovering = false;
+            _canDiagSessionHadTraffic = false;
+            _canDiagConsecutiveRestarts = 0;
+            _canDiagLastRecordUtc = DateTime.MinValue;
+            StopDiagRetryTimer();
             ResetSyncState();
 
             StopRenderLoops();
 
-            // Clear AVTP stats labels
-            if (LblAvtpInFps != null) LblAvtpInFps.Text = "";
-            if (LblAvtpDropped != null) LblAvtpDropped.Text = "";
 
             // Stop all live capture sources (CAN diag capture is independent)
             _liveCapture.StopAll();
@@ -3769,7 +3852,7 @@ namespace VilsSharpX
             }
 
             if (LblDiffStats != null)
-                LblDiffStats.Text = StatusFormatter.FormatDiffStats(maxDiff, minDiff, meanAbsDiff, aboveDeadband, totalDarkPixels, _lastMatchNcc);
+                LblDiffStats.Text = FormatComparisonStats(maxDiff, minDiff, meanAbsDiff, aboveDeadband, totalDarkPixels);
 
             // Per-pane no-signal visibility.
             // When AVTP is lost: show "Signal not available" on A, B, D (comparison meaningless without reference).
@@ -3826,12 +3909,6 @@ namespace VilsSharpX
             bool isRunning = _playback.Cts != null;
             bool isPaused = _playback.IsPaused;
 
-            if (LblAvtpInFps != null) 
-                LblAvtpInFps.Text = $"{_playback.AvtpInFpsEma:F1} fps";
-            if (LblAvtpDropped != null) 
-                LblAvtpDropped.Text = StatusFormatter.FormatAvtpDropped(
-                    _playback.CountAvtpDropped, _playback.CountAvtpSeqGapFrames, 
-                    _playback.CountAvtpIncomplete, _playback.SumAvtpSeqGaps);
 
             if (LblRunInfoA != null)
             {
@@ -3841,10 +3918,6 @@ namespace VilsSharpX
                     bool isAviZero = _lastLoaded == LoadedSource.Avi && shownFps <= 0.0;
                     LblRunInfoA.Text = StatusFormatter.FormatRunInfoA(isRunning, isPaused, shownFps, isAviZero);
                 }
-
-                // Update lateSkip in status
-                if (isRunning && !isPaused && _playback.CountLateFramesSkipped > 0 && LblStatus != null)
-                    LblStatus.Text = StatusFormatter.UpdateLateSkipInStatus(LblStatus.Text ?? "", _playback.CountLateFramesSkipped);
             }
 
             if (LblRunInfoB != null)

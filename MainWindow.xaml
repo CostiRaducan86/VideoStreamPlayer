@@ -328,44 +328,116 @@
             </Grid>
         </GroupBox>
 
-        <!-- Right side bottom: LVDS Info + Status -->
-        <Grid x:Name="SidebarInfo" Grid.Row="2" Grid.RowSpan="3" Grid.Column="2" Margin="4,4,4,8">
+        <!-- Right side bottom: Application Options + Comparison Info + AVTP Info + LVDS Info (stacked vertically) -->
+        <Grid x:Name="SidebarInfo" Grid.Row="2" Grid.RowSpan="3" Grid.Column="2" Margin="4,4,4,4">
             <Grid.RowDefinitions>
-                <RowDefinition Height="3*"/>
-                <RowDefinition Height="2*"/>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="*"/>
             </Grid.RowDefinitions>
 
-            <!-- LVDS Info -->
-            <GroupBox Grid.Row="0" Header="LVDS Info" Padding="8" Margin="0,0,0,8" Background="#F0F0F0">
-                <StackPanel Orientation="Vertical">
-                    <!-- LVDS Protocol details (based on selected LSM device type) -->
-                    <TextBlock x:Name="LblLvdsProtocol" TextWrapping="Wrap" Foreground="DimGray" Margin="0,0,0,0"
-                               Text=""/>
+            <!-- Application Options -->
+            <Border Grid.Row="0" BorderBrush="#ABADB3" BorderThickness="1" CornerRadius="6" Margin="0,0,0,6" Padding="10,6" Background="#F8F8F8">
+                <StackPanel Orientation="Vertical" VerticalAlignment="Center">
+                    <TextBlock Text="Application Options" FontWeight="SemiBold" VerticalAlignment="Center" Margin="0,0,0,6"/>
 
-                    <!-- Separator (LVDS information) -->
-                    <Rectangle Height="1" Fill="Gray" Margin="0,8,0,8" HorizontalAlignment="Stretch"/>
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
 
-                    <!-- Frame Statistics -->
-                    <TextBlock Text="Frame Statistics" FontWeight="SemiBold" Margin="0,0,0,4"/>
-                    <TextBlock x:Name="LblLvdsFrameCount" Text="Frames: 0" Foreground="DimGray"/>
-                    <TextBlock x:Name="LblLvdsBytesReceived" Text="Bytes: 0" Foreground="DimGray"/>
-                    <TextBlock x:Name="LblLvdsSyncLoss" Text="Sync losses: 0" Foreground="DimGray"/>
-                    <TextBlock x:Name="LblLvdsFps" Text="FPS: --" Foreground="DimGray"/>
+                        <!-- Left column: LSM Device Type / AVTP Mode / LVDS Mode -->
+                        <StackPanel Grid.Column="0" Orientation="Vertical" Margin="0,0,10,0">
+                            <StackPanel Orientation="Horizontal" HorizontalAlignment="Left" Margin="0,0,0,6">
+                                <TextBlock Text="LSM Device Type:" VerticalAlignment="Center" Width="102" Margin="0,0,6,0"/>
+                                <ComboBox x:Name="CmbLsmDeviceType" Width="120" SelectedIndex="0" SelectionChanged="CmbLsmDeviceType_SelectionChanged">
+                                    <ComboBoxItem Content="Osram 2.0"/>
+                                    <ComboBoxItem Content="Osram 2.05"/>
+                                    <ComboBoxItem Content="Nichia"/>
+                                </ComboBox>
+                            </StackPanel>
+
+                            <StackPanel Orientation="Horizontal" HorizontalAlignment="Left" Margin="0,0,0,6">
+                                <TextBlock Text="AVTP Mode:" VerticalAlignment="Center" Width="102" Margin="0,0,6,0"/>
+                                <ComboBox x:Name="CmbModeOfOperation" Width="120" SelectedIndex="0" SelectionChanged="CmbModeOfOperation_SelectionChanged">
+                                    <ComboBoxItem Content="AVTP Monitoring"/>
+                                    <ComboBoxItem Content="AVTP Generator"/>
+                                </ComboBox>
+                            </StackPanel>
+
+                            <StackPanel Orientation="Horizontal" HorizontalAlignment="Left" Margin="0,0,0,0">
+                                <TextBlock Text="LVDS Mode:" VerticalAlignment="Center" Width="102" Margin="0,0,6,0"/>
+                                <ComboBox x:Name="CmbLvdsMode" Width="120" SelectedIndex="0" SelectionChanged="CmbLvdsMode_SelectionChanged">
+                                    <ComboBoxItem Content="LVDS Monitoring"/>
+                                    <ComboBoxItem Content="LVDS Generator"/>
+                                </ComboBox>
+                            </StackPanel>
+                        </StackPanel>
+
+                        <!-- Vertical separator -->
+                        <Rectangle Grid.Column="1" Width="1" Fill="Gray" Margin="2,0" HorizontalAlignment="Center"/>
+
+                        <!-- Right column: Comparison Mode / Dev threshold / Flip -->
+                        <StackPanel Grid.Column="2" Orientation="Vertical" Margin="10,0,0,0">
+                            <StackPanel Orientation="Horizontal" HorizontalAlignment="Left" Margin="0,0,0,6">
+                                <TextBlock Text="Comparison Mode:" VerticalAlignment="Center" Width="102" Margin="0,0,6,0"/>
+                                <ComboBox x:Name="CmbComparisonMode" Width="120" SelectedIndex="0" SelectionChanged="CmbComparisonMode_SelectionChanged">
+                                    <ComboBoxItem Content="LVDS-AVTP"/>
+                                    <ComboBoxItem Content="LSM-LVDS"/>
+                                    <ComboBoxItem Content="LSM-AVTP"/>
+                                </ComboBox>
+                            </StackPanel>
+
+                            <StackPanel Orientation="Horizontal" HorizontalAlignment="Left" Margin="0,0,0,6">
+                                <TextBlock Text="Dev. threshold:" VerticalAlignment="Center" Width="102" Margin="0,0,6,0"/>
+                                <Border BorderBrush="#ABADB3" BorderThickness="1" Background="White" CornerRadius="2">
+                                    <Grid Width="50" Height="22">
+                                        <TextBox x:Name="TxtDiffThr" Text="0" BorderThickness="0" Background="Transparent" VerticalContentAlignment="Center" Padding="4,0,18,0" TextChanged="TxtDiffThr_TextChanged"/>
+                                        <StackPanel Orientation="Vertical" HorizontalAlignment="Right" VerticalAlignment="Stretch" Width="16">
+                                            <RepeatButton x:Name="BtnDiffThrUp" Content="▲" FontSize="6" Height="11" Padding="0" BorderThickness="0" Click="BtnDiffThrUp_Click"/>
+                                            <RepeatButton x:Name="BtnDiffThrDown" Content="▼" FontSize="6" Height="11" Padding="0" BorderThickness="0" Click="BtnDiffThrDown_Click"/>
+                                        </StackPanel>
+                                    </Grid>
+                                </Border>
+                            </StackPanel>
+
+                            <CheckBox x:Name="ChkZeroZeroWhite" IsChecked="False" VerticalAlignment="Center" ToolTip="When enabled: 0=0 → white, 255=255 → black" Checked="ChkZeroZeroWhite_Changed" Unchecked="ChkZeroZeroWhite_Changed">
+                                <TextBlock Text="Flip (0=0→white)" FontSize="12"/>
+                            </CheckBox>
+                        </StackPanel>
+                    </Grid>
                 </StackPanel>
+            </Border>
+
+            <!-- Comparison Info -->
+            <GroupBox Grid.Row="1" Header="Comparison Info" Padding="8" Margin="0,0,0,6" Background="#F0F0F0">
+                <TextBlock x:Name="LblDiffStats" TextWrapping="Wrap" Foreground="DimGray" FontSize="11"/>
             </GroupBox>
 
-            <!-- Status -->
-            <GroupBox Grid.Row="1" Header="Status" Padding="8" Background="#F0F0F0">
-                <StackPanel Orientation="Vertical">
-                    <TextBlock x:Name="LblStatus" TextWrapping="Wrap" Foreground="DimGray"/>
-                    <TextBlock x:Name="LblDiffStats" TextWrapping="Wrap" Margin="0,4,0,0" Foreground="DimGray" />
-                    <StackPanel Orientation="Horizontal" Margin="0,4,0,0" Visibility="Collapsed">
-                        <TextBlock Text="AVTP in:" Margin="0,0,6,0" />
-                        <TextBlock x:Name="LblAvtpInFps" Margin="0,0,16,0" />
-                        <TextBlock Text="Dropped:" Margin="0,0,6,0" />
-                        <TextBlock x:Name="LblAvtpDropped" />
+            <!-- AVTP Info -->
+            <GroupBox Grid.Row="2" Header="AVTP Info" Padding="8" Margin="0,0,0,6" Background="#F0F0F0">
+                <TextBlock x:Name="LblStatus" TextWrapping="Wrap" Foreground="DimGray" FontSize="11"/>
+            </GroupBox>
+
+            <!-- LVDS Info (two-column layout) -->
+            <GroupBox Grid.Row="3" Header="LVDS Info" Padding="8" Margin="0,0,0,0" Background="#F0F0F0">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="*"/>
+                    </Grid.ColumnDefinitions>
+                    <TextBlock Grid.Column="0" x:Name="LblLvdsProtocol" TextWrapping="Wrap" Foreground="DimGray" Margin="0,0,10,0" FontSize="11" Text=""/>
+                    <Rectangle Grid.Column="1" Width="1" Fill="Gray" Margin="2,0" HorizontalAlignment="Center"/>
+                    <StackPanel Grid.Column="2" Orientation="Vertical" Margin="10,0,0,0">
+                        <TextBlock x:Name="LblLvdsFrameCount" Text="Frames: 0" Foreground="DimGray" FontSize="11"/>
+                        <TextBlock x:Name="LblLvdsSyncLoss" Text="Sync_error: 0  CRC_error: 0  Parity_error: 0" Foreground="DimGray" Margin="0,2,0,0" FontSize="11"/>
+                        <TextBlock x:Name="LblLvdsFps" Text="FPS: --" Foreground="DimGray" Margin="0,2,0,0" FontSize="11"/>
                     </StackPanel>
-                </StackPanel>
+                </Grid>
             </GroupBox>
         </Grid>
 
@@ -409,59 +481,8 @@
             <Rectangle Grid.Row="1" Height="1" Fill="Gray" Margin="10,6,10,0" HorizontalAlignment="Stretch" />
         </Grid>
 
-        <!-- Comparison Options (under buttons) -->
-        <Border x:Name="ComparisonBar" Grid.Row="4" Grid.ColumnSpan="2" BorderBrush="#ABADB3" BorderThickness="1" CornerRadius="6" Margin="4,8,4,4" Padding="10,6" Background="#F8F8F8">
-            <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                <TextBlock Text="Comparison Options" FontWeight="SemiBold" VerticalAlignment="Center" Margin="0,0,16,0"/>
-                <Rectangle Width="1" Height="22" Fill="#ABADB3" Margin="0,0,16,0" VerticalAlignment="Center"/>
-
-                <!-- Comparison Mode -->
-                <TextBlock Text="Mode:" VerticalAlignment="Center" Margin="0,0,6,0"/>
-                <ComboBox x:Name="CmbComparisonMode" Width="130" SelectedIndex="0" SelectionChanged="CmbComparisonMode_SelectionChanged">
-                    <ComboBoxItem Content="LVDS-AVTP"/>
-                    <ComboBoxItem Content="LSM-LVDS"/>
-                    <ComboBoxItem Content="LSM-AVTP"/>
-                </ComboBox>
-
-                <Rectangle Width="1" Height="22" Fill="#ABADB3" Margin="16,0,16,0" VerticalAlignment="Center"/>
-
-                <!-- Deviation threshold -->
-                <TextBlock Text="Dev. threshold:" VerticalAlignment="Center" Margin="0,0,6,0"/>
-                <Border BorderBrush="#ABADB3" BorderThickness="1" Background="White" CornerRadius="2">
-                    <Grid Width="60" Height="24">
-                        <TextBox x:Name="TxtDiffThr" Text="0" 
-                                 BorderThickness="0" 
-                                 Background="Transparent"
-                                 VerticalContentAlignment="Center"
-                                 Padding="4,0,24,0"
-                                 TextChanged="TxtDiffThr_TextChanged"/>
-                        <StackPanel Orientation="Vertical" HorizontalAlignment="Right" VerticalAlignment="Stretch" Width="18">
-                            <RepeatButton x:Name="BtnDiffThrUp" Content="▲" 
-                                        FontSize="6" 
-                                        Height="12" 
-                                        Padding="0" 
-                                        BorderThickness="0,0,0,0.5"
-                                        Click="BtnDiffThrUp_Click"/>
-                            <RepeatButton x:Name="BtnDiffThrDown" Content="▼" 
-                                        FontSize="6" 
-                                        Height="12" 
-                                        Padding="0" 
-                                        BorderThickness="0"
-                                        Click="BtnDiffThrDown_Click"/>
-                        </StackPanel>
-                    </Grid>
-                </Border>
-
-                <Rectangle Width="1" Height="22" Fill="#ABADB3" Margin="16,0,16,0" VerticalAlignment="Center"/>
-
-                <!-- Flip white/black comparison -->
-                <CheckBox x:Name="ChkZeroZeroWhite" IsChecked="False" VerticalAlignment="Center"
-                          ToolTip="When enabled: 0=0 → white, 255=255 → black"
-                          Checked="ChkZeroZeroWhite_Changed" Unchecked="ChkZeroZeroWhite_Changed">
-                    <TextBlock Text="Flip (0=0→white, 255=255→black)" />
-                </CheckBox>
-            </StackPanel>
-        </Border>
+        <!-- ComparisonBar hidden (moved to SidebarInfo) -->
+        <Border x:Name="ComparisonBar" Grid.Row="4" Grid.ColumnSpan="2" Visibility="Collapsed"/>
 
         <!-- Hidden Configuration Panels (used by popup windows via re-parenting) -->
         <StackPanel x:Name="HiddenConfigPanel" Visibility="Collapsed">
@@ -476,21 +497,6 @@
                         </ComboBox>
                     </StackPanel>
                     <StackPanel Orientation="Horizontal" HorizontalAlignment="Left" Margin="0,0,0,8">
-                        <TextBlock Text="Mode of Operation:" VerticalAlignment="Center" Width="110" Margin="0,0,4,0"/>
-                        <ComboBox x:Name="CmbModeOfOperation" Width="160" SelectedIndex="0" SelectionChanged="CmbModeOfOperation_SelectionChanged">
-                            <ComboBoxItem Content="AVTP Monitoring"/>
-                            <ComboBoxItem Content="AVTP Generator"/>
-                        </ComboBox>
-                    </StackPanel>
-                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Left" Margin="0,0,0,8">
-                        <TextBlock Text="LSM Device Type:" VerticalAlignment="Center" Width="110" Margin="0,0,4,0"/>
-                        <ComboBox x:Name="CmbLsmDeviceType" Width="160" SelectedIndex="0" SelectionChanged="CmbLsmDeviceType_SelectionChanged">
-                            <ComboBoxItem Content="Osram 2.0"/>
-                            <ComboBoxItem Content="Osram 2.05"/>
-                            <ComboBoxItem Content="Nichia"/>
-                        </ComboBox>
-                    </StackPanel>
-                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Left" Margin="0,0,0,8">
                         <TextBlock Text="ECU Variant:" VerticalAlignment="Center" Width="110" Margin="0,0,4,0"/>
                         <ComboBox x:Name="CmbEcuVariant" Width="160" SelectedIndex="0" SelectionChanged="CmbEcuVariant_SelectionChanged">
                             <ComboBoxItem Content="MB PLU-HD 1.0 LH"/>
@@ -499,13 +505,6 @@
                             <ComboBoxItem Content="MB PLU-HD 2.0 RH"/>
                             <ComboBoxItem Content="MB CHLC 1.0"/>
                             <ComboBoxItem Content="MB CHLC 2.0"/>
-                        </ComboBox>
-                    </StackPanel>
-                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Left" Margin="0,0,0,8">
-                        <TextBlock Text="LVDS Mode:" VerticalAlignment="Center" Width="110" Margin="0,0,4,0"/>
-                        <ComboBox x:Name="CmbLvdsMode" Width="160" SelectedIndex="0" SelectionChanged="CmbLvdsMode_SelectionChanged">
-                            <ComboBoxItem Content="LVDS Monitoring"/>
-                            <ComboBoxItem Content="LVDS Generator"/>
                         </ComboBox>
                     </StackPanel>
                     <StackPanel Orientation="Horizontal" HorizontalAlignment="Left" Margin="0,0,0,0">
