@@ -18,6 +18,7 @@
                 <MenuItem Header="Application Settings" Click="MenuAppSettings_Click"/>
                 <MenuItem Header="Ethernet Configuration" Click="MenuEthernetConfig_Click"/>
                 <MenuItem Header="Camera Configuration" Click="MenuCameraConfig_Click"/>
+                <MenuItem Header="API Configuration" Click="MenuApiConfig_Click"/>
             </MenuItem>
         </Menu>
 

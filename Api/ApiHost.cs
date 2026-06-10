@@ -39,7 +39,7 @@ namespace VilsSharpX.Api
         private readonly string _bindAddress = string.IsNullOrWhiteSpace(bindAddress) ? "127.0.0.1" : bindAddress.Trim();
         private readonly int _port = port;
         private readonly string _apiKey = apiKey?.Trim() ?? string.Empty;
-        private readonly IReadOnlyList<CidrRange> _allowedCidrs = ParseAllowedCidrs(allowedCidrs).ToArray();
+        private readonly CidrRange[] _allowedCidrs = [.. ParseAllowedCidrs(allowedCidrs)];
         private WebApplication? _app;
 
         private static readonly JsonSerializerOptions JsonOptions = new()
@@ -91,7 +91,7 @@ namespace VilsSharpX.Api
                         isLoopbackBinding,
                         remoteRequestsEnabled = !isLoopbackBinding,
                         apiKeyRequiredForRemote = !string.IsNullOrWhiteSpace(_apiKey),
-                        allowlistEnabled = _allowedCidrs.Count > 0,
+                        allowlistEnabled = _allowedCidrs.Length > 0,
                         allowlistCidrs = _allowedCidrs.Select(c => c.Text).ToArray()
                     },
                     request = new
@@ -222,10 +222,10 @@ namespace VilsSharpX.Api
 
         private bool IsRemoteIpAllowed(IPAddress remoteIp)
         {
-            if (_allowedCidrs.Count == 0)
+            if (_allowedCidrs.Length == 0)
                 return true;
 
-            for (int i = 0; i < _allowedCidrs.Count; i++)
+            for (int i = 0; i < _allowedCidrs.Length; i++)
             {
                 if (_allowedCidrs[i].Contains(remoteIp))
                     return true;

@@ -4473,6 +4473,7 @@ namespace VilsSharpX
         private Window? _appSettingsWindow;
         private Window? _ethConfigWindow;
         private CameraConfigWindow? _cameraConfigWindow;
+        private ApiConfigurationWindow? _apiConfigWindow;
 
         /// <summary>
         /// Wraps a config GroupBox in a DockPanel with an OK button at the bottom.
@@ -4551,6 +4552,14 @@ namespace VilsSharpX
             _cameraConfigWindow = new CameraConfigWindow(AppendDiagLog, _baslerCapture) { Owner = this };
             _cameraConfigWindow.Closed += (_, _) => _cameraConfigWindow = null;
             _cameraConfigWindow.Show();
+        }
+
+        private void MenuApiConfig_Click(object sender, RoutedEventArgs e)
+        {
+            if (_apiConfigWindow != null && _apiConfigWindow.IsVisible) { _apiConfigWindow.Activate(); return; }
+            _apiConfigWindow = new ApiConfigurationWindow { Owner = this };
+            _apiConfigWindow.Closed += (_, _) => _apiConfigWindow = null;
+            _apiConfigWindow.Show();
         }
     }
 
