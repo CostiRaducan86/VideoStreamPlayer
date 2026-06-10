@@ -103,6 +103,13 @@ namespace VilsSharpX
         private bool _avtpLiveEnabled = true;
         private string? _avtpLiveDeviceHint;
 
+        // Automation REST API settings (persisted; currently configured via settings.json only).
+        private bool _apiAllowRemote = false;
+        private string _apiBindAddress = "127.0.0.1";
+        private int _apiPort = Api.ApiHost.DefaultPort;
+        private string _apiKey = string.Empty;
+        private string[] _apiAllowedCidrs = [];
+
         // AVTP TX MAC addresses
         private string _srcMac = "3C:CE:15:00:00:19";
         private string _dstMac = "01:00:5E:16:00:12";
@@ -176,6 +183,9 @@ namespace VilsSharpX
         /// </summary>
         private string FormatComparisonStats(int maxDiff, int minDiff, double meanAbsDiff, int aboveDeadband, int totalDarkPixels)
         {
+            // Capture the latest stats so the automation API can read them off-thread.
+            StoreComparisonStats(maxDiff, minDiff, meanAbsDiff, aboveDeadband, totalDarkPixels);
+
             string modeLabel = ComparisonModeLabels[Math.Clamp(_comparisonMode, 0, ComparisonModeLabels.Length - 1)];
             return $"[{modeLabel}]: max_positive_dev={Math.Max(0, maxDiff)} | max_negative_dev={Math.Min(0, minDiff)} | average_pixels_dev={meanAbsDiff:F0} | total_pixels_dev={aboveDeadband} | total_dark_pixels={totalDarkPixels}";
         }
@@ -972,6 +982,11 @@ namespace VilsSharpX
 
                 _avtpLiveEnabled = s.AvtpLiveEnabled;
                 _avtpLiveDeviceHint = s.AvtpLiveDeviceHint;
+                _apiAllowRemote = s.ApiAllowRemote;
+                _apiBindAddress = string.IsNullOrWhiteSpace(s.ApiBindAddress) ? "127.0.0.1" : s.ApiBindAddress.Trim();
+                _apiPort = Math.Clamp(s.ApiPort, 1, 65535);
+                _apiKey = s.ApiKey ?? string.Empty;
+                _apiAllowedCidrs = s.ApiAllowedCidrs ?? [];
 
                 _srcMac = s.SrcMac ?? "3C:CE:15:00:00:19";
                 _dstMac = s.DstMac ?? "01:00:5E:16:00:12";
@@ -1050,6 +1065,9 @@ namespace VilsSharpX
                 UpdateLiveUiEnabledState();
                 UpdateLvdsProtocolLabel();
 
+                // Start the automation API only after persisted settings were loaded.
+                StartAutomationApi();
+
                 RenderAll();
 
                 // Update status text with the correct (possibly reinitialized) resolution
@@ -1073,7 +1091,8 @@ namespace VilsSharpX
                 _srcMac, _dstMac, (int)_currentDeviceType,
                 _ecuVariant, _vlanId, _vlanPriority, _avtpEtherType, _streamIdLastByte,
                 CmbLvdsMode?.SelectedIndex ?? 0,
-                _controlMode, _canUartMode);
+                _controlMode, _canUartMode,
+                _apiAllowRemote, _apiBindAddress, _apiPort, _apiKey, _apiAllowedCidrs);
             _settingsManager.TrySave(s);
         }
 
@@ -2574,6 +2593,7 @@ namespace VilsSharpX
 
         private void Window_Closing(object sender, System.ComponentModel.CancelEventArgs e)
         {
+            StopAutomationApi();
             SaveUiSettings();
             if (_recordingManager.IsRecording) StopRecording();
             StopAll();

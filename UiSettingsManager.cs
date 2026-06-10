@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Linq;
 
 namespace VilsSharpX;
 
@@ -41,6 +42,13 @@ public sealed class UiSettingsManager(int width, int height)
             s.BDelta = Math.Clamp(s.BDelta, -255, 255);
             s.Deadband = Math.Clamp(s.Deadband, 0, 255);
             s.ForcedDeadPixelId = Math.Clamp(s.ForcedDeadPixelId, 0, _maxPixelCount);
+            s.ApiPort = Math.Clamp(s.ApiPort, 1, 65535);
+            s.ApiBindAddress = string.IsNullOrWhiteSpace(s.ApiBindAddress) ? "127.0.0.1" : s.ApiBindAddress.Trim();
+            s.ApiKey ??= string.Empty;
+            s.ApiAllowedCidrs ??= [];
+            s.ApiAllowedCidrs = [.. s.ApiAllowedCidrs
+                .Select(x => x?.Trim())
+                .Where(x => !string.IsNullOrWhiteSpace(x))!];
 
             return s;
         }
@@ -100,7 +108,12 @@ public sealed class UiSettingsManager(int width, int height)
         string streamIdLastByte = "0x50",
         int lvdsMode = 0,
         int controlMode = 0,
-        int canUartMode = 0)
+        int canUartMode = 0,
+        bool apiAllowRemote = false,
+        string apiBindAddress = "127.0.0.1",
+        int apiPort = 8420,
+        string apiKey = "",
+        string[]? apiAllowedCidrs = null)
     {
         return new AppSettings
         {
@@ -123,7 +136,12 @@ public sealed class UiSettingsManager(int width, int height)
             StreamIdLastByte = streamIdLastByte,
             LvdsMode = lvdsMode,
             ControlMode = controlMode,
-            CanUartMode = canUartMode
+            CanUartMode = canUartMode,
+            ApiAllowRemote = apiAllowRemote,
+            ApiBindAddress = apiBindAddress,
+            ApiPort = apiPort,
+            ApiKey = apiKey,
+            ApiAllowedCidrs = apiAllowedCidrs ?? []
         };
     }
 }

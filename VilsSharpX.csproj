@@ -6,7 +6,7 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <UseWPF>true</UseWPF>
-    <DefaultItemExcludes>$(DefaultItemExcludes);Aurix_Firmware\**;scripts\**</DefaultItemExcludes>
+    <DefaultItemExcludes>$(DefaultItemExcludes);Aurix_Firmware\**;scripts\**;docs\**;python_sdk\**</DefaultItemExcludes>
   </PropertyGroup>
 
   <ItemGroup>
@@ -14,6 +14,11 @@
     <PackageReference Include="ClosedXML" Version="0.104.2" />
     <PackageReference Include="SharpPcap" Version="6.3.0" />
     <PackageReference Include="System.IO.Ports" Version="10.0.3" />
+  </ItemGroup>
+
+  <!-- In-process REST automation host (localhost only). Provides Kestrel + Minimal API. -->
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
   </ItemGroup>
 
   <ItemGroup>

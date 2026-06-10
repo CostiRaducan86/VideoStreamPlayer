@@ -32,6 +32,7 @@ docs/inputs/
 # Specific technical documents are kept locally
 docs/Aurix_Docs/
 docs/LSM_CAN_Docs/
+docs/api_example/
 
 # Aurix ADS local/generated/vendor artifacts
 Aurix_Firmware/.ads/
