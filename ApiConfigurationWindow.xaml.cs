@@ -49,12 +49,14 @@ public partial class ApiConfigurationWindow : Window
         if (_showPassword)
         {
             TxtApiKey.Text = _currentApiKey;
-            TxtEyeIcon.Text = "👁";  // open eye = visible
+            TxtEyeIcon.Text = "\uD83D\uDC41";  // 👁 open eye = key visible
+            BtnCopyKey.Visibility = Visibility.Visible;
         }
         else
         {
             TxtApiKey.Text = _currentApiKey.Length > 0 ? new string('•', _currentApiKey.Length) : string.Empty;
-            TxtEyeIcon.Text = "🚫";  // crossed = hidden (will use Path below)
+            TxtEyeIcon.Text = "\uD83D\uDC41\u200D\uD83D\uDDE8";  // 👁‍🗨 eye with line = hidden
+            BtnCopyKey.Visibility = Visibility.Collapsed;
         }
     }
 
@@ -62,6 +64,14 @@ public partial class ApiConfigurationWindow : Window
     {
         _showPassword = !_showPassword;
         UpdatePasswordDisplay();
+    }
+
+    private void BtnCopyKey_Click(object sender, RoutedEventArgs e)
+    {
+        if (!string.IsNullOrEmpty(_currentApiKey))
+        {
+            Clipboard.SetText(_currentApiKey);
+        }
     }
 
     private void BtnGenerateKey_Click(object sender, RoutedEventArgs e)
@@ -180,6 +190,13 @@ public partial class ApiConfigurationWindow : Window
             DiagnosticLogger.Log(
                 $"[api] Settings saved. Remote={allowRemote}, " +
                 $"Bind={bindAddress}:{port}, CIDRs={cidrs.Length}");
+
+            MessageBox.Show(
+                "API configuration saved successfully.\n\n" +
+                "Restart the application for changes to take full effect.",
+                "Success",
+                MessageBoxButton.OK,
+                MessageBoxImage.Information);
 
             Close();
         }
