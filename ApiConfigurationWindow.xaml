@@ -3,76 +3,74 @@
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     Title="API Configuration"
-    SizeToContent="WidthAndHeight"
+    Width="520" Height="580"
     ResizeMode="NoResize"
     WindowStartupLocation="CenterOwner"
-    Background="#F0F0F0"
     Padding="20">
-    <Grid>
-        <StackPanel Orientation="Vertical">
+    <DockPanel LastChildFill="True">
+        <!-- OK button at the bottom, centered (same style as Hardware Configuration) -->
+        <Button x:Name="BtnOK" DockPanel.Dock="Bottom" Content="OK" 
+                Padding="24,4,24,4" HorizontalAlignment="Center" Margin="0,8,0,8"
+                Click="BtnOK_Click" />
+
+        <StackPanel Orientation="Vertical" Margin="10">
             
             <!-- Remote Access Section -->
-            <GroupBox Header="Remote Access" Padding="15" BorderBrush="#999" BorderThickness="1" Margin="0,0,0,15">
+            <GroupBox Header="Remote Access" Padding="10" Margin="0,0,0,10">
                 <StackPanel Orientation="Vertical">
-                    <CheckBox x:Name="ChkAllowRemote" Content="Allow Remote Access" VerticalAlignment="Center" Margin="0,0,0,10" />
+                    <CheckBox x:Name="ChkAllowRemote" Content="Allow Remote Access" VerticalAlignment="Center" Margin="0,0,0,8" />
                     
-                    <StackPanel Orientation="Horizontal" Margin="0,0,0,10">
-                        <Label Content="Bind Address:" Width="120" VerticalAlignment="Center" />
-                        <TextBox x:Name="TxtBindAddress" Width="200" Padding="5" />
+                    <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
+                        <Label Content="Bind Address:" Width="100" VerticalAlignment="Center" />
+                        <TextBox x:Name="TxtBindAddress" Width="200" Padding="4,2" VerticalAlignment="Center" />
                     </StackPanel>
                     
                     <StackPanel Orientation="Horizontal">
-                        <Label Content="Port:" Width="120" VerticalAlignment="Center" />
-                        <TextBox x:Name="TxtPort" Width="100" Padding="5" />
+                        <Label Content="Port:" Width="100" VerticalAlignment="Center" />
+                        <TextBox x:Name="TxtPort" Width="80" Padding="4,2" VerticalAlignment="Center" />
                     </StackPanel>
                 </StackPanel>
             </GroupBox>
 
             <!-- API Key Section -->
-            <GroupBox Header="API Key" Padding="15" BorderBrush="#999" BorderThickness="1" Margin="0,0,0,15">
+            <GroupBox Header="API Key" Padding="10" Margin="0,0,0,10">
                 <StackPanel Orientation="Vertical">
                     
-                    <StackPanel Orientation="Horizontal" Margin="0,0,0,10">
-                        <TextBox x:Name="TxtApiKey" Width="280" Padding="5" IsReadOnly="True" 
-                                 Foreground="Gray" Background="#E8E8E8" VerticalAlignment="Center" />
-                        <Button x:Name="BtnToggleShowPassword" Width="40" Height="32" Margin="10,0,0,0"
-                                Content="👁️" ToolTip="Show/Hide" Click="BtnToggleShowPassword_Click" />
+                    <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
+                        <TextBox x:Name="TxtApiKey" Width="350" Padding="4,2" IsReadOnly="True" 
+                                 Foreground="Gray" Background="#F0F0F0" VerticalAlignment="Center" />
+                        <Button x:Name="BtnToggleShowPassword" Width="32" Height="26" Margin="8,0,0,0"
+                                ToolTip="Show/Hide" Click="BtnToggleShowPassword_Click" VerticalAlignment="Center">
+                            <TextBlock x:Name="TxtEyeIcon" Text="👁" FontSize="14" />
+                        </Button>
                     </StackPanel>
                     
-                    <Button x:Name="BtnRotateKey" Width="150" Height="32" Content="Rotate Key" 
-                            Click="BtnRotateKey_Click" HorizontalAlignment="Left" Background="#FF6B6B" Foreground="White" Margin="0,0,0,10" />
+                    <Button x:Name="BtnGenerateKey" Padding="12,4,12,4" Content="Generate Key" 
+                            Click="BtnGenerateKey_Click" HorizontalAlignment="Left" Margin="0,0,0,8" />
                     
                     <TextBlock Foreground="Gray" FontSize="11" TextWrapping="Wrap">
-                        Note: Rotating the key will invalidate the previous token immediately. 
+                        Note: Generating a new key will invalidate the previous token immediately. 
                         Remote clients must use the new token.
                     </TextBlock>
                 </StackPanel>
             </GroupBox>
 
             <!-- Allowed CIDRs Section -->
-            <GroupBox Header="Allowed CIDR Ranges" Padding="15" BorderBrush="#999" BorderThickness="1" Margin="0,0,0,15">
+            <GroupBox Header="Allowed CIDR Ranges" Padding="10" Margin="0,0,0,10">
                 <StackPanel Orientation="Vertical">
-                    <TextBlock Foreground="Gray" FontSize="11" Margin="0,0,0,10">
+                    <TextBlock Foreground="Gray" FontSize="11" Margin="0,0,0,8">
                         Remote IPs outside these ranges will be rejected (e.g., 10.168.50.0/24)
                     </TextBlock>
                     
-                    <ListBox x:Name="LstCidrs" Height="120" BorderBrush="#CCC" BorderThickness="1" Margin="0,0,0,10" />
+                    <ListBox x:Name="LstCidrs" Height="100" Margin="0,0,0,8" />
                     
                     <StackPanel Orientation="Horizontal">
-                        <TextBox x:Name="TxtNewCidr" Width="200" Padding="5" Margin="0,0,10,0" />
-                        <Button x:Name="BtnAddCidr" Width="60" Height="32" Content="Add" Click="BtnAddCidr_Click" Margin="0,0,10,0" />
-                        <Button x:Name="BtnRemoveCidr" Width="60" Height="32" Content="Remove" Click="BtnRemoveCidr_Click" />
+                        <TextBox x:Name="TxtNewCidr" Width="200" Padding="4,2" VerticalAlignment="Center" />
+                        <Button x:Name="BtnAddCidr" Padding="12,4,12,4" Content="Add" Click="BtnAddCidr_Click" Margin="8,0,0,0" />
+                        <Button x:Name="BtnRemoveCidr" Padding="12,4,12,4" Content="Remove" Click="BtnRemoveCidr_Click" Margin="8,0,0,0" />
                     </StackPanel>
                 </StackPanel>
             </GroupBox>
-
-            <!-- Buttons -->
-            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,10,0,0">
-                <Button x:Name="BtnOK" Width="80" Height="32" Content="OK" Click="BtnOK_Click" 
-                        Background="#4CAF50" Foreground="White" Margin="0,0,10,0" />
-                <Button x:Name="BtnCancel" Width="80" Height="32" Content="Cancel" Click="BtnCancel_Click" 
-                        Background="#999" Foreground="White" />
-            </StackPanel>
         </StackPanel>
-    </Grid>
+    </DockPanel>
 </Window>

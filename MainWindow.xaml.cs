@@ -4558,6 +4558,14 @@ namespace VilsSharpX
         {
             if (_apiConfigWindow != null && _apiConfigWindow.IsVisible) { _apiConfigWindow.Activate(); return; }
             _apiConfigWindow = new ApiConfigurationWindow { Owner = this };
+            _apiConfigWindow.OnSettingsSaved = (allowRemote, bindAddress, port, apiKey, cidrs) =>
+            {
+                _apiAllowRemote = allowRemote;
+                _apiBindAddress = bindAddress;
+                _apiPort = port;
+                _apiKey = apiKey;
+                _apiAllowedCidrs = cidrs;
+            };
             _apiConfigWindow.Closed += (_, _) => _apiConfigWindow = null;
             _apiConfigWindow.Show();
         }
