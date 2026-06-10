@@ -49,13 +49,13 @@ public partial class ApiConfigurationWindow : Window
         if (_showPassword)
         {
             TxtApiKey.Text = _currentApiKey;
-            TxtEyeIcon.Text = "\uD83D\uDC41";  // 👁 open eye = key visible
+            EyeSlashLine.Visibility = Visibility.Collapsed;  // no slash = eye open = visible
             BtnCopyKey.Visibility = Visibility.Visible;
         }
         else
         {
             TxtApiKey.Text = _currentApiKey.Length > 0 ? new string('•', _currentApiKey.Length) : string.Empty;
-            TxtEyeIcon.Text = "\uD83D\uDC41\u200D\uD83D\uDDE8";  // 👁‍🗨 eye with line = hidden
+            EyeSlashLine.Visibility = Visibility.Visible;  // slash through eye = hidden
             BtnCopyKey.Visibility = Visibility.Collapsed;
         }
     }
@@ -109,28 +109,126 @@ public partial class ApiConfigurationWindow : Window
 
     private void BtnAddCidr_Click(object sender, RoutedEventArgs e)
     {
-        string cidr = TxtNewCidr.Text?.Trim() ?? string.Empty;
+        string input = TxtNewCidr.Text?.Trim() ?? string.Empty;
 
-        if (string.IsNullOrWhiteSpace(cidr))
+        if (string.IsNullOrWhiteSpace(input))
         {
-            MessageBox.Show("Please enter a valid CIDR range (e.g., 10.168.50.0/24)", "Validation", MessageBoxButton.OK, MessageBoxImage.Warning);
+            MessageBox.Show("Enter a CIDR (10.168.50.0/24), single IP (10.168.55.149),\nor IP range (10.168.55.149/151).", "Validation", MessageBoxButton.OK, MessageBoxImage.Warning);
             return;
         }
 
-        if (!ValidateCidr(cidr))
+        // Expand input into one or more entries to add
+        var entries = ExpandIpInput(input);
+        if (entries == null)
         {
-            MessageBox.Show("Invalid CIDR format. Use: XXX.XXX.XXX.XXX/NN (prefix max 32 for IPv4)", "Validation", MessageBoxButton.OK, MessageBoxImage.Warning);
+            MessageBox.Show("Invalid format. Accepted:\n" +
+                "• CIDR: 10.168.50.0/24\n" +
+                "• Single IP: 10.168.55.149\n" +
+                "• IP range: 10.168.55.149/151 (last octet range)",
+                "Validation", MessageBoxButton.OK, MessageBoxImage.Warning);
             return;
         }
 
-        if (_cidrs.Contains(cidr))
+        foreach (var entry in entries)
         {
-            MessageBox.Show("This CIDR range is already in the list.", "Duplicate", MessageBoxButton.OK, MessageBoxImage.Information);
-            return;
+            if (!_cidrs.Contains(entry))
+                _cidrs.Add(entry);
         }
 
-        _cidrs.Add(cidr);
         TxtNewCidr.Clear();
+    }
+
+    /// <summary>
+    /// Expands user input into CIDR entries. Supports:
+    /// - Standard CIDR: "10.168.50.0/24" (prefix 0-32)
+    /// - Single IP: "10.168.55.149" → "10.168.55.149/32"
+    /// - IP range: "10.168.55.149/151" → individual /32 entries for .149, .150, .151
+    /// Returns null if input is invalid.
+    /// </summary>
+    private static string[]? ExpandIpInput(string input)
+    {
+        if (input.Contains(':'))
+        {
+            // IPv6 CIDR — just validate prefix
+            var parts = input.Split('/');
+            if (parts.Length == 2 && int.TryParse(parts[1], out int pfx) && pfx >= 0 && pfx <= 128)
+                return [input];
+            return null;
+        }
+
+        if (!input.Contains('/'))
+        {
+            // Single IP (no slash) — validate it looks like an IPv4 address
+            if (IsValidIpv4(input))
+                return [$"{input}/32"];
+            return null;
+        }
+
+        // Has a slash — could be CIDR or IP range
+        var slashParts = input.Split('/');
+        if (slashParts.Length != 2)
+            return null;
+
+        string ipPart = slashParts[0];
+        string suffixPart = slashParts[1];
+
+        if (!int.TryParse(suffixPart, out int suffixValue))
+            return null;
+
+        // Standard CIDR: prefix is 0-32
+        if (suffixValue >= 0 && suffixValue <= 32 && IsValidIpv4(ipPart))
+        {
+            // Disambiguate: if suffix > last octet, it's likely a range, not a CIDR prefix
+            var octets = ipPart.Split('.');
+            int lastOctet = int.Parse(octets[3]);
+
+            if (suffixValue > 32)
+            {
+                // Definitely a range
+            }
+            else if (suffixValue > lastOctet && suffixValue <= 255)
+            {
+                // Looks like a range (e.g., 10.168.55.149/151 — 151 > 32 handled above,
+                // but 10.168.55.5/8 is ambiguous; treat as CIDR /8 since <= 32)
+                // For values > 32, always range. For <= 32, assume CIDR.
+                return [input];
+            }
+            else
+            {
+                return [input];
+            }
+        }
+
+        // IP range: suffix is 33-255 (must be > 32 to distinguish from CIDR prefix)
+        if (IsValidIpv4(ipPart) && suffixValue > 32 && suffixValue <= 255)
+        {
+            var octets = ipPart.Split('.');
+            int lastOctet = int.Parse(octets[3]);
+            string basePrefix = $"{octets[0]}.{octets[1]}.{octets[2]}";
+
+            if (suffixValue < lastOctet)
+                return null;  // range end < range start
+
+            var result = new System.Collections.Generic.List<string>();
+            for (int i = lastOctet; i <= suffixValue; i++)
+                result.Add($"{basePrefix}.{i}/32");
+
+            return [.. result];
+        }
+
+        return null;
+    }
+
+    private static bool IsValidIpv4(string ip)
+    {
+        var octets = ip.Split('.');
+        if (octets.Length != 4) return false;
+        foreach (var o in octets)
+        {
+            if (!int.TryParse(o, out int v) || v < 0 || v > 255)
+                return false;
+        }
+        return true;
     }
 
     private void BtnRemoveCidr_Click(object sender, RoutedEventArgs e)
@@ -139,24 +237,6 @@ public partial class ApiConfigurationWindow : Window
             _cidrs.Remove(selectedCidr);
         else
             MessageBox.Show("Please select a CIDR range to remove.", "Selection Required", MessageBoxButton.OK, MessageBoxImage.Information);
-    }
-
-    private static bool ValidateCidr(string cidr)
-    {
-        if (string.IsNullOrWhiteSpace(cidr))
-            return false;
-
-        var parts = cidr.Split('/');
-        if (parts.Length != 2)
-            return false;
-
-        if (!int.TryParse(parts[1], out int prefixLength))
-            return false;
-
-        bool isIpv6 = parts[0].Contains(':');
-        int maxPrefix = isIpv6 ? 128 : 32;
-
-        return prefixLength >= 0 && prefixLength <= maxPrefix;
     }
 
     private void BtnOK_Click(object sender, RoutedEventArgs e)
