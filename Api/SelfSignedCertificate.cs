@@ -144,6 +144,24 @@ internal static class SelfSignedCertificate
             sanBuilder.AddIpAddress(bindIp);
             DiagnosticLogger.Log($"[cert] Adding bind IP to SAN: {bindAddress}");
         }
+        else if (bindAddress == "0.0.0.0" || bindAddress == "::")
+        {
+            // When binding all interfaces, add every non-loopback IPv4 address to SAN
+            // so remote clients can validate the cert against the server's actual IP.
+            try
+            {
+                var host = System.Net.Dns.GetHostEntry(System.Net.Dns.GetHostName());
+                foreach (var addr in host.AddressList)
+                {
+                    if (addr.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork && !IPAddress.IsLoopback(addr))
+                    {
+                        sanBuilder.AddIpAddress(addr);
+                        DiagnosticLogger.Log($"[cert] Adding local IP to SAN: {addr}");
+                    }
+                }
+            }
+            catch { /* DNS lookup failed — cert will only have localhost SANs */ }
+        }
         else if (bindAddress != "0.0.0.0" && bindAddress != "::")
         {
             // If it's a hostname, add it too

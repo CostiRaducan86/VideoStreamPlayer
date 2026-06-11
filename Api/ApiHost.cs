@@ -82,17 +82,25 @@ namespace VilsSharpX.Api
 
                 builder.WebHost.ConfigureKestrel(options =>
                 {
-                    // Primary: HTTPS on the configured bind address (remote clients)
-                    var listenIp = bindIsAllInterfaces ? IPAddress.Any : IPAddress.Parse(_bindAddress);
-                    options.Listen(listenIp, _port, listenOptions =>
+                    if (bindIsAllInterfaces)
                     {
-                        listenOptions.UseHttps(cert);
-                    });
-
-                    // Secondary: plain HTTP on loopback only (local tools, no cert needed)
-                    // Skip if bind is already loopback or 0.0.0.0 (which includes loopback)
-                    if (!bindIsLoopback && !bindIsAllInterfaces)
+                        // Bind HTTPS on each non-loopback IP individually so loopback stays free for HTTP.
+                        foreach (var ip in GetNonLoopbackIPv4Addresses())
+                        {
+                            options.Listen(ip, _port, lo => lo.UseHttps(cert));
+                        }
+                        // Plain HTTP on loopback — local tools always work without certs.
+                        options.Listen(IPAddress.Loopback, _port);
+                    }
+                    else if (bindIsLoopback)
                     {
+                        // Only loopback requested — HTTPS on loopback (user explicitly chose this).
+                        options.Listen(IPAddress.Loopback, _port, lo => lo.UseHttps(cert));
+                    }
+                    else
+                    {
+                        // Specific IP: HTTPS on that IP + plain HTTP on loopback.
+                        options.Listen(IPAddress.Parse(_bindAddress), _port, lo => lo.UseHttps(cert));
                         options.Listen(IPAddress.Loopback, _port);
                     }
                 });
@@ -301,6 +309,26 @@ namespace VilsSharpX.Api
                 return false;
 
             return IPAddress.IsLoopback(ip);
+        }
+
+        /// <summary>
+        /// Returns all non-loopback IPv4 addresses assigned to this machine.
+        /// Used when bind is "0.0.0.0" + HTTPS so each IP gets its own HTTPS listener
+        /// while loopback stays free for plain HTTP.
+        /// </summary>
+        private static IPAddress[] GetNonLoopbackIPv4Addresses()
+        {
+            try
+            {
+                var host = Dns.GetHostEntry(Dns.GetHostName());
+                return host.AddressList
+                    .Where(a => a.AddressFamily == AddressFamily.InterNetwork && !IPAddress.IsLoopback(a))
+                    .ToArray();
+            }
+            catch
+            {
+                return [];
+            }
         }
 
         private sealed class CidrRange
