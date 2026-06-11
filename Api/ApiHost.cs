@@ -4,6 +4,7 @@ using System.Linq;
 using System.Net;
 using System.Net.NetworkInformation;
 using System.Net.Sockets;
+using System.Security.Authentication;
 using System.Security.Cryptography.X509Certificates;
 using System.Text.Json;
 using System.Threading;
@@ -90,7 +91,7 @@ namespace VilsSharpX.Api
                         DiagnosticLogger.Log($"[api] HTTPS bind 0.0.0.0: found {ips.Length} non-loopback IPs: {string.Join(", ", ips.Select(i => i.ToString()))}");
                         foreach (var ip in ips)
                         {
-                            options.Listen(ip, _port, lo => lo.UseHttps(cert));
+                            options.Listen(ip, _port, lo => ConfigureHttps(lo, cert));
                         }
                         // Plain HTTP on loopback — local tools always work without certs.
                         options.Listen(IPAddress.Loopback, _port);
@@ -98,12 +99,12 @@ namespace VilsSharpX.Api
                     else if (bindIsLoopback)
                     {
                         // Only loopback requested — HTTPS on loopback (user explicitly chose this).
-                        options.Listen(IPAddress.Loopback, _port, lo => lo.UseHttps(cert));
+                        options.Listen(IPAddress.Loopback, _port, lo => ConfigureHttps(lo, cert));
                     }
                     else
                     {
                         // Specific IP: HTTPS on that IP + plain HTTP on loopback.
-                        options.Listen(IPAddress.Parse(_bindAddress), _port, lo => lo.UseHttps(cert));
+                        options.Listen(IPAddress.Parse(_bindAddress), _port, lo => ConfigureHttps(lo, cert));
                         options.Listen(IPAddress.Loopback, _port);
                     }
                 });
@@ -312,6 +313,21 @@ namespace VilsSharpX.Api
                 return false;
 
             return IPAddress.IsLoopback(ip);
+        }
+
+        /// <summary>
+        /// Configures an HTTPS listener with the given certificate and an explicit
+        /// SSL protocol set (TLS 1.2 + 1.3). Pinning the protocols avoids handshake
+        /// failures with older clients (e.g. PowerShell 5.1 / .NET Framework) that
+        /// negotiate poorly when the server leaves protocol selection to the OS default.
+        /// </summary>
+        private static void ConfigureHttps(Microsoft.AspNetCore.Server.Kestrel.Core.ListenOptions listenOptions, X509Certificate2 cert)
+        {
+            listenOptions.UseHttps(httpsOptions =>
+            {
+                httpsOptions.ServerCertificate = cert;
+                httpsOptions.SslProtocols = SslProtocols.Tls12 | SslProtocols.Tls13;
+            });
         }
 
         /// <summary>

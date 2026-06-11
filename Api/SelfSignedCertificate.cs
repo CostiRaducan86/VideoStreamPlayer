@@ -95,15 +95,18 @@ internal static class SelfSignedCertificate
 
         using var ephemeral = request.CreateSelfSigned(notBefore, notAfter);
 
-        // Round-trip through PFX bytes so the resulting cert has a Schannel-compatible
-        // private key without touching the Windows cert store or needing admin rights.
+        // CRITICAL for Windows Schannel: the private key must live in a key container,
+        // not an ephemeral/in-memory key, otherwise the server-side TLS handshake fails
+        // with "An unexpected error occurred on a send". Round-trip through PFX and load
+        // with PersistKeySet (user-level key store — no admin required) so Schannel can
+        // access the key during the handshake.
         byte[] pfxBytes = ephemeral.Export(X509ContentType.Pfx);
         var cert = new X509Certificate2(
             pfxBytes,
             (string?)null,
-            X509KeyStorageFlags.Exportable | X509KeyStorageFlags.UserKeySet);
+            X509KeyStorageFlags.PersistKeySet | X509KeyStorageFlags.Exportable);
 
-        DiagnosticLogger.Log($"[api] Self-signed TLS certificate generated (thumbprint={cert.Thumbprint}, valid until {notAfter:yyyy-MM-dd})");
+        DiagnosticLogger.Log($"[api] Self-signed TLS certificate generated (thumbprint={cert.Thumbprint}, hasPrivateKey={cert.HasPrivateKey}, valid until {notAfter:yyyy-MM-dd})");
         return cert;
     }
 }
