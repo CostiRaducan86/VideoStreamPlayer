@@ -57,8 +57,15 @@ namespace VilsSharpX.Api
         /// <summary>Base URL the API listens on (http or https).</summary>
         public string BaseUrl => $"{(_enableHttps ? "https" : "http")}://{_bindAddress}:{_port}";
 
+        /// <summary>Loopback URL always available for local access (HTTP, no auth).</summary>
+        public string LoopbackUrl => $"http://127.0.0.1:{_port}";
+
         /// <summary>
         /// Starts the host on a background thread. Safe to call once.
+        /// When HTTPS is enabled, binds BOTH:
+        ///   - HTTPS on the configured bind address (remote, requires auth)
+        ///   - HTTP on 127.0.0.1 (loopback, no auth required)
+        /// This ensures local tools always work without certificate trust issues.
         /// </summary>
         public void Start()
         {
@@ -70,12 +77,24 @@ namespace VilsSharpX.Api
             if (_enableHttps)
             {
                 var cert = SelfSignedCertificate.LoadCertificate(_bindAddress);
+                bool bindIsAllInterfaces = _bindAddress == "0.0.0.0" || _bindAddress == "::";
+                bool bindIsLoopback = IsLoopbackBindingAddress(_bindAddress);
+
                 builder.WebHost.ConfigureKestrel(options =>
                 {
-                    options.Listen(IPAddress.Parse(_bindAddress), _port, listenOptions =>
+                    // Primary: HTTPS on the configured bind address (remote clients)
+                    var listenIp = bindIsAllInterfaces ? IPAddress.Any : IPAddress.Parse(_bindAddress);
+                    options.Listen(listenIp, _port, listenOptions =>
                     {
                         listenOptions.UseHttps(cert);
                     });
+
+                    // Secondary: plain HTTP on loopback only (local tools, no cert needed)
+                    // Skip if bind is already loopback or 0.0.0.0 (which includes loopback)
+                    if (!bindIsLoopback && !bindIsAllInterfaces)
+                    {
+                        options.Listen(IPAddress.Loopback, _port);
+                    }
                 });
             }
             else

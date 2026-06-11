@@ -8,8 +8,6 @@ remote access with full authentication and transport encryption.
 
 **Base URL**: `http://127.0.0.1:8420` (default) or `https://<bind-address>:<port>` when HTTPS is enabled.
 
----
-
 ## Quick Start
 
 ### 1. Enable Remote Access (optional)
@@ -17,7 +15,7 @@ remote access with full authentication and transport encryption.
 By default the API only listens on `127.0.0.1` and requires no authentication.
 To allow remote clients:
 
-1. Open **Configuration → API Configuration** in VilsSharpX.
+1. Open **Configuration > API Configuration** in VilsSharpX.
 2. Check **Allow Remote Access**.
 3. Optionally check **Enable HTTPS (TLS)** for encrypted transport.
 4. Set the **Bind Address** to `0.0.0.0` (all interfaces) or a specific NIC IP.
@@ -27,28 +25,34 @@ To allow remote clients:
 
 ### 2. Test Connectivity
 
-```bash
-# Loopback (no auth required)
-curl http://127.0.0.1:8420/api/v1/health
+```powershell
+# LOCAL — always works (HTTP loopback, no auth needed, even with HTTPS enabled)
+Invoke-RestMethod -Uri "http://127.0.0.1:8420/api/v1/health"
 
-# Remote with API key
-curl -H "X-Api-Key: YOUR_TOKEN_HERE" https://10.168.55.100:8420/api/v1/health
-
-# Remote HTTPS (self-signed cert — skip verification for testing)
-curl -k -H "X-Api-Key: YOUR_TOKEN_HERE" https://10.168.55.100:8420/api/v1/health
+# REMOTE — requires X-Api-Key header + HTTPS
+$headers = @{ "X-Api-Key" = "YOUR_TOKEN_HERE" }
+Invoke-RestMethod -Uri "https://10.168.50.102:8420/api/v1/health/details" -Headers $headers
 ```
 
----
-
-## Authentication & Security
+## Authentication and Security
 
 ### Transport Layer
 
-| Mode | Binding | Encryption |
-|------|---------|-----------|
-| Loopback (default) | `127.0.0.1:8420` | None (HTTP) — safe, traffic never leaves machine |
-| Remote HTTP | `0.0.0.0:8420` | None — **not recommended** for production |
-| Remote HTTPS | `0.0.0.0:8420` | TLS 1.2/1.3 with self-signed RSA-2048 certificate |
+| Mode            | Binding             | Encryption                                           |
+| --------------- | ------------------- | ---------------------------------------------------- |
+| Loopback        | `127.0.0.1:8420`    | None (HTTP) — safe, traffic never leaves machine     |
+| Remote HTTP     | `<bind-ip>:8420`    | None — **not recommended** for production            |
+| Remote HTTPS    | `<bind-ip>:8420`    | TLS 1.2/1.3 with self-signed RSA-2048 certificate    |
+
+### Dual-Bind Architecture (HTTPS mode)
+
+When HTTPS is enabled and the bind address is a specific remote IP (e.g. `10.168.50.102`),
+Kestrel binds **two** listeners on the same port:
+
+- **HTTPS** on the configured IP (remote clients, requires API key)
+- **HTTP** on `127.0.0.1` (local tools, no certificate needed, no auth required)
+
+This means `http://127.0.0.1:8420` always works locally regardless of HTTPS settings.
 
 ### HTTPS Certificate
 
@@ -58,64 +62,59 @@ When HTTPS is enabled, VilsSharpX automatically generates a self-signed X.509 ce
 - **Subject**: `CN=VilsSharpX Automation API`
 - **Key**: RSA 2048-bit
 - **Validity**: 5 years (auto-regenerated 30 days before expiry)
-- **SANs**: `localhost`, `127.0.0.1`, `::1`, `*.local`
+- **SANs**: `localhost`, `127.0.0.1`, `::1`, `*.local`, plus the configured bind IP
 
-**For remote clients** the certificate must be trusted explicitly (imported into the OS/browser trust store) or verification must be disabled in test environments (`-k` in curl, `verify=False` in Python requests).
+The bind IP address is automatically added to the certificate SAN, so remote clients
+connecting to `https://<bind-ip>:8420` can validate the certificate without bypass flags.
 
 ### Authentication Flow
 
-```
-┌─────────────┐          ┌──────────────────┐
-│   Client    │          │   VilsSharpX     │
-│             │──────────│   REST API       │
-└─────────────┘          └──────────────────┘
-
+```text
 1. Is source IP == 127.0.0.1 (loopback)?
-   → YES: Allow (no header required)
+   YES -> Allow (no header required)
 
 2. Is source IP in the CIDR allowlist?
-   → NO: Reject 401
+   NO  -> Reject 401
 
 3. Does request contain valid X-Api-Key header?
-   → NO: Reject 401
-   → YES: Allow
+   NO  -> Reject 401
+   YES -> Allow
 ```
 
 ### X-Api-Key Header
 
 Remote requests must include the `X-Api-Key` HTTP header:
 
-```
+```text
 X-Api-Key: wN3xK7p2mQ9... (base64url token, ~43 chars)
 ```
 
-The key is generated cryptographically (32 bytes → base64url) and stored encrypted via
+The key is generated cryptographically (32 bytes, base64url) and stored encrypted via
 Windows DPAPI on the host machine.
 
 ### IP Allowlist
 
 The allowlist supports three formats:
 
-| Format | Example | Description |
-|--------|---------|-------------|
-| Single IP | `10.168.55.149` | Exactly one host |
-| IP Range | `10.168.55.149-155` | Last octet range (inclusive) |
-| CIDR (legacy) | `10.168.50.0/24` | Subnet notation |
+| Format       | Example              | Description                     |
+| ------------ | -------------------- | ------------------------------- |
+| Single IP    | `10.168.55.149`      | Exactly one host                |
+| IP Range     | `10.168.55.149-155`  | Last octet range (inclusive)    |
+| CIDR         | `10.168.50.0/24`     | Subnet notation                 |
 
 At runtime, single IPs are expanded to `/32` and ranges are expanded to individual `/32` entries.
 An empty allowlist means **all remote IPs are allowed** (only API key is checked).
-
----
 
 ## Endpoints
 
 All endpoints are prefixed with `/api/v1/`.
 
-### `GET /api/v1/health`
+### GET /api/v1/health
 
 Lightweight health probe. No authentication required (even for remote).
 
 **Response** (200 OK):
+
 ```json
 {
   "ok": true,
@@ -123,29 +122,28 @@ Lightweight health probe. No authentication required (even for remote).
 }
 ```
 
----
-
-### `GET /api/v1/health/details`
+### GET /api/v1/health/details
 
 Detailed host status including security configuration. Requires authentication for remote clients.
 
 **Response** (200 OK):
+
 ```json
 {
   "ok": true,
   "utc": "2026-06-11T14:30:00.000Z",
   "host": {
-    "bindAddress": "0.0.0.0",
+    "bindAddress": "10.168.50.102",
     "port": 8420,
-    "baseUrl": "https://0.0.0.0:8420",
+    "baseUrl": "https://10.168.50.102:8420",
     "isLoopbackBinding": false,
     "remoteRequestsEnabled": true,
     "apiKeyRequiredForRemote": true,
     "allowlistEnabled": true,
-    "allowlistCidrs": ["10.168.55.149/32", "10.168.55.150/32"]
+    "allowlistCidrs": ["10.168.55.140/32", "10.168.50.149/32"]
   },
   "request": {
-    "remoteIp": "10.168.55.149",
+    "remoteIp": "10.168.55.140",
     "isLoopback": false,
     "remoteIpAllowed": true,
     "hasApiKeyHeader": true
@@ -153,13 +151,12 @@ Detailed host status including security configuration. Requires authentication f
 }
 ```
 
----
-
-### `GET /api/v1/commands`
+### GET /api/v1/commands
 
 Lists all supported command names. Requires authentication for remote clients.
 
 **Response** (200 OK):
+
 ```json
 {
   "commands": [
@@ -175,33 +172,34 @@ Lists all supported command names. Requires authentication for remote clients.
 }
 ```
 
----
-
-### `POST /api/v1/command`
+### POST /api/v1/command
 
 Executes a command. All commands use the same envelope format.
 
 **Request Body**:
+
 ```json
 {
   "command": "CommandName",
   "requestId": "optional-correlation-id",
-  "payload": { /* command-specific fields */ }
+  "payload": {}
 }
 ```
 
 **Success Response** (200 OK):
+
 ```json
 {
   "requestId": "optional-correlation-id",
   "ok": true,
   "command": "CommandName",
-  "data": { /* command-specific response */ },
+  "data": {},
   "error": null
 }
 ```
 
 **Error Response** (4xx/5xx):
+
 ```json
 {
   "requestId": "optional-correlation-id",
@@ -216,8 +214,6 @@ Executes a command. All commands use the same envelope format.
 }
 ```
 
----
-
 ## Commands Reference
 
 ### Ping
@@ -229,6 +225,7 @@ Tests connectivity and returns the current application state.
 ```
 
 **Response data**:
+
 ```json
 {
   "pong": true,
@@ -237,8 +234,6 @@ Tests connectivity and returns the current application state.
   "isPaused": false
 }
 ```
-
----
 
 ### StartSimulation
 
@@ -251,16 +246,15 @@ Starts the capture/playback pipeline. If already running and paused, resumes ins
 }
 ```
 
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `fps` | int | 100 | Target frame rate (clamped to ≥1) |
+| Field | Type | Default | Description                     |
+| ----- | ---- | ------- | ------------------------------- |
+| `fps` | int  | 100     | Target frame rate (clamped >=1) |
 
 **Response data**:
+
 ```json
 { "started": true, "fps": 100 }
 ```
-
----
 
 ### StopSimulation
 
@@ -271,11 +265,10 @@ Stops the active capture/playback session.
 ```
 
 **Response data**:
+
 ```json
 { "stopped": true }
 ```
-
----
 
 ### PauseSimulation
 
@@ -286,11 +279,10 @@ Pauses the active session (freezes all panes).
 ```
 
 **Response data**:
+
 ```json
 { "paused": true }
 ```
-
----
 
 ### ResumeSimulation
 
@@ -301,11 +293,10 @@ Resumes a paused session.
 ```
 
 **Response data**:
+
 ```json
 { "resumed": true }
 ```
-
----
 
 ### SetComparisonSettings
 
@@ -323,17 +314,16 @@ Updates comparison parameters. Only provided fields are applied; omitted fields 
 ```
 
 | Field | Type | Range | Description |
-|-------|------|-------|-------------|
-| `mode` | int | 0–2 | 0=LVDS-AVTP, 1=LSM-LVDS, 2=LSM-AVTP |
-| `deadband` | int | 0–255 | Pixel deviation below this is considered "green" |
+| --- | --- | --- | --- |
+| `mode` | int | 0-2 | 0=LVDS-AVTP, 1=LSM-LVDS, 2=LSM-AVTP |
+| `deadband` | int | 0-255 | Pixel deviation below this is considered "green" |
 | `bDelta` | int | any | Value offset applied to B frame before comparison |
 
 **Response data**:
+
 ```json
 { "updated": true, "mode": 0, "deadband": 5, "bDelta": 0 }
 ```
-
----
 
 ### GetComparisonStats
 
@@ -344,6 +334,7 @@ Returns the most recent comparison statistics (updated each render cycle).
 ```
 
 **Response data**:
+
 ```json
 {
   "max_positive_dev": 12,
@@ -354,15 +345,13 @@ Returns the most recent comparison statistics (updated each render cycle).
 }
 ```
 
-| Field | Description |
-|-------|-------------|
-| `max_positive_dev` | Maximum B>A deviation (positive) |
-| `max_negative_dev` | Maximum B<A deviation (negative) |
-| `average_pixels_dev` | Mean absolute deviation across all pixels |
-| `total_pixels_dev` | Number of pixels exceeding the deadband |
-| `total_dark_pixels` | Pixels where A>0 but B==0 (dark pixel defects) |
-
----
+| Field                | Description                                     |
+| -------------------- | ----------------------------------------------- |
+| `max_positive_dev`   | Maximum B>A deviation (positive)                |
+| `max_negative_dev`   | Maximum B<A deviation (negative)                |
+| `average_pixels_dev` | Mean absolute deviation across all pixels       |
+| `total_pixels_dev`   | Number of pixels exceeding the deadband         |
+| `total_dark_pixels`  | Pixels where A>0 but B==0 (dark pixel defects)  |
 
 ### GetFrameSnapshot
 
@@ -376,10 +365,11 @@ Captures a PNG snapshot of a specific pane.
 ```
 
 | Field | Type | Values | Description |
-|-------|------|--------|-------------|
+| --- | --- | --- | --- |
 | `pane` | string | `"A"`, `"B"`, `"D"` | Which visualization pane to capture |
 
 **Response data**:
+
 ```json
 {
   "pane": "D",
@@ -390,12 +380,10 @@ Captures a PNG snapshot of a specific pane.
 
 The `image` field is a base64-encoded PNG (Gray8 for A/B, BGR24 for D).
 
----
-
 ## Error Codes
 
 | Code | HTTP Status | Meaning |
-|------|-------------|---------|
+| --- | --- | --- |
 | `UNAUTHORIZED` | 401 | Missing/invalid API key or IP not in allowlist |
 | `BAD_REQUEST` | 400 | Invalid parameters or missing required fields |
 | `BAD_JSON` | 400 | Request body is not valid JSON |
@@ -403,7 +391,39 @@ The `image` field is a base64-encoded PNG (Gray8 for A/B, BGR24 for D).
 | `NOT_IMPLEMENTED` | 501 | Command exists but is not yet implemented |
 | `INTERNAL_ERROR` | 500 | Unexpected server-side error |
 
----
+## PowerShell Examples
+
+### Local (always works, no auth, no cert)
+
+```powershell
+# Health check
+Invoke-RestMethod -Uri "http://127.0.0.1:8420/api/v1/health"
+
+# Start simulation
+$body = '{"command":"StartSimulation","payload":{"fps":100}}'
+Invoke-RestMethod -Uri "http://127.0.0.1:8420/api/v1/command" -Method Post -Body $body -ContentType "application/json"
+
+# Get comparison stats
+$body = '{"command":"GetComparisonStats"}'
+Invoke-RestMethod -Uri "http://127.0.0.1:8420/api/v1/command" -Method Post -Body $body -ContentType "application/json"
+
+# Stop simulation
+$body = '{"command":"StopSimulation","payload":{}}'
+Invoke-RestMethod -Uri "http://127.0.0.1:8420/api/v1/command" -Method Post -Body $body -ContentType "application/json"
+```
+
+### Remote (HTTPS + API key)
+
+```powershell
+$headers = @{ "X-Api-Key" = "iDFrPdQ5AHYn4Xpbe21t-tZShV8QaIkCrd6GtHSFCwo" }
+
+# Health details
+Invoke-RestMethod -Uri "https://10.168.50.102:8420/api/v1/health/details" -Headers $headers
+
+# Ping
+$body = '{"command":"Ping"}'
+Invoke-RestMethod -Uri "https://10.168.50.102:8420/api/v1/command" -Method Post -Body $body -ContentType "application/json" -Headers $headers
+```
 
 ## Python SDK Example
 
@@ -411,6 +431,7 @@ The `image` field is a base64-encoded PNG (Gray8 for A/B, BGR24 for D).
 import requests
 import base64
 from pathlib import Path
+
 
 class VilsSharpXClient:
     """Minimal Python client for the VilsSharpX Automation API."""
@@ -459,9 +480,12 @@ class VilsSharpXClient:
 
     def set_comparison(self, mode=None, deadband=None, b_delta=None):
         payload = {}
-        if mode is not None: payload["mode"] = mode
-        if deadband is not None: payload["deadband"] = deadband
-        if b_delta is not None: payload["bDelta"] = b_delta
+        if mode is not None:
+            payload["mode"] = mode
+        if deadband is not None:
+            payload["deadband"] = deadband
+        if b_delta is not None:
+            payload["bDelta"] = b_delta
         return self.command("SetComparisonSettings", payload)
 
     def get_stats(self):
@@ -475,52 +499,19 @@ class VilsSharpXClient:
         return png_bytes
 
 
-# Usage example:
 if __name__ == "__main__":
     # Local (no auth needed)
     client = VilsSharpXClient()
-
-    # Remote with HTTPS + API key
-    # client = VilsSharpXClient(
-    #     base_url="https://10.168.55.100:8420",
-    #     api_key="wN3xK7p2mQ9...",
-    #     verify_ssl=False  # self-signed cert
-    # )
-
     print(client.health())
     print(client.ping())
 
-    client.start(fps=50)
-    client.set_comparison(deadband=3)
-    stats = client.get_stats()
-    print(f"Pixels deviating: {stats['total_pixels_dev']}")
-
-    client.get_snapshot("D", save_path="diff_snapshot.png")
-    client.stop()
+    # Remote with HTTPS + API key
+    # client = VilsSharpXClient(
+    #     base_url="https://10.168.50.102:8420",
+    #     api_key="iDFrPdQ5AHYn4Xpbe21t-tZShV8QaIkCrd6GtHSFCwo",
+    #     verify_ssl=True
+    # )
 ```
-
----
-
-## PowerShell Example
-
-```powershell
-$baseUrl = "http://127.0.0.1:8420"
-$headers = @{}  # No auth for loopback
-
-# Health check
-Invoke-RestMethod -Uri "$baseUrl/api/v1/health"
-
-# Start simulation
-$body = @{ command = "StartSimulation"; payload = @{ fps = 100 } } | ConvertTo-Json
-Invoke-RestMethod -Uri "$baseUrl/api/v1/command" -Method Post -Body $body -ContentType "application/json" -Headers $headers
-
-# Get comparison stats
-$body = @{ command = "GetComparisonStats" } | ConvertTo-Json
-$resp = Invoke-RestMethod -Uri "$baseUrl/api/v1/command" -Method Post -Body $body -ContentType "application/json" -Headers $headers
-$resp.data
-```
-
----
 
 ## Configuration Reference
 
@@ -528,56 +519,48 @@ Settings are stored in `%APPDATA%\VilsSharpX\settings.json`:
 
 ```json
 {
-  "ApiAllowRemote": false,
-  "ApiEnableHttps": false,
-  "ApiBindAddress": "127.0.0.1",
+  "ApiAllowRemote": true,
+  "ApiEnableHttps": true,
+  "ApiBindAddress": "10.168.50.102",
   "ApiPort": 8420,
   "ApiKeyProtected": "...(DPAPI encrypted)...",
-  "ApiAllowedCidrs": ["10.168.55.149", "10.168.55.200-210"]
+  "ApiAllowedCidrs": ["10.168.55.140-150", "10.168.50.149"]
 }
 ```
 
-| Field | Default | Description |
-|-------|---------|-------------|
-| `ApiAllowRemote` | `false` | Enable remote access (binds to configured address) |
-| `ApiEnableHttps` | `false` | Enable TLS transport with self-signed certificate |
-| `ApiBindAddress` | `127.0.0.1` | Network interface to bind to |
-| `ApiPort` | `8420` | TCP port |
-| `ApiKeyProtected` | `""` | DPAPI-encrypted API key |
-| `ApiAllowedCidrs` | `[]` | IP allowlist (single IPs, ranges, or CIDR notation) |
-
----
+| Field             | Default      | Description                                         |
+| ----------------- | ------------ | --------------------------------------------------- |
+| `ApiAllowRemote`  | `false`      | Enable remote access (binds to configured address)  |
+| `ApiEnableHttps`  | `false`      | Enable TLS transport with self-signed certificate   |
+| `ApiBindAddress`  | `127.0.0.1`  | Network interface to bind to                        |
+| `ApiPort`         | `8420`       | TCP port                                            |
+| `ApiKeyProtected` | `""`         | DPAPI-encrypted API key                             |
+| `ApiAllowedCidrs` | `[]`         | IP allowlist (single IPs, ranges, or CIDR notation) |
 
 ## Architecture
 
+```text
+VilsSharpX.exe
+  |
+  +-- Kestrel (HTTP on 127.0.0.1 + HTTPS on bind-ip)
+  |     |
+  |     +-- /api/v1/health          (no auth)
+  |     +-- /api/v1/health/details  (auth required for remote)
+  |     +-- /api/v1/commands        (auth required for remote)
+  |     +-- /api/v1/command         (auth required for remote)
+  |           |
+  |           v
+  |     CommandRouter.cs (dispatch + validation)
+  |           |
+  |           v
+  |     IGuiAutomationBridge (WPF MainWindow)
+  |
+  +-- Security Layer
+        - IP allowlist (CidrRange)
+        - X-Api-Key validation
+        - TLS (SelfSignedCertificate.cs)
+        - DPAPI key storage
 ```
-┌─────────────────────────────────────────────────────────┐
-│                    VilsSharpX.exe                        │
-│                                                         │
-│  ┌─────────────┐     ┌──────────────────────────────┐  │
-│  │  WPF UI     │     │  Kestrel (HTTP/HTTPS)        │  │
-│  │  (MainWindow│◄────┤  ApiHost.cs                   │  │
-│  │  .xaml.cs)  │     │  ├─ /api/v1/health           │  │
-│  │             │     │  ├─ /api/v1/health/details    │  │
-│  │  IGuiAuto-  │     │  ├─ /api/v1/commands         │  │
-│  │  mation-    │     │  └─ /api/v1/command           │  │
-│  │  Bridge     │     │       │                       │  │
-│  └─────────────┘     │       ▼                       │  │
-│                       │  CommandRouter.cs             │  │
-│                       │  (dispatch + validation)     │  │
-│                       └──────────────────────────────┘  │
-│                                                         │
-│  ┌─────────────────────────────────────────────────┐    │
-│  │  Security Layer                                  │    │
-│  │  • IP allowlist (CidrRange)                      │    │
-│  │  • X-Api-Key validation                          │    │
-│  │  • TLS (SelfSignedCertificate.cs)                │    │
-│  │  • DPAPI key storage                             │    │
-│  └─────────────────────────────────────────────────┘    │
-└─────────────────────────────────────────────────────────┘
-```
-
----
 
 ## Versioning
 
