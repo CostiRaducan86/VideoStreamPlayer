@@ -78,6 +78,13 @@ namespace VilsSharpX.Api
 
             if (_enableHttps)
             {
+                // Forward Kestrel warnings/errors (incl. TLS handshake failures) to the diagnostic log.
+                builder.Logging.AddProvider(new DiagnosticLoggerProvider());
+                builder.Logging.AddFilter("Microsoft.AspNetCore.Server.Kestrel", LogLevel.Warning);
+            }
+
+            if (_enableHttps)
+            {
                 var cert = SelfSignedCertificate.LoadCertificate(_bindAddress);
                 bool bindIsAllInterfaces = _bindAddress == "0.0.0.0" || _bindAddress == "::";
                 bool bindIsLoopback = IsLoopbackBindingAddress(_bindAddress);
@@ -316,17 +323,16 @@ namespace VilsSharpX.Api
         }
 
         /// <summary>
-        /// Configures an HTTPS listener with the given certificate and an explicit
-        /// SSL protocol set (TLS 1.2 + 1.3). Pinning the protocols avoids handshake
-        /// failures with older clients (e.g. PowerShell 5.1 / .NET Framework) that
-        /// negotiate poorly when the server leaves protocol selection to the OS default.
+        /// Configures an HTTPS listener with the given certificate.
+        /// Pins TLS 1.2 only: PowerShell 5.1 / .NET Framework 4.x clients do NOT support
+        /// TLS 1.3, and offering a 1.2+1.3 set can break Schannel negotiation with them.
         /// </summary>
         private static void ConfigureHttps(Microsoft.AspNetCore.Server.Kestrel.Core.ListenOptions listenOptions, X509Certificate2 cert)
         {
             listenOptions.UseHttps(httpsOptions =>
             {
                 httpsOptions.ServerCertificate = cert;
-                httpsOptions.SslProtocols = SslProtocols.Tls12 | SslProtocols.Tls13;
+                httpsOptions.SslProtocols = SslProtocols.Tls12;
             });
         }
 
@@ -427,4 +433,29 @@ namespace VilsSharpX.Api
             }
         }
     }
+
+    /// <summary>
+    /// Minimal ILoggerProvider that forwards log messages (warnings/errors) to DiagnosticLogger.
+    /// Used to surface Kestrel TLS handshake failures into diagnostic.log.
+    /// </summary>
+    internal sealed class DiagnosticLoggerProvider : ILoggerProvider
+    {
+        public ILogger CreateLogger(string categoryName) => new DiagnosticForwardingLogger(categoryName);
+        public void Dispose() { }
+
+        private sealed class DiagnosticForwardingLogger(string category) : ILogger
+        {
+            public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+            public bool IsEnabled(LogLevel logLevel) => logLevel >= LogLevel.Warning;
+
+            public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
+            {
+                if (!IsEnabled(logLevel)) return;
+                string msg = formatter(state, exception);
+                string exText = exception != null ? $" | {exception.GetType().Name}: {exception.Message}" : string.Empty;
+                DiagnosticLogger.Log($"[api][kestrel:{logLevel}] {category}: {msg}{exText}");
+            }
+        }
+    }
 }
+
