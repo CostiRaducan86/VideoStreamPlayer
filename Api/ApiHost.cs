@@ -69,7 +69,7 @@ namespace VilsSharpX.Api
 
             if (_enableHttps)
             {
-                var cert = SelfSignedCertificate.LoadCertificate();
+                var cert = SelfSignedCertificate.LoadCertificate(_bindAddress);
                 builder.WebHost.ConfigureKestrel(options =>
                 {
                     options.Listen(IPAddress.Parse(_bindAddress), _port, listenOptions =>
