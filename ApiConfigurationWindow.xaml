@@ -3,7 +3,7 @@
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     Title="API Configuration"
-    Width="520" Height="620"
+    Width="520" Height="650"
     ResizeMode="NoResize"
     WindowStartupLocation="CenterOwner"
     Padding="20">
@@ -19,6 +19,8 @@
             <GroupBox Header="Remote Access" Padding="10" Margin="0,0,0,10">
                 <StackPanel Orientation="Vertical">
                     <CheckBox x:Name="ChkAllowRemote" Content="Allow Remote Access" VerticalAlignment="Center" Margin="0,0,0,8" />
+                    <CheckBox x:Name="ChkEnableHttps" Content="Enable HTTPS (TLS)" VerticalAlignment="Center" Margin="0,0,0,8"
+                              ToolTip="Uses a self-signed certificate (auto-generated). Remote clients must trust it." />
                     
                     <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
                         <Label Content="Bind Address:" Width="100" VerticalAlignment="Center" />

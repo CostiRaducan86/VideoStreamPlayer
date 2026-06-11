@@ -3,12 +3,14 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Net;
 using System.Net.Sockets;
+using System.Security.Cryptography.X509Certificates;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Server.Kestrel.Core;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -16,15 +18,16 @@ using Microsoft.Extensions.Logging;
 namespace VilsSharpX.Api
 {
     /// <summary>
-    /// In-process REST host (Kestrel + Minimal API), bound to localhost only.
-    /// Exposes a single command endpoint plus a lightweight health probe.
+    /// In-process REST host (Kestrel + Minimal API). Supports HTTP or HTTPS (self-signed).
+    /// Exposes command endpoints plus a lightweight health probe.
     /// </summary>
     public sealed class ApiHost(
         IGuiAutomationBridge bridge,
         string bindAddress = "127.0.0.1",
         int port = 8420,
         string? apiKey = null,
-        IEnumerable<string>? allowedCidrs = null)
+        IEnumerable<string>? allowedCidrs = null,
+        bool enableHttps = false)
     {
         /// <summary>Default localhost port for the automation API.</summary>
         public const int DefaultPort = 8420;
@@ -40,6 +43,7 @@ namespace VilsSharpX.Api
         private readonly int _port = port;
         private readonly string _apiKey = apiKey?.Trim() ?? string.Empty;
         private readonly CidrRange[] _allowedCidrs = [.. ParseAllowedCidrs(allowedCidrs)];
+        private readonly bool _enableHttps = enableHttps;
         private WebApplication? _app;
 
         private static readonly JsonSerializerOptions JsonOptions = new()
@@ -50,8 +54,8 @@ namespace VilsSharpX.Api
         /// <summary>True once the host has been started.</summary>
         public bool IsRunning => _app != null;
 
-        /// <summary>Base URL the API listens on.</summary>
-        public string BaseUrl => $"http://{_bindAddress}:{_port}";
+        /// <summary>Base URL the API listens on (http or https).</summary>
+        public string BaseUrl => $"{(_enableHttps ? "https" : "http")}://{_bindAddress}:{_port}";
 
         /// <summary>
         /// Starts the host on a background thread. Safe to call once.
@@ -62,7 +66,22 @@ namespace VilsSharpX.Api
 
             var builder = WebApplication.CreateBuilder();
             builder.Logging.ClearProviders();
-            builder.WebHost.UseUrls($"http://{_bindAddress}:{_port}");
+
+            if (_enableHttps)
+            {
+                var cert = SelfSignedCertificate.LoadCertificate();
+                builder.WebHost.ConfigureKestrel(options =>
+                {
+                    options.Listen(IPAddress.Parse(_bindAddress), _port, listenOptions =>
+                    {
+                        listenOptions.UseHttps(cert);
+                    });
+                });
+            }
+            else
+            {
+                builder.WebHost.UseUrls($"http://{_bindAddress}:{_port}");
+            }
 
             var app = builder.Build();
 

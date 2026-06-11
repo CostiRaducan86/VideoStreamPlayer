@@ -50,10 +50,10 @@ namespace VilsSharpX
                     bindAddress = "127.0.0.1";
                 }
 
-                _apiHost = new ApiHost(this, bindAddress, _apiPort, apiKey, _apiAllowedCidrs);
+                _apiHost = new ApiHost(this, bindAddress, _apiPort, apiKey, _apiAllowedCidrs, _apiEnableHttps);
                 _apiHost.Start();
                 AppendDiagLog($"[api] Automation REST API listening on {_apiHost.BaseUrl}");
-                AppendDiagLog($"[api] mode={(bindAddress == "127.0.0.1" ? "loopback-only" : "remote-enabled")}, apiKeyRequiredForRemote={!string.IsNullOrWhiteSpace(apiKey)}");
+                AppendDiagLog($"[api] mode={(bindAddress == "127.0.0.1" ? "loopback-only" : "remote-enabled")}, https={_apiEnableHttps}, apiKeyRequiredForRemote={!string.IsNullOrWhiteSpace(apiKey)}");
                 if (_apiAllowedCidrs.Length > 0)
                     AppendDiagLog($"[api] allowlist={string.Join(", ", _apiAllowedCidrs)}");
             }

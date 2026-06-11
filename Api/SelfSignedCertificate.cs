@@ -1,0 +1,125 @@
+using System;
+using System.IO;
+using System.Security.Cryptography;
+using System.Security.Cryptography.X509Certificates;
+
+namespace VilsSharpX.Api;
+
+/// <summary>
+/// Generates and caches a self-signed X.509 certificate for the HTTPS automation API.
+/// The .pfx file is stored in the per-user AppData folder alongside settings.json.
+/// </summary>
+internal static class SelfSignedCertificate
+{
+    private const string CertFileName = "vilssharpx_api.pfx";
+    private const string SubjectName = "CN=VilsSharpX Automation API";
+    private const int KeySizeRsa = 2048;
+    private const int ValidityYears = 5;
+
+    /// <summary>
+    /// Returns the path to the .pfx certificate file, creating it if it does not exist
+    /// or if the existing certificate has expired.
+    /// </summary>
+    public static string GetOrCreateCertificatePath()
+    {
+        string dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "VilsSharpX");
+        Directory.CreateDirectory(dir);
+        string pfxPath = Path.Combine(dir, CertFileName);
+
+        if (File.Exists(pfxPath))
+        {
+            try
+            {
+                using var existing = new X509Certificate2(pfxPath);
+                if (existing.NotAfter > DateTime.UtcNow.AddDays(30))
+                    return pfxPath; // Still valid
+            }
+            catch
+            {
+                // Corrupted or unreadable — regenerate
+            }
+        }
+
+        GenerateAndSave(pfxPath);
+        return pfxPath;
+    }
+
+    /// <summary>
+    /// Loads the certificate from the .pfx file. Call <see cref="GetOrCreateCertificatePath"/>
+    /// first to ensure it exists.
+    /// </summary>
+    public static X509Certificate2 LoadCertificate()
+    {
+        string path = GetOrCreateCertificatePath();
+        return new X509Certificate2(path, (string?)null, X509KeyStorageFlags.MachineKeySet | X509KeyStorageFlags.PersistKeySet);
+    }
+
+    /// <summary>
+    /// Returns the SHA-256 thumbprint of the current certificate (for display in the UI).
+    /// Returns null if the certificate doesn't exist yet.
+    /// </summary>
+    public static string? GetThumbprint()
+    {
+        string dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "VilsSharpX");
+        string pfxPath = Path.Combine(dir, CertFileName);
+
+        if (!File.Exists(pfxPath)) return null;
+
+        try
+        {
+            using var cert = new X509Certificate2(pfxPath);
+            return cert.Thumbprint;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Forces regeneration of the certificate. Use when the user explicitly requests a new cert.
+    /// </summary>
+    public static void Regenerate()
+    {
+        string dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "VilsSharpX");
+        Directory.CreateDirectory(dir);
+        string pfxPath = Path.Combine(dir, CertFileName);
+        GenerateAndSave(pfxPath);
+    }
+
+    private static void GenerateAndSave(string pfxPath)
+    {
+        using var rsa = RSA.Create(KeySizeRsa);
+
+        var request = new CertificateRequest(SubjectName, rsa, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
+
+        // Key usage: digital signature + key encipherment (TLS server)
+        request.CertificateExtensions.Add(
+            new X509KeyUsageExtension(X509KeyUsageFlags.DigitalSignature | X509KeyUsageFlags.KeyEncipherment, critical: false));
+
+        // Enhanced key usage: Server Authentication
+        request.CertificateExtensions.Add(
+            new X509EnhancedKeyUsageExtension(
+                new OidCollection { new("1.3.6.1.5.5.7.3.1") }, // serverAuth
+                critical: false));
+
+        // Subject Alternative Names (localhost + loopback + wildcard LAN)
+        var sanBuilder = new SubjectAlternativeNameBuilder();
+        sanBuilder.AddDnsName("localhost");
+        sanBuilder.AddIpAddress(System.Net.IPAddress.Loopback);
+        sanBuilder.AddIpAddress(System.Net.IPAddress.IPv6Loopback);
+        sanBuilder.AddDnsName("*.local");
+        request.CertificateExtensions.Add(sanBuilder.Build());
+
+        var notBefore = DateTimeOffset.UtcNow.AddDays(-1);
+        var notAfter = DateTimeOffset.UtcNow.AddYears(ValidityYears);
+
+        using var cert = request.CreateSelfSigned(notBefore, notAfter);
+
+        // Export as PFX (no password — DPAPI protects the file via OS-level ACL)
+        byte[] pfxBytes = cert.Export(X509ContentType.Pfx);
+        File.WriteAllBytes(pfxPath, pfxBytes);
+
+        DiagnosticLogger.Log($"[api] Self-signed TLS certificate generated: {pfxPath} (valid until {notAfter:yyyy-MM-dd})");
+    }
+}

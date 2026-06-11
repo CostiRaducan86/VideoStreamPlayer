@@ -105,6 +105,7 @@ namespace VilsSharpX
 
         // Automation REST API settings (persisted; currently configured via settings.json only).
         private bool _apiAllowRemote = false;
+        private bool _apiEnableHttps = false;
         private string _apiBindAddress = "127.0.0.1";
         private int _apiPort = Api.ApiHost.DefaultPort;
         private string _apiKey = string.Empty;
@@ -983,6 +984,7 @@ namespace VilsSharpX
                 _avtpLiveEnabled = s.AvtpLiveEnabled;
                 _avtpLiveDeviceHint = s.AvtpLiveDeviceHint;
                 _apiAllowRemote = s.ApiAllowRemote;
+                _apiEnableHttps = s.ApiEnableHttps;
                 _apiBindAddress = string.IsNullOrWhiteSpace(s.ApiBindAddress) ? "127.0.0.1" : s.ApiBindAddress.Trim();
                 _apiPort = Math.Clamp(s.ApiPort, 1, 65535);
                 _apiKey = s.ApiKey ?? string.Empty;
@@ -1092,7 +1094,7 @@ namespace VilsSharpX
                 _ecuVariant, _vlanId, _vlanPriority, _avtpEtherType, _streamIdLastByte,
                 CmbLvdsMode?.SelectedIndex ?? 0,
                 _controlMode, _canUartMode,
-                _apiAllowRemote, _apiBindAddress, _apiPort, _apiKey, _apiAllowedCidrs);
+                _apiAllowRemote, _apiEnableHttps, _apiBindAddress, _apiPort, _apiKey, _apiAllowedCidrs);
             _settingsManager.TrySave(s);
         }
 
@@ -4558,9 +4560,10 @@ namespace VilsSharpX
         {
             if (_apiConfigWindow != null && _apiConfigWindow.IsVisible) { _apiConfigWindow.Activate(); return; }
             _apiConfigWindow = new ApiConfigurationWindow { Owner = this };
-            _apiConfigWindow.OnSettingsSaved = (allowRemote, bindAddress, port, apiKey, cidrs) =>
+            _apiConfigWindow.OnSettingsSaved = (allowRemote, enableHttps, bindAddress, port, apiKey, cidrs) =>
             {
                 _apiAllowRemote = allowRemote;
+                _apiEnableHttps = enableHttps;
                 _apiBindAddress = bindAddress;
                 _apiPort = port;
                 _apiKey = apiKey;

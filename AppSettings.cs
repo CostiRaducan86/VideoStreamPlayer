@@ -57,6 +57,7 @@ public sealed class AppSettings
 
     // Automation REST API settings
     public bool ApiAllowRemote { get; set; } = false;
+    public bool ApiEnableHttps { get; set; } = false;
     public string ApiBindAddress { get; set; } = "127.0.0.1";
     public int ApiPort { get; set; } = 8420;
     [JsonIgnore]

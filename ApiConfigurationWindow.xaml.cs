@@ -16,7 +16,7 @@ public partial class ApiConfigurationWindow : Window
     /// Called after successful save so the parent MainWindow can update its in-memory fields
     /// (prevents SaveUiSettings from overwriting the new values on WPF close).
     /// </summary>
-    public Action<bool, string, int, string, string[]>? OnSettingsSaved { get; set; }
+    public Action<bool, bool, string, int, string, string[]>? OnSettingsSaved { get; set; }
 
     public ApiConfigurationWindow()
     {
@@ -29,6 +29,7 @@ public partial class ApiConfigurationWindow : Window
         var settings = AppSettingsStore.LoadOrDefault();
 
         ChkAllowRemote.IsChecked = settings.ApiAllowRemote;
+        ChkEnableHttps.IsChecked = settings.ApiEnableHttps;
         TxtBindAddress.Text = settings.ApiBindAddress ?? "127.0.0.1";
         TxtPort.Text = settings.ApiPort.ToString();
 
@@ -253,10 +254,12 @@ public partial class ApiConfigurationWindow : Window
             var settings = AppSettingsStore.LoadOrDefault();
 
             bool allowRemote = ChkAllowRemote.IsChecked ?? false;
+            bool enableHttps = ChkEnableHttps.IsChecked ?? false;
             string bindAddress = TxtBindAddress.Text?.Trim() ?? "127.0.0.1";
             string[] cidrs = [.. _cidrs];
 
             settings.ApiAllowRemote = allowRemote;
+            settings.ApiEnableHttps = enableHttps;
             settings.ApiBindAddress = bindAddress;
             settings.ApiPort = port;
             settings.ApiKey = _currentApiKey;
@@ -265,10 +268,10 @@ public partial class ApiConfigurationWindow : Window
             AppSettingsStore.Save(settings);
 
             // Notify parent MainWindow to update its in-memory API fields
-            OnSettingsSaved?.Invoke(allowRemote, bindAddress, port, _currentApiKey, cidrs);
+            OnSettingsSaved?.Invoke(allowRemote, enableHttps, bindAddress, port, _currentApiKey, cidrs);
 
             DiagnosticLogger.Log(
-                $"[api] Settings saved. Remote={allowRemote}, " +
+                $"[api] Settings saved. Remote={allowRemote}, HTTPS={enableHttps}, " +
                 $"Bind={bindAddress}:{port}, CIDRs={cidrs.Length}");
 
             MessageBox.Show(
