@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Net;
+using System.Net.NetworkInformation;
 using System.Net.Sockets;
 using System.Security.Cryptography.X509Certificates;
 using System.Text.Json;
@@ -85,7 +86,9 @@ namespace VilsSharpX.Api
                     if (bindIsAllInterfaces)
                     {
                         // Bind HTTPS on each non-loopback IP individually so loopback stays free for HTTP.
-                        foreach (var ip in GetNonLoopbackIPv4Addresses())
+                        var ips = GetNonLoopbackIPv4Addresses();
+                        DiagnosticLogger.Log($"[api] HTTPS bind 0.0.0.0: found {ips.Length} non-loopback IPs: {string.Join(", ", ips.Select(i => i.ToString()))}");
+                        foreach (var ip in ips)
                         {
                             options.Listen(ip, _port, lo => lo.UseHttps(cert));
                         }
@@ -313,16 +316,20 @@ namespace VilsSharpX.Api
 
         /// <summary>
         /// Returns all non-loopback IPv4 addresses assigned to this machine.
-        /// Used when bind is "0.0.0.0" + HTTPS so each IP gets its own HTTPS listener
-        /// while loopback stays free for plain HTTP.
+        /// Uses NetworkInterface enumeration (more reliable than Dns.GetHostEntry which
+        /// may miss interfaces on multi-homed machines).
         /// </summary>
         private static IPAddress[] GetNonLoopbackIPv4Addresses()
         {
             try
             {
-                var host = Dns.GetHostEntry(Dns.GetHostName());
-                return host.AddressList
-                    .Where(a => a.AddressFamily == AddressFamily.InterNetwork && !IPAddress.IsLoopback(a))
+                return NetworkInterface.GetAllNetworkInterfaces()
+                    .Where(ni => ni.OperationalStatus == OperationalStatus.Up
+                              && ni.NetworkInterfaceType != NetworkInterfaceType.Loopback)
+                    .SelectMany(ni => ni.GetIPProperties().UnicastAddresses)
+                    .Where(ua => ua.Address.AddressFamily == AddressFamily.InterNetwork
+                              && !IPAddress.IsLoopback(ua.Address))
+                    .Select(ua => ua.Address)
                     .ToArray();
             }
             catch

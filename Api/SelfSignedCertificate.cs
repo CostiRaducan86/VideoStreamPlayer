@@ -3,6 +3,8 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Net;
+using System.Net.NetworkInformation;
+using System.Net.Sockets;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 
@@ -11,7 +13,7 @@ namespace VilsSharpX.Api;
 /// <summary>
 /// Generates and caches a self-signed X.509 certificate for the HTTPS automation API.
 /// The .pfx file is stored in the per-user AppData folder alongside settings.json.
-/// Automatically includes the bind address in the certificate SAN for seamless remote validation.
+/// Regenerated on every application start to ensure all current network IPs are in the SAN.
 /// </summary>
 internal static class SelfSignedCertificate
 {
@@ -21,8 +23,8 @@ internal static class SelfSignedCertificate
     private const int ValidityYears = 5;
 
     /// <summary>
-    /// Returns the path to the .pfx certificate file, creating it if it does not exist,
-    /// if the existing certificate has expired, or if the bind address has changed.
+    /// Always regenerates the certificate to include current machine IPs in SAN.
+    /// This ensures that if network adapters change, the cert is always up to date.
     /// </summary>
     public static string GetOrCreateCertificatePath(string bindAddress = "127.0.0.1")
     {
@@ -30,56 +32,18 @@ internal static class SelfSignedCertificate
         Directory.CreateDirectory(dir);
         string pfxPath = Path.Combine(dir, CertFileName);
 
-        if (File.Exists(pfxPath))
-        {
-            try
-            {
-                using var existing = new X509Certificate2(pfxPath);
-                if (existing.NotAfter > DateTime.UtcNow.AddDays(30))
-                {
-                    // Check if cert has the bind address in SANs (unless it's 0.0.0.0)
-                    if (bindAddress == "0.0.0.0" || CertificateHasSan(existing, bindAddress))
-                        return pfxPath; // Still valid and has required SANs
-                }
-            }
-            catch
-            {
-                // Corrupted or unreadable — regenerate
-            }
-        }
-
+        // Always regenerate — self-signed cert generation is ~50ms, ensures all current IPs are in SAN.
         GenerateAndSave(pfxPath, bindAddress);
         return pfxPath;
     }
 
     /// <summary>
-    /// Loads the certificate from the .pfx file. Automatically regenerates if bind address
-    /// has changed (to include it in SAN).
+    /// Loads the certificate from the .pfx file (regenerated on each app start).
     /// </summary>
     public static X509Certificate2 LoadCertificate(string bindAddress = "127.0.0.1")
     {
         string path = GetOrCreateCertificatePath(bindAddress);
         return new X509Certificate2(path, (string?)null, X509KeyStorageFlags.MachineKeySet | X509KeyStorageFlags.PersistKeySet);
-    }
-
-    /// <summary>
-    /// Check if certificate already has a specific hostname/IP in SAN extension.
-    /// </summary>
-    private static bool CertificateHasSan(X509Certificate2 cert, string sanValue)
-    {
-        try
-        {
-            var sanExt = cert.Extensions["2.5.29.17"]; // SAN extension OID
-            if (sanExt == null) return false;
-
-            // For simplicity, regenerate if we're unsure (rare case)
-            // Production would parse X509SubjectAlternativeNameExtension properly
-            return false;
-        }
-        catch
-        {
-            return false;
-        }
     }
 
     /// <summary>
@@ -131,42 +95,41 @@ internal static class SelfSignedCertificate
                 new OidCollection { new("1.3.6.1.5.5.7.3.1") }, // serverAuth
                 critical: false));
 
-        // Subject Alternative Names: localhost, loopback, wildcard LAN, + bind address
+        // Subject Alternative Names: localhost, loopback, + all machine IPs
         var sanBuilder = new SubjectAlternativeNameBuilder();
         sanBuilder.AddDnsName("localhost");
         sanBuilder.AddIpAddress(IPAddress.Loopback);              // 127.0.0.1
         sanBuilder.AddIpAddress(IPAddress.IPv6Loopback);          // ::1
         sanBuilder.AddDnsName("*.local");
 
-        // Add the bind address if it's a valid IP and not 0.0.0.0
-        if (IPAddress.TryParse(bindAddress, out var bindIp) && !bindIp.Equals(IPAddress.Any) && !bindIp.Equals(IPAddress.IPv6Any))
+        // Always add ALL non-loopback IPv4 addresses so the cert works regardless of which IP is contacted.
+        // Uses NetworkInterface (reliable on multi-homed machines) instead of Dns.GetHostEntry.
+        try
         {
-            sanBuilder.AddIpAddress(bindIp);
-            DiagnosticLogger.Log($"[cert] Adding bind IP to SAN: {bindAddress}");
-        }
-        else if (bindAddress == "0.0.0.0" || bindAddress == "::")
-        {
-            // When binding all interfaces, add every non-loopback IPv4 address to SAN
-            // so remote clients can validate the cert against the server's actual IP.
-            try
+            var allIps = NetworkInterface.GetAllNetworkInterfaces()
+                .Where(ni => ni.OperationalStatus == OperationalStatus.Up
+                          && ni.NetworkInterfaceType != NetworkInterfaceType.Loopback)
+                .SelectMany(ni => ni.GetIPProperties().UnicastAddresses)
+                .Where(ua => ua.Address.AddressFamily == AddressFamily.InterNetwork
+                          && !IPAddress.IsLoopback(ua.Address))
+                .Select(ua => ua.Address)
+                .ToArray();
+
+            foreach (var addr in allIps)
             {
-                var host = System.Net.Dns.GetHostEntry(System.Net.Dns.GetHostName());
-                foreach (var addr in host.AddressList)
-                {
-                    if (addr.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork && !IPAddress.IsLoopback(addr))
-                    {
-                        sanBuilder.AddIpAddress(addr);
-                        DiagnosticLogger.Log($"[cert] Adding local IP to SAN: {addr}");
-                    }
-                }
+                sanBuilder.AddIpAddress(addr);
             }
-            catch { /* DNS lookup failed — cert will only have localhost SANs */ }
+            DiagnosticLogger.Log($"[cert] SAN IPs: {string.Join(", ", allIps.Select(a => a.ToString()))}");
         }
-        else if (bindAddress != "0.0.0.0" && bindAddress != "::")
+        catch (Exception ex)
         {
-            // If it's a hostname, add it too
+            DiagnosticLogger.Log($"[cert] Warning: could not enumerate NICs: {ex.Message}");
+        }
+
+        // Also add explicit bind address if it's a hostname (non-IP)
+        if (!IPAddress.TryParse(bindAddress, out _) && bindAddress != "0.0.0.0" && bindAddress != "::")
+        {
             sanBuilder.AddDnsName(bindAddress);
-            DiagnosticLogger.Log($"[cert] Adding bind hostname to SAN: {bindAddress}");
         }
 
         request.CertificateExtensions.Add(sanBuilder.Build());
