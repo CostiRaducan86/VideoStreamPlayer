@@ -113,110 +113,110 @@ public partial class ApiConfigurationWindow : Window
 
         if (string.IsNullOrWhiteSpace(input))
         {
-            MessageBox.Show("Enter a CIDR (10.168.50.0/24), single IP (10.168.55.149),\nor IP range (10.168.55.149/151).", "Validation", MessageBoxButton.OK, MessageBoxImage.Warning);
-            return;
-        }
-
-        // Expand input into one or more entries to add
-        var entries = ExpandIpInput(input);
-        if (entries == null)
-        {
-            MessageBox.Show("Invalid format. Accepted:\n" +
-                "• CIDR: 10.168.50.0/24\n" +
-                "• Single IP: 10.168.55.149\n" +
-                "• IP range: 10.168.55.149/151 (last octet range)",
+            MessageBox.Show("Enter a single IP (e.g., 10.168.55.149)\nor an IP range (e.g., 10.168.55.149-151).",
                 "Validation", MessageBoxButton.OK, MessageBoxImage.Warning);
             return;
         }
 
-        foreach (var entry in entries)
+        // Validate and normalize
+        string? displayEntry = ValidateIpEntry(input);
+        if (displayEntry == null)
         {
-            if (!_cidrs.Contains(entry))
-                _cidrs.Add(entry);
+            MessageBox.Show("Invalid format. Accepted:\n" +
+                "• Single IP: 10.168.55.149\n" +
+                "• IP range: 10.168.55.149-151",
+                "Validation", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
         }
 
+        if (_cidrs.Contains(displayEntry))
+        {
+            MessageBox.Show($"\"{displayEntry}\" is already in the list.",
+                "Duplicate", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+
+        _cidrs.Add(displayEntry);
         TxtNewCidr.Clear();
     }
 
     /// <summary>
-    /// Expands user input into CIDR entries. Supports:
-    /// - Standard CIDR: "10.168.50.0/24" (prefix 0-32)
-    /// - Single IP: "10.168.55.149" → "10.168.55.149/32"
-    /// - IP range: "10.168.55.149/151" → individual /32 entries for .149, .150, .151
-    /// Returns null if input is invalid.
+    /// Validates the user input and returns the display string to store.
+    /// Returns null if invalid. Accepted formats:
+    /// - Single IP: "10.168.55.149" (stored as-is)
+    /// - IP range: "10.168.55.149-151" (stored as-is, expanded at runtime)
     /// </summary>
-    private static string[]? ExpandIpInput(string input)
+    private static string? ValidateIpEntry(string input)
     {
+        // IPv6 address (simple validation)
         if (input.Contains(':'))
+            return System.Net.IPAddress.TryParse(input, out _) ? input : null;
+
+        // IP range format: xxx.xxx.xxx.aaa-bbb
+        if (input.Contains('-'))
         {
-            // IPv6 CIDR — just validate prefix
-            var parts = input.Split('/');
-            if (parts.Length == 2 && int.TryParse(parts[1], out int pfx) && pfx >= 0 && pfx <= 128)
-                return [input];
-            return null;
-        }
+            int dashIdx = input.LastIndexOf('-');
+            string ipPart = input[..dashIdx];
+            string endStr = input[(dashIdx + 1)..];
 
-        if (!input.Contains('/'))
-        {
-            // Single IP (no slash) — validate it looks like an IPv4 address
-            if (IsValidIpv4(input))
-                return [$"{input}/32"];
-            return null;
-        }
+            if (!IsValidIpv4(ipPart) || !int.TryParse(endStr, out int endOctet))
+                return null;
 
-        // Has a slash — could be CIDR or IP range
-        var slashParts = input.Split('/');
-        if (slashParts.Length != 2)
-            return null;
-
-        string ipPart = slashParts[0];
-        string suffixPart = slashParts[1];
-
-        if (!int.TryParse(suffixPart, out int suffixValue))
-            return null;
-
-        // Standard CIDR: prefix is 0-32
-        if (suffixValue >= 0 && suffixValue <= 32 && IsValidIpv4(ipPart))
-        {
-            // Disambiguate: if suffix > last octet, it's likely a range, not a CIDR prefix
             var octets = ipPart.Split('.');
-            int lastOctet = int.Parse(octets[3]);
+            int startOctet = int.Parse(octets[3]);
 
-            if (suffixValue > 32)
+            if (endOctet < startOctet || endOctet > 255)
+                return null;
+
+            return input;  // store as-is: "10.168.55.149-151"
+        }
+
+        // Single IP
+        if (IsValidIpv4(input))
+            return input;
+
+        return null;
+    }
+
+    /// <summary>
+    /// Expands stored allowlist entries into CIDR strings for the runtime engine.
+    /// - "10.168.55.149" → ["10.168.55.149/32"]
+    /// - "10.168.55.149-151" → ["10.168.55.149/32", "10.168.55.150/32", "10.168.55.151/32"]
+    /// </summary>
+    public static string[] ExpandAllowlistForRuntime(string[] storedEntries)
+    {
+        var result = new System.Collections.Generic.List<string>();
+        foreach (var entry in storedEntries)
+        {
+            if (string.IsNullOrWhiteSpace(entry)) continue;
+
+            if (entry.Contains('-'))
             {
-                // Definitely a range
+                // Range: expand to individual /32 entries
+                int dashIdx = entry.LastIndexOf('-');
+                string ipPart = entry[..dashIdx];
+                string endStr = entry[(dashIdx + 1)..];
+                if (IsValidIpv4(ipPart) && int.TryParse(endStr, out int endOctet))
+                {
+                    var octets = ipPart.Split('.');
+                    int startOctet = int.Parse(octets[3]);
+                    string basePrefix = $"{octets[0]}.{octets[1]}.{octets[2]}";
+                    for (int i = startOctet; i <= endOctet; i++)
+                        result.Add($"{basePrefix}.{i}/32");
+                }
             }
-            else if (suffixValue > lastOctet && suffixValue <= 255)
+            else if (entry.Contains('/'))
             {
-                // Looks like a range (e.g., 10.168.55.149/151 — 151 > 32 handled above,
-                // but 10.168.55.5/8 is ambiguous; treat as CIDR /8 since <= 32)
-                // For values > 32, always range. For <= 32, assume CIDR.
-                return [input];
+                // Already has CIDR prefix (legacy entries)
+                result.Add(entry);
             }
             else
             {
-                return [input];
+                // Single IP → /32
+                result.Add($"{entry}/32");
             }
         }
-
-        // IP range: suffix is 33-255 (must be > 32 to distinguish from CIDR prefix)
-        if (IsValidIpv4(ipPart) && suffixValue > 32 && suffixValue <= 255)
-        {
-            var octets = ipPart.Split('.');
-            int lastOctet = int.Parse(octets[3]);
-            string basePrefix = $"{octets[0]}.{octets[1]}.{octets[2]}";
-
-            if (suffixValue < lastOctet)
-                return null;  // range end < range start
-
-            var result = new System.Collections.Generic.List<string>();
-            for (int i = lastOctet; i <= suffixValue; i++)
-                result.Add($"{basePrefix}.{i}/32");
-
-            return [.. result];
-        }
-
-        return null;
+        return [.. result];
     }
 
     private static bool IsValidIpv4(string ip)

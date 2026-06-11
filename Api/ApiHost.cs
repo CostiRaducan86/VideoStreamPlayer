@@ -238,9 +238,11 @@ namespace VilsSharpX.Api
         {
             if (values == null) yield break;
 
-            foreach (string? raw in values)
+            // Expand stored entries (clean IPs and ranges) into CIDR format
+            string[] expanded = ApiConfigurationWindow.ExpandAllowlistForRuntime(values.ToArray());
+
+            foreach (string token in expanded)
             {
-                string token = raw?.Trim() ?? string.Empty;
                 if (string.IsNullOrWhiteSpace(token))
                     continue;
 

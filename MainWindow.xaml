@@ -354,7 +354,7 @@
                         <StackPanel Grid.Column="0" Orientation="Vertical" Margin="0,0,10,0">
                             <StackPanel Orientation="Horizontal" HorizontalAlignment="Left" Margin="0,0,0,6">
                                 <TextBlock Text="LSM Device Type:" VerticalAlignment="Center" Width="102" Margin="0,0,6,0"/>
-                                <ComboBox x:Name="CmbLsmDeviceType" Width="120" SelectedIndex="0" SelectionChanged="CmbLsmDeviceType_SelectionChanged">
+                                <ComboBox x:Name="CmbLsmDeviceType" Width="145" SelectedIndex="0" SelectionChanged="CmbLsmDeviceType_SelectionChanged">
                                     <ComboBoxItem Content="Osram 2.0"/>
                                     <ComboBoxItem Content="Osram 2.05"/>
                                     <ComboBoxItem Content="Nichia"/>
@@ -363,7 +363,7 @@
 
                             <StackPanel Orientation="Horizontal" HorizontalAlignment="Left" Margin="0,0,0,6">
                                 <TextBlock Text="AVTP Mode:" VerticalAlignment="Center" Width="102" Margin="0,0,6,0"/>
-                                <ComboBox x:Name="CmbModeOfOperation" Width="120" SelectedIndex="0" SelectionChanged="CmbModeOfOperation_SelectionChanged">
+                                <ComboBox x:Name="CmbModeOfOperation" Width="145" SelectedIndex="0" SelectionChanged="CmbModeOfOperation_SelectionChanged">
                                     <ComboBoxItem Content="AVTP Monitoring"/>
                                     <ComboBoxItem Content="AVTP Generator"/>
                                 </ComboBox>
@@ -371,7 +371,7 @@
 
                             <StackPanel Orientation="Horizontal" HorizontalAlignment="Left" Margin="0,0,0,0">
                                 <TextBlock Text="LVDS Mode:" VerticalAlignment="Center" Width="102" Margin="0,0,6,0"/>
-                                <ComboBox x:Name="CmbLvdsMode" Width="120" SelectedIndex="0" SelectionChanged="CmbLvdsMode_SelectionChanged">
+                                <ComboBox x:Name="CmbLvdsMode" Width="145" SelectedIndex="0" SelectionChanged="CmbLvdsMode_SelectionChanged">
                                     <ComboBoxItem Content="LVDS Monitoring"/>
                                     <ComboBoxItem Content="LVDS Generator"/>
                                 </ComboBox>

@@ -44,7 +44,7 @@
                                      Foreground="Gray" Background="Transparent" BorderThickness="0"
                                      VerticalAlignment="Center" />
                             <Button x:Name="BtnToggleShowPassword" Width="34" Height="26"
-                                    HorizontalAlignment="Right" VerticalAlignment="Center"
+                                    HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,4,0"
                                     Background="Transparent" BorderThickness="0"
                                     ToolTip="Show/Hide" Click="BtnToggleShowPassword_Click" Cursor="Hand">
                                 <Viewbox Width="20" Height="16">
