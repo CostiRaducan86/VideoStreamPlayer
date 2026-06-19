@@ -1769,8 +1769,7 @@ namespace VilsSharpX
 
             _canDiagCurrentPage = 1;
             // Reset capture counters so Rx/CD/OS restart from 0
-            if (_canDiagCapture is not null)
-                _canDiagCapture.ResetCounters();
+            _canDiagCapture?.ResetCounters();
             RefreshCanDiagView();
         }
 
@@ -1808,8 +1807,7 @@ namespace VilsSharpX
             SendDiagSniffStart();
 
             // Reset capture counters so Rx/CD/OS restart from 0
-            if (_canDiagCapture is not null)
-                _canDiagCapture.ResetCounters();
+            _canDiagCapture?.ResetCounters();
 
             // Start a fresh recording session: clear previous data
             _canDiagStore.Clear();
@@ -4658,15 +4656,18 @@ namespace VilsSharpX
         private void MenuApiConfig_Click(object sender, RoutedEventArgs e)
         {
             if (_apiConfigWindow is { IsVisible: true }) { _apiConfigWindow.Activate(); return; }
-            _apiConfigWindow = new() { Owner = this };
-            _apiConfigWindow.OnSettingsSaved = (allowRemote, enableHttps, bindAddress, port, apiKey, cidrs) =>
+            _apiConfigWindow = new()
             {
-                _apiAllowRemote = allowRemote;
-                _apiEnableHttps = enableHttps;
-                _apiBindAddress = bindAddress;
-                _apiPort = port;
-                _apiKey = apiKey;
-                _apiAllowedCidrs = cidrs;
+                Owner = this,
+                OnSettingsSaved = (allowRemote, enableHttps, bindAddress, port, apiKey, cidrs) =>
+                {
+                    _apiAllowRemote = allowRemote;
+                    _apiEnableHttps = enableHttps;
+                    _apiBindAddress = bindAddress;
+                    _apiPort = port;
+                    _apiKey = apiKey;
+                    _apiAllowedCidrs = cidrs;
+                }
             };
             _apiConfigWindow.Closed += (_, _) => _apiConfigWindow = null;
             _apiConfigWindow.Show();
