@@ -257,6 +257,7 @@ namespace VilsSharpX
         private readonly DispatcherTimer _overlayTimerB;
         private readonly DispatcherTimer _overlayTimerC;
         private readonly DispatcherTimer _overlayTimerD;
+        private readonly DispatcherTimer _deviceModeSyncTimer = new() { Interval = TimeSpan.FromSeconds(2) };
 
         private readonly DateTime _statusOverrideUntil = DateTime.MinValue;
 
@@ -318,6 +319,7 @@ namespace VilsSharpX
             _overlayTimerB = MakeOverlayTimer(Pane.B);
             _overlayTimerC = MakeOverlayTimer(Pane.C);
             _overlayTimerD = MakeOverlayTimer(Pane.D);
+            _deviceModeSyncTimer.Tick += (_, _) => _ = TrySyncDeviceModeToAurixAsync("periodic");
 
             InitializeDefaultPatterns();
 
@@ -894,6 +896,9 @@ namespace VilsSharpX
             // Send device-mode command to ECU at app startup so the firmware
             // immediately matches the persisted device type from settings.
             _ = TrySyncDeviceModeToAurixAsync("startup");
+
+            // Keep Aurix aligned even after board reset/run while WPF stays open.
+            _deviceModeSyncTimer.Start();
         }
 
         /// <summary>
@@ -1764,7 +1769,7 @@ namespace VilsSharpX
 
             _canDiagCurrentPage = 1;
             // Reset capture counters so Rx/CD/OS restart from 0
-            if (_canDiagCapture != null)
+            if (_canDiagCapture is not null)
                 _canDiagCapture.ResetCounters();
             RefreshCanDiagView();
         }
@@ -1775,7 +1780,7 @@ namespace VilsSharpX
         /// </summary>
         private void EnsureCanDiagCapture()
         {
-            if (_canDiagCapture != null && _canDiagCapture.IsCapturing)
+            if (_canDiagCapture is not null && _canDiagCapture.IsCapturing)
                 return;
             StartCanDiagCapture();
         }
@@ -1803,7 +1808,7 @@ namespace VilsSharpX
             SendDiagSniffStart();
 
             // Reset capture counters so Rx/CD/OS restart from 0
-            if (_canDiagCapture != null)
+            if (_canDiagCapture is not null)
                 _canDiagCapture.ResetCounters();
 
             // Start a fresh recording session: clear previous data
@@ -2688,6 +2693,7 @@ namespace VilsSharpX
 
         private void Window_Closing(object sender, System.ComponentModel.CancelEventArgs e)
         {
+            _deviceModeSyncTimer.Stop();
             StopAutomationApi();
             SaveUiSettings();
             if (_recordingManager.IsRecording) StopRecording();
@@ -4651,8 +4657,8 @@ namespace VilsSharpX
 
         private void MenuApiConfig_Click(object sender, RoutedEventArgs e)
         {
-            if (_apiConfigWindow != null && _apiConfigWindow.IsVisible) { _apiConfigWindow.Activate(); return; }
-            _apiConfigWindow = new ApiConfigurationWindow { Owner = this };
+            if (_apiConfigWindow is { IsVisible: true }) { _apiConfigWindow.Activate(); return; }
+            _apiConfigWindow = new() { Owner = this };
             _apiConfigWindow.OnSettingsSaved = (allowRemote, enableHttps, bindAddress, port, apiKey, cidrs) =>
             {
                 _apiAllowRemote = allowRemote;
