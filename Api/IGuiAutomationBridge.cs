@@ -38,5 +38,29 @@ namespace VilsSharpX.Api
         /// </summary>
         /// <param name="pane">"A", "B", or "D" (case-insensitive).</param>
         byte[] GetFrameSnapshotPng(string pane);
+        
+        /// <summary>
+        /// Returns the current CAN/UART state, including live data and paging info.
+        /// </summary>
+        CanUartState GetCanUartState();
+
+        /// <summary>Clears the CAN/UART state.</summary>
+        void ClearCanUart();
+
+        /// <summary>Starts CAN/UART recording.</summary>
+        void StartCanUartRecording();
+
+        /// <summary>Stops CAN/UART recording.</summary>
+        void StopCanUartRecording();
+
+        /// <summary>Moves to the previous CAN/UART page.</summary>
+        void PreviousCanUartPage();
+
+        /// <summary>Moves to the next CAN/UART page.</summary>
+        void NextCanUartPage();
+
+        /// <summary>Sets the current CAN/UART page.</summary>
+        /// <param name="page">The page number to set.</param>
+        void SetCanUartPage(int page);
     }
 }

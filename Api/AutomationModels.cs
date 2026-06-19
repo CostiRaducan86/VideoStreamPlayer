@@ -115,4 +115,37 @@ namespace VilsSharpX.Api
         [JsonPropertyName("bDelta")]
         public int? BDelta { get; set; }
     }
+    /// <summary>CAN/UART monitoring</summary>
+    public sealed class CanUartState
+    {
+        [JsonPropertyName("state")]
+        public string State { get; set; } = "";
+    
+        [JsonPropertyName("stored")]
+        public int Stored { get; set; }
+    
+        [JsonPropertyName("rx")]
+        public int Rx { get; set; }
+    
+        [JsonPropertyName("cd")]
+        public int Cd { get; set; }
+    
+        [JsonPropertyName("parseErr")]
+        public int ParseErr { get; set; }
+    
+        [JsonPropertyName("health")]
+        public string Health { get; set; } = "ok";
+    
+        [JsonPropertyName("currentPage")]
+        public int CurrentPage { get; set; }
+    
+        [JsonPropertyName("totalPages")]
+        public int TotalPages { get; set; }
+    
+        [JsonPropertyName("canPrevious")]
+        public bool CanPrevious { get; set; }
+    
+        [JsonPropertyName("canNext")]
+        public bool CanNext { get; set; }
+    }
 }

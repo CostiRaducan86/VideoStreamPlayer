@@ -178,5 +178,49 @@ namespace VilsSharpX
                 return ms.ToArray();
             });
         }
+
+        // ---- CAN/UART automation implementation ----
+
+        CanUartState IGuiAutomationBridge.GetCanUartState()
+        {
+            return Dispatcher.Invoke(() => new CanUartState
+            {
+                State = _canDiagRecording ? "recording" : "monitoring",
+                CurrentPage = _canDiagCurrentPage,
+                TotalPages = _canDiagTotalPages,
+                CanPrevious = _canDiagCurrentPage > 1,
+                CanNext = _canDiagCurrentPage < _canDiagTotalPages
+            });
+        }
+        
+        void IGuiAutomationBridge.ClearCanUart()
+        {
+            Dispatcher.Invoke(ClearCanUartInternal);
+        }
+        
+        void IGuiAutomationBridge.StartCanUartRecording()
+        {
+            Dispatcher.Invoke(StartCanUartRecordingInternal);
+        }
+        
+        void IGuiAutomationBridge.StopCanUartRecording()
+        {
+            Dispatcher.Invoke(StopCanUartRecordingInternal);
+        }
+        
+        void IGuiAutomationBridge.PreviousCanUartPage()
+        {
+            Dispatcher.Invoke(PreviousCanUartPageInternal);
+        }
+        
+        void IGuiAutomationBridge.NextCanUartPage()
+        {
+            Dispatcher.Invoke(NextCanUartPageInternal);
+        }
+        
+        void IGuiAutomationBridge.SetCanUartPage(int page)
+        {
+            Dispatcher.Invoke(() => SetCanUartPageInternal(page));
+        }
     }
 }

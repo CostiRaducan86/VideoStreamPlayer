@@ -23,8 +23,15 @@ public static class DeviceModeCommand
     /// Sends SET_DEVICE_MODE command to the ECU.
     /// Sends the packet 3× for reliability (UDP-style, no ACK).
     /// </summary>
-    public static void SendDeviceMode(string pcapDeviceName, LsmDeviceType deviceType, Action<string>? log = null)
+    public static void SendDeviceMode(string? pcapDeviceName, LsmDeviceType deviceType, Action<string>? log = null)
     {
+        // Validate NIC name
+        if (string.IsNullOrWhiteSpace(pcapDeviceName))
+        {
+            log?.Invoke($"[cmd] Error: NIC device name is null or empty. Device type change NOT sent to Aurix.");
+            return;
+        }
+
         byte devByte = deviceType == LsmDeviceType.Nichia ? FeDeviceNichia : FeDeviceOsram;
 
         // Build 60-byte Ethernet frame (minimum size excl. FCS)
@@ -48,6 +55,7 @@ public static class DeviceModeCommand
         pkt[17] = devByte;
 
         // Remaining bytes 18..59 stay 0x00 (padding)
+        log?.Invoke($"[cmd] Building SET_DEVICE_MODE: type={deviceType.GetDisplayName()}, devByte=0x{devByte:X2}, magic=0x{MagicCommand:X4}, ethertype=0x{Ethertype:X4}");
 
         var existing = CaptureDeviceList.Instance
             .OfType<LibPcapLiveDevice>()
@@ -55,9 +63,11 @@ public static class DeviceModeCommand
 
         if (existing == null)
         {
-            log?.Invoke($"[cmd] NIC not found for device-mode command: {pcapDeviceName}");
+            log?.Invoke($"[cmd] Error: NIC not found for device-mode command: '{pcapDeviceName}'. Available NICs: {string.Join(", ", CaptureDeviceList.Instance.OfType<LibPcapLiveDevice>().Select(d => d.Name))}");
             return;
         }
+
+        log?.Invoke($"[cmd] Found NIC: {existing.Name} ({existing.Description ?? "no description"})");
 
         // Create an independent handle so we don't disrupt ongoing captures
         var txDev = new LibPcapLiveDevice(existing.Interface);
@@ -66,13 +76,16 @@ public static class DeviceModeCommand
         {
             // Send 3× for reliability
             for (int i = 0; i < 3; i++)
+            {
                 txDev.SendPacket(pkt);
+                log?.Invoke($"[cmd] Sent packet {i + 1}/3 to {pcapDeviceName}");
+            }
 
-            log?.Invoke($"[cmd] Sent SET_DEVICE_MODE → {deviceType.GetDisplayName()} (0x{devByte:X2})");
+            log?.Invoke($"[cmd] ✓ SET_DEVICE_MODE command sent → {deviceType.GetDisplayName()} (0x{devByte:X2}) via {pcapDeviceName}");
         }
         catch (Exception ex)
         {
-            log?.Invoke($"[cmd] Send error: {ex.Message}");
+            log?.Invoke($"[cmd] ✗ Send error: {ex.GetType().Name}: {ex.Message}");
         }
         finally
         {

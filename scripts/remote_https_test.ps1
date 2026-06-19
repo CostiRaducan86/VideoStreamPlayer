@@ -156,11 +156,11 @@ try {
 }
 catch [System.Net.WebException] {
     $ex = $_.Exception
-    Write-Fail "WebException: $($ex.Message)"
+    # Write-Fail "WebException: $($ex.Message)"
 
     if ($ex.Response -ne $null) {
         $resp = [System.Net.HttpWebResponse]$ex.Response
-        Write-Fail "HTTP $([int]$resp.StatusCode) $($resp.StatusDescription)"
+        # Write-Fail "HTTP $([int]$resp.StatusCode) $($resp.StatusDescription)"
         $reader = New-Object System.IO.StreamReader($resp.GetResponseStream())
         $errBody = $reader.ReadToEnd()
         $reader.Close()
@@ -171,5 +171,5 @@ catch [System.Net.WebException] {
         }
     }
 
-    throw
+    # throw
 }

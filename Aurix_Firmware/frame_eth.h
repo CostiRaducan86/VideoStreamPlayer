@@ -153,6 +153,11 @@ typedef struct
     volatile uint32 nichiaRowsReceived;
     volatile uint32 nichiaFramesAssembled;
     volatile uint32 osramFramesPushed;
+
+    /* Command RX telemetry */
+    volatile uint32 cmdPacketsReceived;    /* Total command packets (magic "CM") */
+    volatile uint32 cmdSetDeviceReceived;  /* SET_DEVICE commands received */
+    volatile uint32 cmdSetDeviceApplied;   /* SET_DEVICE successfully applied */
 } FeStats;
 
 extern FeStats g_feStats;

@@ -893,13 +893,40 @@ namespace VilsSharpX
 
             // Send device-mode command to ECU at app startup so the firmware
             // immediately matches the persisted device type from settings.
-            try
+            _ = TrySyncDeviceModeToAurixAsync("startup");
+        }
+
+        /// <summary>
+        /// Tries to sync the current WPF device type to Aurix with short retries.
+        /// Startup can race NIC enumeration, so we retry for a brief window.
+        /// </summary>
+        private async Task TrySyncDeviceModeToAurixAsync(string reason)
+        {
+            const int maxAttempts = 5;
+            const int delayMs = 250;
+
+            for (int attempt = 1; attempt <= maxAttempts; attempt++)
             {
-                string? txDev = GetTxPcapDeviceNameOrNull();
-                if (!string.IsNullOrWhiteSpace(txDev))
-                    DeviceModeCommand.SendDeviceMode(txDev, _currentDeviceType, AppendDiagLog);
+                try
+                {
+                    string? txDev = GetTxPcapDeviceNameOrNull();
+                    if (!string.IsNullOrWhiteSpace(txDev))
+                    {
+                        DeviceModeCommand.SendDeviceMode(txDev, _currentDeviceType, AppendDiagLog);
+                        AppendDiagLog($"[cmd] Device-mode sync ({reason}) done on attempt {attempt}/{maxAttempts}");
+                        return;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    AppendDiagLog($"[cmd] Device-mode sync ({reason}) failed on attempt {attempt}/{maxAttempts}: {ex.Message}");
+                }
+
+                if (attempt < maxAttempts)
+                    await Task.Delay(delayMs);
             }
-            catch (Exception ex) { AppendDiagLog($"[cmd] Startup device-mode: {ex.Message}"); }
+
+            AppendDiagLog($"[cmd] Device-mode sync ({reason}) not sent: no usable NIC");
         }
 
         private void HandleLiveFrameReady(byte[] frame, FrameMeta meta)
@@ -1157,12 +1184,17 @@ namespace VilsSharpX
             try
             {
                 string? txDev = GetTxPcapDeviceNameOrNull();
-                if (!string.IsNullOrWhiteSpace(txDev))
-                    DeviceModeCommand.SendDeviceMode(txDev, _currentDeviceType, AppendDiagLog);
+                if (string.IsNullOrWhiteSpace(txDev))
+                {
+                    AppendDiagLog("[cmd] ⚠ No NIC available — device-mode command NOT sent to Aurix. Please select a network interface.");
+                }
                 else
-                    AppendDiagLog("[cmd] No NIC selected — device-mode command not sent");
+                {
+                    AppendDiagLog($"[cmd] Selected NIC for command transmission: {txDev}");
+                    DeviceModeCommand.SendDeviceMode(txDev, _currentDeviceType, AppendDiagLog);
+                }
             }
-            catch (Exception ex) { AppendDiagLog($"[cmd] {ex.Message}"); }
+            catch (Exception ex) { AppendDiagLog($"[cmd] Exception: {ex.Message}"); }
 
             LblStatus.Text = $"Device Type: {_currentDeviceType.GetDisplayName()} ({GetCurrentWidth()}x{GetCurrentHeight()}). Load a file or start live capture.";
         }
@@ -1719,10 +1751,21 @@ namespace VilsSharpX
 
         private void BtnCanClear_Click(object sender, RoutedEventArgs e)
         {
+            ClearCanUartInternal();
+        }
+
+        private void ClearCanUartInternal()
+        {
             _canDiagStore.Clear();
             _rawCanLines.Clear();
-            if (TblRawCan != null) TblRawCan.Text = string.Empty;
+
+            if (TblRawCan != null)
+                TblRawCan.Text = string.Empty;
+
             _canDiagCurrentPage = 1;
+            // Reset capture counters so Rx/CD/OS restart from 0
+            if (_canDiagCapture != null)
+                _canDiagCapture.ResetCounters();
             RefreshCanDiagView();
         }
 
@@ -1738,6 +1781,10 @@ namespace VilsSharpX
         }
 
         private void BtnCanRecord_Click(object sender, RoutedEventArgs e)
+        {
+            StartCanUartRecordingInternal();
+        }
+        private void StartCanUartRecordingInternal()
         {
             // Ensure the Ethernet listener is running (independent of main Start/Stop)
             EnsureCanDiagCapture();
@@ -1756,20 +1803,23 @@ namespace VilsSharpX
             SendDiagSniffStart();
 
             // Reset capture counters so Rx/CD/OS restart from 0
-            _canDiagCapture?.ResetCounters();
+            if (_canDiagCapture != null)
+                _canDiagCapture.ResetCounters();
 
             // Start a fresh recording session: clear previous data
             _canDiagStore.Clear();
             _rawCanLines.Clear();
-            if (TblRawCan != null) TblRawCan.Text = string.Empty;
+
+            if (TblRawCan != null)
+                TblRawCan.Text = string.Empty;
+
             _canDiagCurrentPage = 1;
             _canDiagRecording = true;
+
             UpdateCanDiagRecordingButtons();
             RefreshCanDiagView();
 
             // Start a retry timer: if CD stays 0 after 2 seconds, resend START.
-            // This handles the rare case where the initial START packet was lost
-            // or the firmware didn't process it in time.
             StartDiagRetryTimer();
         }
 
@@ -1886,10 +1936,15 @@ namespace VilsSharpX
 
         private void BtnCanStopRecord_Click(object sender, RoutedEventArgs e)
         {
+            StopCanUartRecordingInternal();
+        }
+        private void StopCanUartRecordingInternal()
+        {
             _canDiagRecording = false;
             _canDiagWatchdogRecovering = false;
             _canDiagSessionHadTraffic = false;
             _canDiagConsecutiveRestarts = 0;
+
             StopDiagRetryTimer();
             UpdateCanDiagRecordingButtons();
 
@@ -1900,7 +1955,10 @@ namespace VilsSharpX
                 if (!string.IsNullOrWhiteSpace(txDev))
                     DiagSniffCommand.Send(txDev, start: false, AppendDiagLog);
             }
-            catch (Exception ex) { AppendDiagLog($"[cmd] DiagSniff stop: {ex.Message}"); }
+            catch (Exception ex)
+            {
+                AppendDiagLog($"[cmd] DiagSniff stop: {ex.Message}");
+            }
         }
 
         private void UpdateCanDiagRecordingButtons()
@@ -1919,22 +1977,45 @@ namespace VilsSharpX
                 BtnCanStopRecord.IsEnabled = _canDiagRecording;
         }
 
+        private void SyncCanUartPageJumpText()
+        {
+            if (TxtCanPageJump == null)
+                return;
+        
+            int page = Math.Max(1, _canDiagCurrentPage);
+            string text = page.ToString();
+        
+            if (TxtCanPageJump.Text != text)
+                TxtCanPageJump.Text = text;
+        }
+
         private void BtnCanPrevPage_Click(object sender, RoutedEventArgs e)
+        {
+            PreviousCanUartPageInternal();
+        }
+        private void PreviousCanUartPageInternal()
         {
             if (_canDiagCurrentPage <= 1)
                 return;
 
             _canDiagCurrentPage--;
             RefreshCanDiagView();
+            SyncCanUartPageJumpText();
         }
 
         private void BtnCanNextPage_Click(object sender, RoutedEventArgs e)
+        {
+            NextCanUartPageInternal();
+        }
+
+        private void NextCanUartPageInternal()
         {
             if (_canDiagCurrentPage >= _canDiagTotalPages)
                 return;
 
             _canDiagCurrentPage++;
             RefreshCanDiagView();
+            SyncCanUartPageJumpText();
         }
 
         private void TxtCanPageJump_KeyDown(object sender, System.Windows.Input.KeyEventArgs e)
@@ -1942,14 +2023,23 @@ namespace VilsSharpX
             if (e.Key != System.Windows.Input.Key.Enter)
                 return;
 
-            if (int.TryParse(TxtCanPageJump?.Text, out int page) && page >= 1 && page <= _canDiagTotalPages)
+            if (int.TryParse(TxtCanPageJump?.Text, out int page))
             {
-                _canDiagCurrentPage = page;
-                RefreshCanDiagView();
+                SetCanUartPageInternal(page);
             }
 
             TxtCanPageJump?.SelectAll();
             e.Handled = true;
+        }
+
+        private void SetCanUartPageInternal(int page)
+        {
+            if (page < 1 || page > _canDiagTotalPages)
+                return;
+
+            _canDiagCurrentPage = page;
+            RefreshCanDiagView();
+            SyncCanUartPageJumpText();
         }
 
         // ── CAN/UART Trace: Save (.rply) ───────────────────────────────────────
@@ -2462,6 +2552,9 @@ namespace VilsSharpX
             if (_settingsManager.IsLoading) return;
             _avtpLiveDeviceHint = LiveNicSelector.GetSelectedDeviceName(CmbLiveNic);
             SaveUiSettings();
+
+            // Re-sync selected device type to Aurix when NIC selection changes.
+            _ = TrySyncDeviceModeToAurixAsync("nic-change");
         }
 
         private void BDelta_TextChanged(object sender, System.Windows.Controls.TextChangedEventArgs e)
@@ -4550,7 +4643,7 @@ namespace VilsSharpX
 
         private void MenuCameraConfig_Click(object sender, RoutedEventArgs e)
         {
-            if (_cameraConfigWindow != null && _cameraConfigWindow.IsVisible) { _cameraConfigWindow.Activate(); return; }
+            if (_cameraConfigWindow is { IsVisible: true }) { _cameraConfigWindow.Activate(); return; }
             _cameraConfigWindow = new CameraConfigWindow(AppendDiagLog, _baslerCapture) { Owner = this };
             _cameraConfigWindow.Closed += (_, _) => _cameraConfigWindow = null;
             _cameraConfigWindow.Show();

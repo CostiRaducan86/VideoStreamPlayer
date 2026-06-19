@@ -994,6 +994,9 @@ static uint8 handle_config_option_touch(uint16 px, uint16 py)
                 s_prevDrawnValid = 0u;
                 s_uiFrameValid = 0u;
                 s_lastFrameTick = 0u;
+                /* Clear frame buffers to prevent garbage pixels from previous resolution */
+                memset(s_uiFrameBuf, 0, sizeof(s_uiFrameBuf));
+                memset(s_prevDrawnBuf, 0, sizeof(s_prevDrawnBuf));
                 ui_fps_reset();
             }
             draw_config_page();
@@ -1013,6 +1016,9 @@ static uint8 handle_config_option_touch(uint16 px, uint16 py)
                 s_prevDrawnValid = 0u;
                 s_uiFrameValid = 0u;
                 s_lastFrameTick = 0u;
+                /* Clear frame buffers to prevent garbage pixels from previous resolution */
+                memset(s_uiFrameBuf, 0, sizeof(s_uiFrameBuf));
+                memset(s_prevDrawnBuf, 0, sizeof(s_prevDrawnBuf));
                 ui_fps_reset();
             }
             draw_config_page();

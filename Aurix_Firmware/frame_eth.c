@@ -1252,15 +1252,18 @@ void frame_eth_poll_rx(void)
 
             if (magic == FE_MAGIC_COMMAND)
             {
+                g_feStats.cmdPacketsReceived++;
                 uint8 cmdId      = pRxBuf[16];
                 uint8 cmdPayload = pRxBuf[17];
 
                 if (cmdId == FE_CMD_SET_DEVICE)
                 {
+                    g_feStats.cmdSetDeviceReceived++;
                     FrameEthDevice newDev = (cmdPayload == (uint8)FE_DEVICE_OSRAM)
                                           ? FE_DEVICE_OSRAM
                                           : FE_DEVICE_NICHIA;
                     device_mode_set(newDev);
+                    g_feStats.cmdSetDeviceApplied++;
                 }
                 else if (cmdId == FE_CMD_DIAG_SNIFF)
                 {

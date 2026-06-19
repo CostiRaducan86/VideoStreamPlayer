@@ -22,8 +22,8 @@ internal sealed class PfsConfigParser
         public string Key => Selector != null ? $"{Name}{Selector}" : Name;
     }
 
-    private readonly List<string> _commentLines = new();
-    private readonly List<PfsEntry> _entries = new();
+    private readonly List<string> _commentLines = [];
+    private readonly List<PfsEntry> _entries = [];
 
     public IReadOnlyList<PfsEntry> Entries => _entries;
 

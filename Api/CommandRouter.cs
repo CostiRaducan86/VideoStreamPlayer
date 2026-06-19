@@ -97,6 +97,70 @@ namespace VilsSharpX.Api
                         });
                     }
 
+                    case "getcanuartstate":
+                        return CommandResponse.Success(command, reqId, _bridge.GetCanUartState());
+                    
+                    case "clearcanuart":
+                        _bridge.ClearCanUart();
+                        return CommandResponse.Success(command, reqId, new
+                        {
+                            cleared = true,
+                            state = _bridge.GetCanUartState()
+                        });
+                    
+                    case "startcanuartrecording":
+                        _bridge.StartCanUartRecording();
+                        return CommandResponse.Success(command, reqId, new
+                        {
+                            recording = true,
+                            state = _bridge.GetCanUartState()
+                        });
+                    
+                    case "stopcanuartrecording":
+                        _bridge.StopCanUartRecording();
+                        return CommandResponse.Success(command, reqId, new
+                        {
+                            recording = false,
+                            state = _bridge.GetCanUartState()
+                        });
+                    
+                    case "previouscanuartpage":
+                        _bridge.PreviousCanUartPage();
+                        return CommandResponse.Success(command, reqId, new
+                        {
+                            moved = "previous",
+                            state = _bridge.GetCanUartState()
+                        });
+                    
+                    case "nextcanuartpage":
+                        _bridge.NextCanUartPage();
+                        return CommandResponse.Success(command, reqId, new
+                        {
+                            moved = "next",
+                            state = _bridge.GetCanUartState()
+                        });
+                    
+                    case "setcanuartpage":
+                    {
+                        int? page = ReadOptionalInt(request!.Payload, "page");
+                    
+                        if (page is null)
+                            return CommandResponse.Failure(command, reqId, "BAD_REQUEST",
+                                "Missing required payload field: page.");
+                    
+                        if (page <= 0)
+                            return CommandResponse.Failure(command, reqId, "BAD_REQUEST",
+                                "page must be a positive 1-based page number.");
+                    
+                        _bridge.SetCanUartPage(page.Value);
+                    
+                        return CommandResponse.Success(command, reqId, new
+                        {
+                            requestedPage = page.Value,
+                            state = _bridge.GetCanUartState()
+                        });
+                    }
+
                     default:
                         return CommandResponse.Failure(command, reqId, "UNKNOWN_COMMAND",
                             $"Command '{command}' is not supported in v1.");

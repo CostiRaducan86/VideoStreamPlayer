@@ -191,7 +191,7 @@ public sealed class AvtpLiveCapture : IDisposable
 
             if (endFrame) {
                 _frameId++;
-                _log?.Invoke($"AVTP frame READY: seq={chunk.Seq} line={chunk.LineNumber1Based} end={chunk.EndFrame} bytes={(payload?.Length ?? 0)}");
+                //_log?.Invoke($"AVTP frame READY: seq={chunk.Seq} line={chunk.LineNumber1Based} end={chunk.EndFrame} bytes={(payload?.Length ?? 0)}");
             }
         }
         catch
