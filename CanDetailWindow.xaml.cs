@@ -21,8 +21,8 @@ public partial class CanDetailWindow : Window
             return;
         }
 
-        var (name, memType) = LsmRegisterMap.Resolve(record.Address);
-        string description = LsmRegisterMap.GetDescription(record.Address);
+        var (name, memType) = LsmRegisterMap.ResolveFromDeviceId(record.Address, record.DeviceId);
+        string description = LsmRegisterMap.GetDescription(record.Address, record.DeviceId);
 
         TxtTitle.Text = name == "/" ? $"0x{record.Address:X4}" : name;
 
@@ -77,7 +77,7 @@ public partial class CanDetailWindow : Window
             for (int i = 0; i < decoded.Length; i++)
             {
                 var (addr, val) = decoded[i];
-                var (rName, _) = LsmRegisterMap.Resolve(addr);
+                var (rName, _) = LsmRegisterMap.ResolveFromDeviceId(addr, record.DeviceId);
                 string nameStr = rName == "/" ? "null" : $"\"{rName}\"";
                 sb.Append($"  {{ \"Address\": \"0x{addr:X4}\", \"Value\": \"0x{val:X4}\", " +
                           $"\"Name\": {nameStr}, \"Index\": {i * 4} }}");

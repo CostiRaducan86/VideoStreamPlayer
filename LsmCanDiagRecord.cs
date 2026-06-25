@@ -80,6 +80,16 @@ public sealed class LsmCanDiagRecord
         }
     }
 
+    /// <summary>
+    /// Calculate timestamp in microseconds combining SourceTimestamp (milliseconds) and InterFrameDelayUs.
+    /// Result: SourceTimestamp_ms * 1000 + InterFrameDelayUs.
+    /// Useful for high-precision timing reconstruction and display in microseconds.
+    /// </summary>
+    public long GetCalculatedTimestampMicroseconds()
+    {
+        return (long)SourceTimestamp * 1000 + InterFrameDelayUs;
+    }
+
     private (ushort Address, ushort Value)[] DecodeOsramRegisters()
     {
         if (RawLength < 4 || RawPayload.Length < 4)

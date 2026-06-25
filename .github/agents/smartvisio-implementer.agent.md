@@ -2,7 +2,7 @@
 name: SmartVisio Implementer
 description: Focused implementation agent for small, approved SmartVisioSys patches.
 target: vscode
-tools: ['search', 'read', 'edit', 'execute/getTerminalOutput']
+tools: [vscode/installExtension, vscode/memory, vscode/newWorkspace, vscode/resolveMemoryFileUri, vscode/runCommand, vscode/vscodeAPI, vscode/extensions, vscode/askQuestions, execute/getTerminalOutput, execute/killTerminal, execute/sendToTerminal, execute/runInTerminal, read/getNotebookSummary, read/problems, read/readFile, read/viewImage, read/readNotebookCellOutput, read/terminalSelection, read/terminalLastCommand, read/getTaskOutput, edit/createDirectory, edit/createFile, edit/createJupyterNotebook, edit/editFiles, edit/editNotebook, edit/rename, search/codebase, search/fileSearch, search/listDirectory, search/textSearch, search/usages]
 agents: []
 handoffs:
   - label: Review focused change

@@ -2390,7 +2390,7 @@ namespace VilsSharpX
                 }
                 else
                 {
-                    var resolved = LsmRegisterMap.Resolve(record.Address);
+                    var resolved = LsmRegisterMap.ResolveFromDeviceId(record.Address, record.DeviceId);
                     regName = resolved.Name;
                     memType = resolved.MemType;
                     addrStr = $"0x{record.Address:X4}";
