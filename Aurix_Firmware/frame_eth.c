@@ -1223,6 +1223,7 @@ boolean frame_eth_send_can_diag_pending(void)
 
 #include "device_mode.h"   /* device_mode_set() */
 #include "adapter_ctrl.h"  /* adapter_ctrl_set_mode/can_uart/apply() */
+#include "can_uart_bridge.h" /* can_uart_bridge_set_active() */
 #include "can_hw.h"        /* diag_uart_init_for_device() */
 
 void frame_eth_poll_rx(void)
@@ -1295,7 +1296,15 @@ void frame_eth_poll_rx(void)
                     adapter_can_uart_mode_t canEnum = CAN_UART_ECU;
                     if (canMode == 1u) canEnum = CAN_UART_DIRECT;
                     else if (canMode == 2u) canEnum = CAN_UART_EXTERNAL;
+
+                    /* Route the bus FIRST (sets CAN_SEL / EXT_CAN_SEL), then
+                     * start or stop the active forwarding bridge.  AURIX
+                     * forwards bytes only in Direct CAN-UART mode; in ECU and
+                     * External modes it must not drive the bus, so forwarding
+                     * stays OFF and the bus is a hardware passthrough. */
                     adapter_ctrl_apply(ctrlEnum, canEnum);
+                    can_uart_bridge_set_active(
+                        (canEnum == CAN_UART_DIRECT) ? TRUE : FALSE);
                 }
             }
         }

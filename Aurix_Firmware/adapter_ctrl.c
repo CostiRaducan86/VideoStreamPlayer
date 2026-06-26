@@ -108,3 +108,13 @@ void adapter_ctrl_apply(adapter_control_mode_t ctrl, adapter_can_uart_mode_t can
     adapter_ctrl_set_mode(ctrl);
     adapter_ctrl_set_can_uart(can);
 }
+
+void adapter_ctrl_set_can_bridge(boolean enable)
+{
+    /* Adapter_V2: CAN_SEL HIGH routes the diagnostic bus through the two
+     * on-board CAN transceivers wired to AURIX (active forwarding).
+     * CAN_SEL LOW is the fail-safe direct ECU<->LSM bridge.
+     * EXT_CAN_SEL stays LOW (no external CAN source on Adapter_V2). */
+    pin_set(PIN_EXT_CAN_SEL, FALSE);
+    pin_set(PIN_CAN_SEL,     enable ? TRUE : FALSE);
+}

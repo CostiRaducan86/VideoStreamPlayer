@@ -12,6 +12,7 @@
 #include "asclin1_dma.h"
 #include "can_diag.h"
 #include "can_hw.h"
+#include "can_uart_bridge.h"
 #include "rxmon.h"
 #include "osram_frame.h"
 
@@ -51,6 +52,11 @@ void device_mode_init(FrameEthDevice device)
 
     /* Initialise diagnostic UART sniffer on ASCLIN9 / P20.7 */
     diag_uart_init_for_device((uint8)device);
+
+    /* Adapter_V2: initialise the active CAN-UART forwarding bridge
+     * (ASCLIN5 ECU side + ASCLIN4 LSM side).  Forwarding stays OFF and
+     * CAN_SEL stays LOW until can_uart_bridge_set_active(TRUE) is called. */
+    can_uart_bridge_init((uint8)device);
 }
 
 void device_mode_set(FrameEthDevice device)
@@ -88,6 +94,15 @@ void device_mode_set(FrameEthDevice device)
     /* 5. Reconfigure diagnostic UART framing/parser for the selected LSM.
      *    Osram stays on 8O2; Nichia/TLD816K uses 8N1. */
     diag_uart_init_for_device((uint8)device);
+
+    /* 6. Reconfigure the active CAN-UART bridge framing for the new device.
+     *    Preserve the current active/CAN_SEL state across the switch. */
+    {
+        boolean wasActive = can_uart_bridge_is_active();
+        can_uart_bridge_init((uint8)device);
+        if (wasActive)
+            can_uart_bridge_set_active(TRUE);
+    }
 
     s_currentDevice = device;
 }

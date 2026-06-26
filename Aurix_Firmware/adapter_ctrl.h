@@ -80,6 +80,13 @@ void adapter_ctrl_set_mode(adapter_control_mode_t mode);
 /* Apply the CAN UART Mode (independent of control mode). */
 void adapter_ctrl_set_can_uart(adapter_can_uart_mode_t mode);
 
+/* Adapter_V2 active CAN-UART bridge selector (drives CAN_SEL only).
+ *   enable = TRUE  -> CAN_SEL HIGH: bus routed through AURIX transceivers
+ *                     (active CAN-UART forwarding via can_uart_bridge.c).
+ *   enable = FALSE -> CAN_SEL LOW : fail-safe direct bridge ECU<->LSM.
+ * EXT_CAN_SEL is forced LOW (external CAN source not used on Adapter_V2). */
+void adapter_ctrl_set_can_bridge(boolean enable);
+
 /* Convenience: apply both modes at once. */
 void adapter_ctrl_apply(adapter_control_mode_t ctrl, adapter_can_uart_mode_t can);
 

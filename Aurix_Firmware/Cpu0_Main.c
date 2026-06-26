@@ -42,6 +42,7 @@
 #include "asclin1_dma.h"
 #include "can_diag.h"
 #include "can_hw.h"
+#include "can_uart_bridge.h"
 #include "rxmon.h"
 #include "osram_frame.h"
 #include "frame_eth.h"
@@ -298,6 +299,15 @@ void core0_main(void)
      * which puts adapter in Direct mode and breaks ECU path. */
     adapter_ctrl_init();  /* Sets ECU mode: TTL_SEL=HIGH, ECU_5V_EN=HIGH, relays OFF */
 
+    /* Adapter_V2 active CAN-UART bridge.
+     * device_mode_init() already configured ASCLIN5 (ECU) + ASCLIN4 (LSM) and
+     * initialised the bridge with forwarding OFF.  adapter_ctrl_init() left the
+     * adapter in ECU CAN-UART mode (CAN_SEL LOW): the ECU and LSM are wired
+     * directly in hardware and AURIX only sniffs the bus.  This is the safe
+     * default so the ECU never enters fail-safe after a reset+run.
+     * The active forwarding bridge (CAN_SEL HIGH) is started on demand only
+     * when "Direct CAN UART" is selected from the UI (FE_CMD_SET_ADAPTER). */
+
     /* Basler trigger on P23.1 -> camera Pin 3 (Line3), GND -> Pin 6 */
     camera_trigger_init();
     /* SYNC mode: trigger fires on each LVDS frame-complete (from osram_frame.c).
@@ -358,9 +368,25 @@ void core0_main(void)
             DiagUartFrame diagFrame;
             if (diag_uart_try_receive(&diagFrame))
             {
-                can_diag_bridge_uart_frame(&diagFrame, (uint8)device_mode_get());
+                /* On Adapter_V2 the diagnostic traffic is tapped by the active
+                 * ASCLIN5/ASCLIN4 bridge below.  The legacy ASCLIN9 pin (P20.7)
+                 * is then unconnected and would otherwise feed floating-pin
+                 * noise (phantom records even with ECU/LSM powered off) and
+                 * duplicate every real frame.  Keep the DMA consumer warm by
+                 * still draining it, but only publish its frames when the active
+                 * bridge is NOT running. */
+                if (!can_uart_bridge_is_active())
+                {
+                    can_diag_bridge_uart_frame(&diagFrame, (uint8)device_mode_get());
+                }
             }
         }
+
+        /* Adapter_V2 active CAN-UART bridge: emit idle-gap-delimited
+         * directional frames (ECU->LSM requests, LSM->ECU responses) into
+         * the diagnostic queue.  Transparent byte forwarding itself runs in
+         * the ASCLIN5/ASCLIN4 RX ISRs, independent of this poll. */
+        can_uart_bridge_tick();
 
         /* Send assembled frame over Ethernet (if ready) */
         frame_eth_send_pending();
