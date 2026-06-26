@@ -2476,19 +2476,24 @@ namespace VilsSharpX
             // a consistent (B, matchedA) pair.
             var matched = FindBestMatchA(frame, _currentWidth * _currentHeight);
 
+            // True when playback loop is NOT active (standalone LVDS capture mode)
+            bool standaloneLvdsMode = (_playback.Cts == null);
+
             lock (_frameLock)
             {
                 _matchedAForDiff = matched;
                 _latestB = new Frame(_currentWidth, _currentHeight, frame, DateTime.UtcNow);
                 _lastLvdsFrameUtc = DateTime.UtcNow;
                 _lvdsSignalLost = false;
-            }
 
-            // When the main playback loop is NOT running (user didn't press Start),
-            // render LVDS frame directly on pane B (standalone LVDS capture mode).
-            if (_playback.Cts == null)
-            {
-                RenderLvdsOnly(frame);
+                // When the main playback loop is NOT running (user didn't press Start),
+                // render LVDS frame directly on pane B (standalone LVDS capture mode).
+                // Rendering INSIDE the lock prevents race conditions with playback loop
+                // accessing _wbB concurrently.
+                if (standaloneLvdsMode)
+                {
+                    RenderLvdsOnlyLocked(frame);
+                }
             }
         }
 
@@ -2496,7 +2501,46 @@ namespace VilsSharpX
         /// Renders LVDS frame on pane B (and optionally A/DIFF) when the main
         /// AVTP playback loop is not active. This allows standalone LVDS capture
         /// without needing to hit the Start button.
+        ///
+        /// LOCKED version: must be called INSIDE _frameLock to prevent concurrent
+        /// bitmap writes from playback loop rendering pane D.
         /// </summary>
+        private void RenderLvdsOnlyLocked(byte[] frame)
+        {
+            int w = _currentWidth;
+            int h = _currentHeight;
+
+            // Pane B: LVDS frame
+            if (frame.Length == w * h)
+            {
+                BitmapUtils.Blit(_wbB, frame, w);
+            }
+            else if (frame.Length > 0)
+            {
+                // Dimension mismatch — create a padded/cropped buffer
+                var safeFrame = new byte[w * h];
+                int copyLen = Math.Min(frame.Length, safeFrame.Length);
+                Buffer.BlockCopy(frame, 0, safeFrame, 0, copyLen);
+                BitmapUtils.Blit(_wbB, safeFrame, w);
+            }
+
+            // Pane A: show the loaded/generated source frame (gradient if nothing loaded)
+            var aData = GetASourceBytes();
+            BitmapUtils.Blit(_wbA, aData, w);
+
+            // Pane D: |A − B| diff
+            DiffRenderer.RenderCompareToBgr(_diffBgr, aData, frame.Length == w * h ? frame : _noSignalGrayFrame,
+                w, h, _diffThreshold, _zeroZeroIsWhite,
+                out var minDiff, out var maxDiff, out _,
+                out _, out var meanAbsDiff, out var aboveDeadband,
+                out var totalDarkPixels);
+            BitmapUtils.Blit(_wbD, _diffBgr, w * 3);
+
+            // Update stats (same as RenderLvdsOnly, but explicitly here too)
+            // Note: the stats UI elements (LblLvdsFrameCount etc.) are updated in HandleLvdsFrameReady
+            // This rendering-only function doesn't touch them.
+        }
+
         private void RenderLvdsOnly(byte[] frame)
         {
             int w = _currentWidth;
