@@ -45,19 +45,30 @@
 
 #define BRIDGE_TX_FIFO_DEPTH      16u   /* ASCLIN TX FIFO depth  */
 
-/* A directional frame is emitted when the line stays idle for this long.
- * 50 us >> one byte time (~5.5 us @ 2 Mbaud) so it reliably separates the
- * request burst from the response burst on each directional channel.       */
-#define BRIDGE_IDLE_THRESHOLD_US  50u
-
 /* Accumulator capacity per direction (one diagnostic frame fits easily). */
 #define BRIDGE_ACC_MAX            CAN_DIAG_RAW_MAX   /* 72 */
 
-/* Sync-gated capture: only start a monitoring frame at a valid sync byte and
- * never emit a burst shorter than this.  Kills 1-2 byte noise records that an
- * unterminated/floating CAN bus otherwise produces (e.g. lone "80 A5").      */
-#define BRIDGE_MIN_FRAME_BYTES    4u
 #define BRIDGE_OSRAM_SYNC0        0x80u  /* Osram diagnostic frame SYNC0 */
+
+/* ---- Osram diagnostic frame structure (KEWGBXXD1U) ----------------------
+ * The merged monitor stream is framed by LENGTH, exactly like the legacy
+ * ASCLIN9 sniffer (diag_uart_try_receive_osram), NOT by an idle gap.  An idle
+ * gap that landed mid-transaction (e.g. the ~13 us request->response turnaround
+ * or any inter-byte stretch) used to split a frame into a short head record
+ * ("Malformed") and a discarded tail.  Length framing derives the exact frame
+ * size from the HCTRL byte so a frame is only ever emitted once all of its
+ * bytes are present, embedded 0x80 data bytes can never re-trigger a sync, and
+ * fragments disappear. */
+#define BRIDGE_OSRAM_SYNC1        0xA5u  /* SYNC1 (master address)            */
+#define BRIDGE_FRAME_HEADER_LEN   4u     /* SYNC0 SYNC1 HCTRL HADR            */
+#define BRIDGE_FRAME_CRC_LEN      2u     /* trailing CRC-16                   */
+#define BRIDGE_RD_DELAY_US        6u     /* read response latency (~1 byte)   */
+
+/* A header whose remaining bytes never arrive (e.g. a read request whose
+ * response was lost) is discarded after this much bus-quiet so the parser
+ * resynchronises on the next transaction instead of stalling on the partial.
+ * Sits above the ~300 us inter-transaction idle yet flushes promptly.        */
+#define BRIDGE_STALE_FLUSH_US     500u
 
 /* Bus-quiet timeout after which the half-duplex relay lock is released back to
  * RELAY_IDLE.  This is ONLY a safety net for a desynchronised lock (e.g. a lost
@@ -99,7 +110,6 @@ static bridge_dir_t  s_lsmDir;    /* RX from LSM  -> forward to ECU TX */
 static volatile uint8 s_bridgeActive;  /* 1 = forwarding + capturing       */
 static uint8          s_deviceId = BRIDGE_DEVICE_OSRAM;
 static uint32         s_ticksPerUs = 100u;  /* STM0 ticks per microsecond  */
-static uint8          s_syncByte = BRIDGE_OSRAM_SYNC0;  /* 0 = no sync gate */
 
 /* ---- Half-duplex relay arbitration --------------------------------------
  * The diagnostic bus is strictly turn-based: the ECU issues a request, the LSM
@@ -140,58 +150,39 @@ static volatile uint32 s_relayResyncs;  /* telemetry: idle/overflow resyncs  */
  * Genuine (echo-filtered) bytes from BOTH directions are appended here in
  * processing order: the ECU request bytes first, then the LSM response bytes
  * ~6 us later.  This reproduces the single-wire view the legacy ASCLIN9 sniffer
- * captured, so one read transaction = one record "80A5BE00 + <response> + CRC"
- * instead of a request-only "Malformed" record plus a discarded response.
- * Sync-gated on the first byte only (Osram frames start 0x80); emitted on a
- * global bus-idle gap. */
+ * captured, so one read transaction = one record "80A5BE00 + <response> + CRC".
+ * The buffer is a linear parse buffer drained by bridge_mon_tick(), which
+ * extracts complete frames by LENGTH (see BRIDGE_FRAME_* above). */
 static volatile uint8  s_monAcc[BRIDGE_ACC_MAX];
 static volatile uint16 s_monLen;
-static volatile uint32 s_monStartStm;    /* STM of first (request) byte       */
+static volatile uint32 s_monStartStm;    /* STM of byte[0] (current frame)    */
 static volatile uint32 s_monLastStm;     /* STM of last byte appended         */
-static volatile uint32 s_monReqEndStm;   /* STM of last request byte          */
-static volatile uint32 s_monRspStm;      /* STM of first response byte (0=none)*/
 static uint32          s_monPrevEndStm;  /* for inter-frame delay             */
-static volatile uint32 s_monNoiseSkipped;/* non-sync / short-burst drops      */
+static volatile uint32 s_monNoiseSkipped;/* sync-hunt / discarded bytes       */
 static volatile uint32 s_monOverflow;    /* accumulator overflow              */
 static volatile uint32 s_monFramesBridged;
 
 /* ======================== Low-level forwarding ======================== */
 
-/* Append a genuine (already echo-filtered) byte to the SHARED monitoring
- * accumulator.  Both directions feed the same stream in processing order, so
- * request bytes (isResponse=FALSE) and the response that follows (isResponse=
- * TRUE) end up in one record.  Sync-gated for Osram so the stream only starts
- * on a real frame SYNC0 (0x80) and ignores floating-bus noise.  Forwarding is
- * independent of this; gating only affects what the UI trace shows. */
-static void bridge_mon_capture(uint8 b, uint32 stm, boolean isResponse)
+/* Append a genuine (already echo-filtered) byte to the SHARED monitoring parse
+ * buffer.  Both directions feed the same linear buffer in processing order
+ * (request bytes, then the response that follows); bridge_mon_tick() later
+ * extracts complete frames by length.  No sync gating here — the extractor
+ * hunts the sync pair so an out-of-phase start self-corrects. */
+static void bridge_mon_capture(uint8 b, uint32 stm)
 {
-    if (s_monLen == 0u)
+    if (s_monLen >= BRIDGE_ACC_MAX)
     {
-        if (s_syncByte != 0u && b != s_syncByte)
-        {
-            s_monNoiseSkipped++;   /* wait for a real frame start */
-            return;
-        }
-        s_monStartStm  = stm;
-        s_monReqEndStm = stm;
-        s_monRspStm    = 0u;
-    }
-
-    if (s_monLen < BRIDGE_ACC_MAX)
-        s_monAcc[s_monLen++] = b;
-    else
+        /* Parser fell behind on unframable data: drop the buffer rather than
+         * dead-lock.  Bounded frames (<=38 B) make this practically unreachable. */
         s_monOverflow++;
-
-    if (isResponse)
-    {
-        if (s_monRspStm == 0u)
-            s_monRspStm = stm;     /* first response byte of this transaction */
-    }
-    else
-    {
-        s_monReqEndStm = stm;      /* last request byte before any response   */
+        s_monLen = 0u;
     }
 
+    if (s_monLen == 0u)
+        s_monStartStm = stm;
+
+    s_monAcc[s_monLen++] = b;
     s_monLastStm = stm;
 }
 
@@ -201,7 +192,7 @@ static void bridge_mon_capture(uint8 b, uint32 stm, boolean isResponse)
  * exact even if the TX FIFO is momentarily full (which cannot happen at cut-
  * through on a same-baud bus, but is handled defensively). */
 static void bridge_forward(bridge_dir_t *srcDir, Ifx_ASCLIN *dst,
-                           uint8 b, uint32 stm, boolean isResponse)
+                           uint8 b, uint32 stm)
 {
     if (dst->TXFIFOCON.B.FILL < BRIDGE_TX_FIFO_DEPTH)
     {
@@ -214,7 +205,7 @@ static void bridge_forward(bridge_dir_t *srcDir, Ifx_ASCLIN *dst,
         srcDir->txDropped++;   /* not transmitted -> generates no echo */
     }
 
-    bridge_mon_capture(b, stm, isResponse);
+    bridge_mon_capture(b, stm);
 }
 
 /* Discard any bytes sitting in an RX FIFO (used on overflow recovery only). */
@@ -300,7 +291,7 @@ static void bridge_relay_pump(void)
                         s_echoCount = 0u;
                         s_relayReqCount++;
                     }
-                    bridge_forward(&s_ecuDir, lsm, b, stm, FALSE);
+                    bridge_forward(&s_ecuDir, lsm, b, stm);
                 }
             }
         }
@@ -332,7 +323,7 @@ static void bridge_relay_pump(void)
                         s_echoCount = 0u;
                         s_relayRspCount++;
                     }
-                    bridge_forward(&s_lsmDir, ecu, b, stm, TRUE);
+                    bridge_forward(&s_lsmDir, ecu, b, stm);
                 }
             }
         }
@@ -463,10 +454,6 @@ void can_uart_bridge_init(uint8 deviceId)
     s_deviceId = (deviceId == BRIDGE_DEVICE_NICHIA) ? BRIDGE_DEVICE_NICHIA
                                                     : BRIDGE_DEVICE_OSRAM;
 
-    /* Sync-gate the monitoring capture for Osram (frames start with 0x80).
-     * Nichia diagnostic sync is not assumed here -> rely on min-length only. */
-    s_syncByte = (s_deviceId == BRIDGE_DEVICE_OSRAM) ? BRIDGE_OSRAM_SYNC0 : 0u;
-
     /* Keep forwarding OFF while we (re)configure the UART hardware. */
     s_bridgeActive = 0u;
 
@@ -546,91 +533,157 @@ boolean can_uart_bridge_is_active(void)
     return (s_bridgeActive != 0u) ? TRUE : FALSE;
 }
 
-/* Emit the accumulated shared-stream transaction to the diagnostic UI queue.
- * One record = ECU request bytes + LSM response bytes, in wire order, matching
- * the legacy single-wire sniffer format. */
-static void bridge_mon_emit(void)
+/* Total Osram frame length (header + data + CRC) decoded from the HCTRL byte,
+ * identical to the legacy sniffer's diag_full_frame_length().  The HCTRL nRegs
+ * field describes both write-data and read-response register counts, so this is
+ * the full merged length for either operation. */
+static uint8 bridge_mon_full_len(uint8 hctrl)
 {
-    DiagUartFrame frame;
-    uint16        len;
-    uint32        startStm;
-    uint32        reqEndStm;
-    uint32        rspStm;
-    boolean       intState;
-
-    /* Snapshot + clear the accumulator atomically vs the RX ISR. */
-    intState  = IfxCpu_disableInterrupts();
-    len       = s_monLen;
-    startStm  = s_monStartStm;
-    reqEndStm = s_monReqEndStm;
-    rspStm    = s_monRspStm;
-    if (len > 0u)
-    {
-        if (len > sizeof(frame.data))
-            len = (uint16)sizeof(frame.data);
-        memcpy(frame.data, (const void *)s_monAcc, len);
-        s_monLen = 0u;
-    }
-    IfxCpu_restoreInterrupts(intState);
-
-    if (len == 0u)
-        return;
-
-    /* Drop sub-minimum bursts (lone sync / noise) so the trace only shows
-     * plausible diagnostic frames. */
-    if (len < BRIDGE_MIN_FRAME_BYTES)
-    {
-        s_monNoiseSkipped++;
-        return;
-    }
-
-    frame.len         = (uint8)len;
-    frame.timestampUs = startStm / s_ticksPerUs;
-
-    /* Inter-frame delay: gap since previous transaction on the bus. */
-    if (s_monPrevEndStm != 0u)
-    {
-        uint32 gap = startStm - s_monPrevEndStm;
-        uint32 us  = gap / s_ticksPerUs;
-        frame.interFrameDelayUs = (us > 0xFFFFu) ? 0xFFFFu : (uint16)us;
-    }
-    else
-    {
-        frame.interFrameDelayUs = 0u;
-    }
-
-    /* Response delay: gap between the last request byte and the first response
-     * byte (~6 us for Osram).  0 = no response in this transaction (e.g. write). */
-    if (rspStm != 0u && rspStm >= reqEndStm)
-    {
-        uint32 us = (rspStm - reqEndStm) / s_ticksPerUs;
-        frame.responseDelayUs = (us > 0xFFFFu) ? 0xFFFFu : (uint16)us;
-    }
-    else
-    {
-        frame.responseDelayUs = 0u;
-    }
-
-    s_monPrevEndStm = s_monLastStm;
-
-    if (can_diag_bridge_uart_frame(&frame, (uint8)s_deviceId))
-        s_monFramesBridged++;
+    uint8 nRegs = (uint8)(((hctrl >> 1u) & 0x0Fu) + 1u);
+    return (uint8)(BRIDGE_FRAME_HEADER_LEN + nRegs * 2u + BRIDGE_FRAME_CRC_LEN);
 }
 
-/* Emit the shared transaction once the whole bus has been idle long enough that
- * both the request and its response are complete. */
+/* Remove n bytes from the front of the parse buffer (caller holds the int-lock). */
+static void bridge_mon_compact(uint16 n)
+{
+    if (n >= s_monLen)
+    {
+        s_monLen = 0u;
+        return;
+    }
+    memmove((void *)s_monAcc, (const void *)&s_monAcc[n], (size_t)(s_monLen - n));
+    s_monLen = (uint16)(s_monLen - n);
+    /* Remaining bytes belong to the next transaction; approximate its start. */
+    s_monStartStm = s_monLastStm;
+}
+
+/* One length-framing step over the shared parse buffer (caller holds the
+ * int-lock).  Returns TRUE when it made progress (a frame was produced into
+ * *out, or noise/a bare request was discarded) so the caller loops again;
+ * FALSE when the buffer holds only an incomplete frame and must wait for more
+ * bytes.  Mirrors diag_uart_try_receive_osram() but on the merged relay stream. */
+static boolean bridge_mon_parse_step(DiagUartFrame *out, boolean *haveFrame)
+{
+    uint8  hctrl;
+    uint8  fullLen;
+    uint8  copyLen;
+    uint16 i;
+
+    *haveFrame = FALSE;
+
+    if (s_monLen < 2u)
+        return FALSE;
+
+    /* Hunt the SYNC0 (0x80) at the front of the buffer. */
+    if (s_monAcc[0] != BRIDGE_OSRAM_SYNC0)
+    {
+        for (i = 1u; i < s_monLen; i++)
+        {
+            if (s_monAcc[i] == BRIDGE_OSRAM_SYNC0)
+                break;
+        }
+        s_monNoiseSkipped += i;
+        bridge_mon_compact(i);
+        return (s_monLen >= 2u) ? TRUE : FALSE;
+    }
+
+    /* Verify SYNC1 (0xA5); if absent, this was a stray 0x80 — skip it. */
+    if (s_monAcc[1] != BRIDGE_OSRAM_SYNC1)
+    {
+        s_monNoiseSkipped++;
+        bridge_mon_compact(1u);
+        return TRUE;
+    }
+
+    if (s_monLen < BRIDGE_FRAME_HEADER_LEN)
+        return FALSE;          /* wait for HCTRL + HADR */
+
+    hctrl = (uint8)s_monAcc[2];
+
+    /* Read frame: distinguish a bare 4-byte read request (no response captured)
+     * from a full read response by peeking at bytes [4..5].  If they are the
+     * next sync pair the response is missing, so drop the request header instead
+     * of letting it swallow the following frame. */
+    if ((hctrl & 0x80u) != 0u)
+    {
+        if (s_monLen < 6u)
+            return FALSE;      /* need [4..5] before deciding */
+
+        if (s_monAcc[4] == BRIDGE_OSRAM_SYNC0 &&
+            s_monAcc[5] == BRIDGE_OSRAM_SYNC1)
+        {
+            s_monNoiseSkipped += BRIDGE_FRAME_HEADER_LEN;
+            bridge_mon_compact(BRIDGE_FRAME_HEADER_LEN);
+            return TRUE;
+        }
+    }
+
+    fullLen = bridge_mon_full_len(hctrl);
+
+    if (s_monLen < fullLen)
+        return FALSE;          /* wait for the rest of the frame */
+
+    /* Complete frame — emit exactly fullLen bytes. */
+    copyLen = (fullLen <= (uint8)sizeof(out->data)) ? fullLen : (uint8)sizeof(out->data);
+    memcpy(out->data, (const void *)s_monAcc, copyLen);
+    out->len             = copyLen;
+    out->timestampUs     = s_monStartStm / s_ticksPerUs;
+    out->responseDelayUs = ((hctrl & 0x80u) != 0u) ? BRIDGE_RD_DELAY_US : 0u;
+
+    if (s_monPrevEndStm != 0u)
+    {
+        uint32 gap = s_monStartStm - s_monPrevEndStm;
+        uint32 us  = gap / s_ticksPerUs;
+        out->interFrameDelayUs = (us > 0xFFFFu) ? 0xFFFFu : (uint16)us;
+    }
+    else
+    {
+        out->interFrameDelayUs = 0u;
+    }
+    s_monPrevEndStm = s_monLastStm;
+
+    bridge_mon_compact(fullLen);
+    *haveFrame = TRUE;
+    return TRUE;
+}
+
+/* Drain the shared parse buffer, pushing every complete length-framed
+ * transaction to the diagnostic UI queue.  A header whose remainder never
+ * arrives is discarded after a long bus-quiet so the parser resynchronises. */
 static void bridge_mon_tick(void)
 {
-    uint16 len = s_monLen;
-    if (len == 0u)
-        return;
+    boolean progress = TRUE;
 
+    while (progress)
     {
-        uint32 now    = IfxStm_getLower(&MODULE_STM0);
-        uint32 idleTk = now - s_monLastStm;
-        uint32 idleUs = idleTk / s_ticksPerUs;
-        if (idleUs >= BRIDGE_IDLE_THRESHOLD_US)
-            bridge_mon_emit();
+        DiagUartFrame frame;
+        boolean       haveFrame = FALSE;
+        boolean       intState  = IfxCpu_disableInterrupts();
+        progress = bridge_mon_parse_step(&frame, &haveFrame);
+        IfxCpu_restoreInterrupts(intState);
+
+        if (haveFrame)
+        {
+            if (can_diag_bridge_uart_frame(&frame, (uint8)s_deviceId))
+                s_monFramesBridged++;
+        }
+    }
+
+    /* Stale-partial flush: discard an incomplete frame whose missing bytes
+     * never showed up, so a lost response cannot block the buffer forever. */
+    {
+        boolean intState = IfxCpu_disableInterrupts();
+        if (s_monLen > 0u)
+        {
+            uint32 now    = IfxStm_getLower(&MODULE_STM0);
+            uint32 idleUs = (now - s_monLastStm) / s_ticksPerUs;
+            if (idleUs >= BRIDGE_STALE_FLUSH_US)
+            {
+                s_monNoiseSkipped += s_monLen;
+                s_monLen = 0u;
+            }
+        }
+        IfxCpu_restoreInterrupts(intState);
     }
 }
 
@@ -682,8 +735,6 @@ void can_uart_bridge_reset_state(void)
     s_monLen          = 0u;
     s_monStartStm     = 0u;
     s_monLastStm      = 0u;
-    s_monReqEndStm    = 0u;
-    s_monRspStm       = 0u;
     s_monPrevEndStm   = 0u;
     s_monNoiseSkipped = 0u;
     s_monOverflow     = 0u;
