@@ -215,17 +215,36 @@ static void bridge_drain_rx(Ifx_ASCLIN *asc)
         (void)IfxAsclin_readRxData(asc);
 }
 
-/* Half-duplex relay pump.  Called from BOTH RX ISRs; serialised by a short
- * global interrupt-disable so the two channels never race on the shared relay
- * state (the lower-priority ECU ISR cannot be corrupted mid-update by the
- * higher-priority LSM ISR, and vice versa).  All work is bounded (FIFOs are 16
- * deep), no allocation, no blocking. */
+/* Re-entrancy guard so the two RX ISRs never run the pump body concurrently and
+ * race on the shared relay state.  It is set/cleared with only a 2-instruction
+ * interrupt disable (NOT around the whole pump). */
+static volatile uint8 s_pumpBusy = 0u;
+
+/* Half-duplex relay pump.  Called from BOTH RX ISRs.  The two channels never run
+ * the pump body concurrently thanks to s_pumpBusy: if the higher-priority LSM
+ * ISR preempts the ECU ISR mid-pump it sees the guard set and returns at once
+ * (the running pump drains BOTH FIFOs, so nothing is lost).  Crucially the body
+ * runs with interrupts ENABLED, so the prio-14 LVDS DMA ISR can preempt it and
+ * the LVDS capture / Ethernet TX path is no longer starved by the bridge (this
+ * starvation was the root cause of the pane-B glitch that appeared once the two
+ * bridge ASCLINs were added).  All work is bounded (FIFOs are 16 deep), no
+ * allocation, no blocking. */
 static void bridge_relay_pump(void)
 {
     Ifx_ASCLIN *ecu = s_ascEcu.asclin;   /* RX from ECU, TX to LSM */
     Ifx_ASCLIN *lsm = s_ascLsm.asclin;   /* RX from LSM, TX to ECU */
-    boolean     is  = IfxCpu_disableInterrupts();
+    boolean     is;
     boolean     more = TRUE;
+
+    /* Re-entrancy test-and-set (minimal critical section, NOT the whole pump). */
+    is = IfxCpu_disableInterrupts();
+    if (s_pumpBusy != 0u)
+    {
+        IfxCpu_restoreInterrupts(is);
+        return;
+    }
+    s_pumpBusy = 1u;
+    IfxCpu_restoreInterrupts(is);
 
     /* RX-FIFO overflow forces a resync: a lost echo would otherwise desync the
      * echo counters and stall the lock until the idle timeout.  Clear the
@@ -332,7 +351,7 @@ static void bridge_relay_pump(void)
     IfxAsclin_clearRxFifoFillLevelFlag(ecu);
     IfxAsclin_clearRxFifoFillLevelFlag(lsm);
 
-    IfxCpu_restoreInterrupts(is);
+    s_pumpBusy = 0u;
 }
 
 /* ======================== Interrupt handlers ======================== */
