@@ -158,6 +158,13 @@ typedef struct
     volatile uint32 cmdPacketsReceived;    /* Total command packets (magic "CM") */
     volatile uint32 cmdSetDeviceReceived;  /* SET_DEVICE commands received */
     volatile uint32 cmdSetDeviceApplied;   /* SET_DEVICE successfully applied */
+
+    /* RX poll health (command path robustness) */
+    volatile uint32 rxPollBudgetHits;      /* poll loop hit per-call budget */
+    volatile uint32 rxNullBuffers;         /* getReceiveBuffer returned NULL */
+    volatile uint32 rxRecoveries;          /* RX descriptor ring recoveries  */
+    volatile uint32 rxDmaStatus;           /* DMA CH0 STATUS snapshot        */
+    volatile uint32 rxNoProgressEvents;    /* prolonged no-progress events   */
 } FeStats;
 
 extern FeStats g_feStats;

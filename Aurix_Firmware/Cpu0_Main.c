@@ -84,6 +84,9 @@ static uint32 framesOk_base = 0;
  * ASCLIN1/DMA LVDS path, re-arm only the LVDS receiver and parser. */
 #define LVDS_RECOVERY_TIMEOUT_MS    1000u
 #define LVDS_RECOVERY_COOLDOWN_MS   1000u
+/* Main-loop fairness: drain at most N completed LVDS DMA buffers per pass so
+ * command RX/TX and bridge out-drain are serviced regularly on long runtimes. */
+#define LVDS_DRAIN_BUDGET           4u
 
 volatile uint32 g_lvdsRecoveryCount;
 volatile uint32 g_lvdsRecoveryLastDevice;
@@ -264,9 +267,12 @@ void core0_main(void)
          * longer than the DMA buffer fill time (~1.28 ms at 20 Mbaud). */
         {
             uint8 *completed;
-            while ((completed = asclin1_dma_get_completed_buffer()) != NULL_PTR)
+            uint8 drainCount = 0u;
+            while (drainCount < LVDS_DRAIN_BUDGET &&
+                   (completed = asclin1_dma_get_completed_buffer()) != NULL_PTR)
             {
                 consume_dma_buffer(completed, ASCLIN1_DMA_BUFFER_SIZE);
+                drainCount++;
             }
         }
 

@@ -30,6 +30,7 @@ static const uint8 s_dstMac[6] = { 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF };  /* bro
 /* ==================== GETH handle & buffers ==================== */
 static IfxGeth_Eth s_geth;
 static IfxGeth_Eth_TxChannelConfig s_txChannelConfig;
+static IfxGeth_Eth_RxChannelConfig s_rxChannelConfig;
 
 IFX_ALIGN(32) static uint8 s_txBuf[FE_TX_DESCRIPTORS * FE_TX_BUF_SIZE];
 IFX_ALIGN(32) static uint8 s_rxBuf[FE_RX_DESCRIPTORS * FE_RX_BUF_SIZE];
@@ -82,6 +83,13 @@ static volatile IfxGeth_TxDescr *s_txPendingDescr = NULL_PTR;
 FeStats g_feStats;
 
 #define FE_TX_RECOVERY_INTERVAL_MS   100u
+/* Main-loop fairness guardrails:
+ * - TX: do not send an entire frame (12-18 fragments) in one tight burst.
+ * - RX: do not stay forever in poll_rx() if RX ring status becomes sticky.
+ * These caps keep command polling, LVDS parsing and transport responsive even
+ * under transient MAC/DMA glitches. */
+#define FE_TX_FRAG_BURST_MAX         6u
+#define FE_RX_POLL_BUDGET            64u
 
 #define PHY_BMSR_LINK_STATUS         0x0004u
 #define PHY_BMSR_AUTONEG_COMPLETE    0x0020u
@@ -113,8 +121,14 @@ static uint8  s_phyFound        = 0u;
 static uint8  s_phyAddrRuntime  = 0u;
 static uint32 s_lastLinkPollStm = 0u;
 static uint32 s_lastTxRecoveryStm = 0u;
+static uint32 s_lastRxRecoveryStm = 0u;
 static uint32 s_lastLinkUp = 0u;
 static uint8  s_macSynced = 0u;
+
+/* RX watchdog: if command RX makes no progress for too long while link is up,
+ * reinitialize the RX descriptor ring in-place (no full GETH reinit needed). */
+static uint32 s_lastRxCmdCount = 0u;
+static uint32 s_lastRxProgressStm = 0u;
 
 /* ==================== RGMII pin configuration ==================== */
 /*
@@ -236,6 +250,14 @@ static void frame_eth_snapshot_tx_dma(void)
     frame_eth_cache_invalidate_range(descr, FE_TX_DESC_BYTES);
     if (descr != NULL_PTR)
         g_feStats.txDescOwn = descr->TDES3.R.OWN;
+}
+
+static void frame_eth_snapshot_rx_dma(void)
+{
+    if (s_geth.gethSFR == NULL_PTR)
+        return;
+
+    g_feStats.rxDmaStatus = s_geth.gethSFR->DMA_CH[IfxGeth_DmaChannel_0].STATUS.U;
 }
 
 static boolean frame_eth_tx_pending_complete(void)
@@ -387,6 +409,32 @@ static void frame_eth_recover_tx_ring(boolean force)
     s_txFragIdx  = 0u;
     s_txOffset   = 0u;
     s_txRemaining = 0u;
+}
+
+static void frame_eth_recover_rx_ring(boolean force)
+{
+    uint32 now = (uint32)IfxStm_getLower(&MODULE_STM0);
+    uint32 minInterval = (uint32)IfxStm_getTicksFromMilliseconds(&MODULE_STM0,
+                                                                 FE_TX_RECOVERY_INTERVAL_MS);
+
+    if (s_rxChannelConfig.rxDescrList == NULL_PTR || s_geth.gethSFR == NULL_PTR)
+        return;
+
+    if (!force && (uint32)(now - s_lastRxRecoveryStm) < minInterval)
+        return;
+
+    s_lastRxRecoveryStm = now;
+    frame_eth_snapshot_rx_dma();
+
+    /* Re-prime RX descriptors/buffers with APIs available in this iLLD build.
+     * Receiver wakeup handles the suspended/RBU path if needed. */
+    IfxGeth_Eth_initReceiveDescriptors(&s_geth, &s_rxChannelConfig);
+    IfxGeth_Eth_wakeupReceiver(&s_geth, IfxGeth_RxDmaChannel_0);
+    IfxGeth_Eth_startTransmitters(&s_geth, 1u);
+    IfxGeth_Eth_startReceivers(&s_geth, 1u);
+
+    g_feStats.rxRecoveries++;
+    frame_eth_snapshot_rx_dma();
 }
 
 static boolean frame_eth_sync_mac_with_phy(void)
@@ -585,8 +633,11 @@ void frame_eth_init(FrameEthDevice device)
     s_phyAddrRuntime  = 0u;
     s_lastLinkPollStm = 0u;
     s_lastTxRecoveryStm = 0u;
+    s_lastRxRecoveryStm = 0u;
     s_lastLinkUp = 0u;
     s_macSynced = 0u;
+    s_lastRxCmdCount = 0u;
+    s_lastRxProgressStm = (uint32)IfxStm_getLower(&MODULE_STM0);
     g_feStats.initStep = 1;
 
     /* ╔═══════════════════════════════════════════════════════════════════════╗
@@ -645,6 +696,7 @@ void frame_eth_init(FrameEthDevice device)
         IfxGeth_Index gethInst = IfxGeth_getIndex(&MODULE_GETH);
 
         memset(&s_txChannelConfig, 0, sizeof(s_txChannelConfig));
+        memset(&s_rxChannelConfig, 0, sizeof(s_rxChannelConfig));
         s_txChannelConfig.channelEnable        = TRUE;
         s_txChannelConfig.channelId             = IfxGeth_TxDmaChannel_0;
         s_txChannelConfig.txDescrList           = &IfxGeth_Eth_txDescrList[gethInst][0];
@@ -653,11 +705,13 @@ void frame_eth_init(FrameEthDevice device)
 
         config.dma.txChannel[0] = s_txChannelConfig;
 
-        config.dma.rxChannel[0].channelEnable        = TRUE;
-        config.dma.rxChannel[0].channelId             = IfxGeth_RxDmaChannel_0;
-        config.dma.rxChannel[0].rxDescrList           = &IfxGeth_Eth_rxDescrList[gethInst][0];
-        config.dma.rxChannel[0].rxBuffer1StartAddress = (uint32 *)&s_rxBuf[0];
-        config.dma.rxChannel[0].rxBuffer1Size         = FE_RX_BUF_SIZE;
+        s_rxChannelConfig.channelEnable        = TRUE;
+        s_rxChannelConfig.channelId             = IfxGeth_RxDmaChannel_0;
+        s_rxChannelConfig.rxDescrList           = &IfxGeth_Eth_rxDescrList[gethInst][0];
+        s_rxChannelConfig.rxBuffer1StartAddress = (uint32 *)&s_rxBuf[0];
+        s_rxChannelConfig.rxBuffer1Size         = FE_RX_BUF_SIZE;
+
+        config.dma.rxChannel[0] = s_rxChannelConfig;
 
         config.dma.txInterrupt[0].channelId = IfxGeth_DmaChannel_0;
         config.dma.txInterrupt[0].priority  = FE_GETH_TX_ISR_PRIO;
@@ -1127,6 +1181,7 @@ static void frame_eth_begin_tx_from_ready(void)
 boolean frame_eth_send_pending(void)
 {
     uint16 chunkLen;
+    uint8  burstCount = 0u;
 
     if (s_txActive != 0u && s_frameReady)
     {
@@ -1159,13 +1214,9 @@ boolean frame_eth_send_pending(void)
         return FALSE;
     }
 
-    /* Send ALL remaining fragments in one burst.  The spin-wait inside
-     * frame_eth_tx_pending_complete() (~12-15 µs per fragment at 1 Gbps)
-     * ensures each fragment completes before submitting the next.
-     * Total burst time for Nichia (12 frags): ~180 µs
-     * Total burst time for Osram  (18 frags): ~270 µs
-     * Both are ≪ 20 ms frame period — main loop is not starved. */
-    while (s_txRemaining > 0u)
+    /* Send a bounded burst per call to keep main-loop fairness under control.
+     * The next call continues from s_txFragIdx/s_txOffset/s_txRemaining. */
+    while (s_txRemaining > 0u && burstCount < FE_TX_FRAG_BURST_MAX)
     {
         chunkLen = (s_txRemaining > FE_MAX_PAYLOAD)
                  ? (uint16)FE_MAX_PAYLOAD
@@ -1181,7 +1232,11 @@ boolean frame_eth_send_pending(void)
         s_txOffset    = (uint16)(s_txOffset + chunkLen);
         s_txRemaining -= chunkLen;
         s_txFragIdx++;
+        burstCount++;
     }
+
+    if (s_txRemaining > 0u)
+        return FALSE;
 
     s_txActive = 0u;
     s_txPixels = NULL_PTR;
@@ -1228,6 +1283,10 @@ boolean frame_eth_send_can_diag_pending(void)
 
 void frame_eth_poll_rx(void)
 {
+    uint32 budget = FE_RX_POLL_BUDGET;
+    uint32 now;
+    uint32 watchdogTicks;
+
     frame_eth_update_link_status(FALSE);
 
     /* Drain ALL available RX buffers.  Every buffer MUST be freed even if the
@@ -1235,10 +1294,20 @@ void frame_eth_poll_rx(void)
      * the DMA enters an abnormal state (bus error trap). */
     while (IfxGeth_Eth_isRxDataAvailable(&s_geth, IfxGeth_RxDmaChannel_0))
     {
+        if (budget-- == 0u)
+        {
+            /* A sticky RX-available status (descriptor/ring transient) must not
+             * monopolize the CPU0 main loop forever; bail out and retry next
+             * iteration so LVDS parsing and TX keep progressing. */
+            g_feStats.rxPollBudgetHits++;
+            break;
+        }
+
         uint8 *pRxBuf = (uint8 *)IfxGeth_Eth_getReceiveBuffer(&s_geth, IfxGeth_RxDmaChannel_0);
         if (pRxBuf == NULL_PTR)
         {
             /* Shouldn't happen when isRxDataAvailable returned TRUE, but be safe */
+            g_feStats.rxNullBuffers++;
             IfxGeth_Eth_freeReceiveBuffer(&s_geth, IfxGeth_RxDmaChannel_0);
             continue;
         }
@@ -1309,5 +1378,23 @@ void frame_eth_poll_rx(void)
 
         /* Always free — even for unrecognised frames */
         IfxGeth_Eth_freeReceiveBuffer(&s_geth, IfxGeth_RxDmaChannel_0);
+    }
+
+    /* RX command-path watchdog: if link is up but command counter has not
+     * progressed for a long time, recover the RX descriptor ring in place. */
+    now = (uint32)IfxStm_getLower(&MODULE_STM0);
+    watchdogTicks = (uint32)IfxStm_getTicksFromMilliseconds(&MODULE_STM0, 2000u);
+
+    if (g_feStats.cmdPacketsReceived != s_lastRxCmdCount)
+    {
+        s_lastRxCmdCount = g_feStats.cmdPacketsReceived;
+        s_lastRxProgressStm = now;
+    }
+    else if (g_feStats.linkUp != 0u &&
+             (uint32)(now - s_lastRxProgressStm) >= watchdogTicks)
+    {
+        g_feStats.rxNoProgressEvents++;
+        frame_eth_recover_rx_ring(FALSE);
+        s_lastRxProgressStm = now;
     }
 }

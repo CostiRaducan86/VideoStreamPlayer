@@ -174,6 +174,11 @@ static volatile DiagUartFrame s_outRing[BRIDGE_OUT_RING_LEN];
 static volatile uint16        s_outHead;     /* advanced only by CPU2 producer */
 static volatile uint16        s_outTail;     /* advanced only by CPU0 consumer */
 static volatile uint32        s_outDropped;  /* ring full -> frame dropped      */
+/* CPU0 drain budget per main-loop iteration.
+ * Without a cap, a sustained producer stream can keep the consumer inside
+ * can_uart_bridge_poll_out() for too long, starving frame_eth_poll_rx() and
+ * making UI commands appear "stuck" until reset. */
+#define BRIDGE_OUT_DRAIN_BUDGET  8u
 
 /* Cross-core enable request: set on CPU0 by can_uart_bridge_set_active(TRUE);
  * the actual RX-FIFO drain + relay reset + activation is performed on CPU2 (the
@@ -819,7 +824,9 @@ void can_uart_bridge_tick(void)
  * single-consumer on one core exactly as before the CPU2 migration. */
 void can_uart_bridge_poll_out(void)
 {
-    while (s_outTail != s_outHead)
+    uint8 drained = 0u;
+
+    while (s_outTail != s_outHead && drained < BRIDGE_OUT_DRAIN_BUDGET)
     {
         DiagUartFrame f;
         uint16        tail = s_outTail;
@@ -829,6 +836,7 @@ void can_uart_bridge_poll_out(void)
         s_outTail = (uint16)((tail + 1u) % BRIDGE_OUT_RING_LEN);
 
         (void)can_diag_bridge_uart_frame(&f, (uint8)s_deviceId);
+        drained++;
     }
 }
 
