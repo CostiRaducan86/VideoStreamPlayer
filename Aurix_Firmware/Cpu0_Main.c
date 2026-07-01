@@ -96,21 +96,6 @@ static uint64 s_lvdsLastRecoveryTick;
 static uint32 s_lvdsLastProgress;
 static FrameEthDevice s_lvdsLastDevice = FE_DEVICE_NICHIA;
 
-/* ── Diagnostic UART DMA recovery watchdog ──────────────────────
- * If ASCLIN9/DMA stalls (no new DMA completions for N seconds),
- * reinitialize the hardware.  Without this, the diagnostic capture
- * dies silently and only an Aurix reset brings it back.
- * Recovery only fires after DMA was once active (count > 0),
- * with a cooldown to avoid hammering the hardware.                */
-#define DIAG_RECOVERY_TIMEOUT_MS   5000u
-#define DIAG_RECOVERY_COOLDOWN_MS 30000u
-static uint64 s_diagRecoveryTimeoutTicks;
-static uint64 s_diagRecoveryCooldownTicks;
-static uint64 s_diagLastCompletionTick;
-static uint64 s_diagLastRecoveryTick;
-static uint32 s_diagLastCompletionCount;
-static uint8  s_diagEverActive;          /* set once DMA count > 0 */
-volatile uint32 g_diagRecoveryCount;
 
 static void fps_init(void)
 {
@@ -209,61 +194,6 @@ static void lvds_recovery_tick(void)
     s_lvdsLastProgressTick = now;
 }
 
-/* ── Diagnostic UART recovery ─────────────────────────────────── */
-
-static void diag_recovery_init(void)
-{
-    s_diagRecoveryTimeoutTicks =
-        (uint64)IfxStm_getTicksFromMilliseconds(&MODULE_STM0, DIAG_RECOVERY_TIMEOUT_MS);
-    s_diagRecoveryCooldownTicks =
-        (uint64)IfxStm_getTicksFromMilliseconds(&MODULE_STM0, DIAG_RECOVERY_COOLDOWN_MS);
-    s_diagLastCompletionTick  = stm_now64();
-    s_diagLastRecoveryTick    = 0u;
-    s_diagLastCompletionCount = 0u;
-    s_diagEverActive          = 0u;
-    g_diagRecoveryCount       = 0u;
-}
-
-static void diag_recovery_tick(void)
-{
-    uint32 count = diag_uart_get_completion_count();
-    uint64 now   = stm_now64();
-
-    if (count != s_diagLastCompletionCount)
-    {
-        /* DMA is alive — update baseline */
-        s_diagLastCompletionCount = count;
-        s_diagLastCompletionTick  = now;
-        s_diagEverActive          = 1u;
-        return;
-    }
-
-    /* Don't recover if DMA was never active (no CAN/UART traffic on bus).
-     * This prevents spurious reinits at boot when nothing is connected.  */
-    if (s_diagEverActive == 0u)
-        return;
-
-    /* DMA stalled — check timeout */
-    if ((now - s_diagLastCompletionTick) < s_diagRecoveryTimeoutTicks)
-        return;
-
-    /* Cooldown: don't reinit more than once per 30 seconds */
-    if ((s_diagLastRecoveryTick != 0u) &&
-        ((now - s_diagLastRecoveryTick) < s_diagRecoveryCooldownTicks))
-        return;
-
-    /* Reinitialize diagnostic UART hardware (ASCLIN9 + DMA) */
-    diag_uart_init_for_device((uint8)device_mode_get());
-    can_diag_reset();
-    g_diagRecoveryCount++;
-
-    s_diagLastCompletionCount = 0u;
-    s_diagLastCompletionTick  = now;
-    s_diagLastRecoveryTick    = now;
-    /* Keep s_diagEverActive = 1 so future recovery attempts are allowed.
-     * If reinit doesn't fix it, we retry after cooldown.                */
-}
-
 /* User callback: feed appropriate parser based on device mode */
 static void consume_dma_buffer(const uint8 *data, uint32 len)
 {
@@ -283,15 +213,15 @@ void core0_main(void)
     /* ── Device mode selection ──
      * Change to FE_DEVICE_NICHIA for Nichia (12.5 Mbaud, 8O1, 256×64).
      * Change to FE_DEVICE_OSRAM for Osram (20 Mbaud, 8O1, 320×80).
-     * This configures ASCLIN9, parsers, and GETH all in one call.
+     * This configures ASCLIN1 (LVDS), parsers, the CAN-UART bridge and
+     * GETH all in one call.
      */
     device_mode_init(FE_DEVICE_NICHIA);
 
-    /* Enable diagnostic sniffing at boot so CD packets flow immediately.
-     * The g_diagSniffEnabled flag now only gates Ethernet TX — UART parsing
-     * runs unconditionally in the main loop.  The PC's START command
-     * still resets counters for a clean trace, but is no longer required
-     * for data to flow (eliminates the persistent CD:0 bug).            */
+    /* Enable CAN-UART monitor TX at boot so records flow immediately.
+     * g_diagSniffEnabled now only gates the Ethernet TX of the monitor
+     * records produced by the ASCLIN4/ASCLIN5 bridge; the PC's START
+     * command still resets counters for a clean trace.                 */
     g_diagSniffEnabled = 1u;
 
     /* SmartVisio Adapter: configure all GPIO selectors.
@@ -321,7 +251,6 @@ void core0_main(void)
     /* FPS */
     fps_init();
     lvds_recovery_init();
-    diag_recovery_init();
 
     while (1)
     {
@@ -351,42 +280,12 @@ void core0_main(void)
 
         lvds_recovery_tick();
 
-        /* Watchdog: reinit ASCLIN9+DMA if no DMA completions for 5 s */
-        diag_recovery_tick();
-
-        /* Diagnostic UART sniffer: poll + decode + bridge to queue.
-         * UART parsing runs ALWAYS to keep the DMA consumer and gap
-         * detector "warm".  If parsing is paused for minutes while
-         * g_diagSniffEnabled=0, the DMA ping-pong overflows silently
-         * and the parser can't recover when re-enabled.
-         * Only the Ethernet TX of diagnostic records is gated by
-         * g_diagSniffEnabled — this is the lightweight on/off switch.
-         * CPU cost of always-parsing is negligible (~5 µs/loop).     */
-        diag_uart_poll_idle();   /* detect inter-frame gaps via DMA position */
-        diag_uart_tick();
-        {
-            DiagUartFrame diagFrame;
-            if (diag_uart_try_receive(&diagFrame))
-            {
-                /* On Adapter_V2 the diagnostic traffic is tapped by the active
-                 * ASCLIN5/ASCLIN4 bridge below.  The legacy ASCLIN9 pin (P20.7)
-                 * is then unconnected and would otherwise feed floating-pin
-                 * noise (phantom records even with ECU/LSM powered off) and
-                 * duplicate every real frame.  Keep the DMA consumer warm by
-                 * still draining it, but only publish its frames when the active
-                 * bridge is NOT running. */
-                if (!can_uart_bridge_is_active())
-                {
-                    can_diag_bridge_uart_frame(&diagFrame, (uint8)device_mode_get());
-                }
-            }
-        }
-
-        /* Adapter_V2 active CAN-UART bridge: emit idle-gap-delimited
-         * directional frames (ECU->LSM requests, LSM->ECU responses) into
-         * the diagnostic queue.  Transparent byte forwarding itself runs in
-         * the ASCLIN5/ASCLIN4 RX ISRs, independent of this poll. */
-        can_uart_bridge_tick();
+        /* Adapter_V2 active CAN-UART bridge: the byte forwarding and monitor-
+         * frame extraction now run on CPU2 (off the real-time LVDS path).  Here
+         * on CPU0 we only drain the completed monitor frames handed over through
+         * the cross-core ring into the (single-core) can_diag queue, which is
+         * then sent to the PC by frame_eth_send_can_diag_pending() below. */
+        can_uart_bridge_poll_out();
 
         /* Send assembled frame over Ethernet (if ready) */
         frame_eth_send_pending();

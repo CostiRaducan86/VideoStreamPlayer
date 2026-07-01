@@ -162,6 +162,24 @@ static volatile uint32 s_monNoiseSkipped;/* sync-hunt / discarded bytes       */
 static volatile uint32 s_monOverflow;    /* accumulator overflow              */
 static volatile uint32 s_monFramesBridged;
 
+/* ---- Cross-core handoff: CPU2 (bridge) -> CPU0 (can_diag + GETH) ----------
+ * The bridge RX ISRs and the monitoring frame extraction run on CPU2 so they
+ * never steal CPU0 cycles from the real-time LVDS pipeline.  The can_diag queue
+ * is single-core only (shared count, producer drops tail on overflow), so it is
+ * NOT safe to push into from CPU2.  Completed monitor frames are instead handed
+ * to CPU0 through this lock-free single-producer (CPU2) / single-consumer (CPU0)
+ * ring; CPU0 then feeds them into can_diag exactly as before. */
+#define BRIDGE_OUT_RING_LEN   16u
+static volatile DiagUartFrame s_outRing[BRIDGE_OUT_RING_LEN];
+static volatile uint16        s_outHead;     /* advanced only by CPU2 producer */
+static volatile uint16        s_outTail;     /* advanced only by CPU0 consumer */
+static volatile uint32        s_outDropped;  /* ring full -> frame dropped      */
+
+/* Cross-core enable request: set on CPU0 by can_uart_bridge_set_active(TRUE);
+ * the actual RX-FIFO drain + relay reset + activation is performed on CPU2 (the
+ * core that owns the RX ISRs and the relay/FIFO state) to avoid any race. */
+static volatile uint8         s_enableReq;
+
 /* ======================== Low-level forwarding ======================== */
 
 /* Append a genuine (already echo-filtered) byte to the SHARED monitoring parse
@@ -356,12 +374,17 @@ static void bridge_relay_pump(void)
 
 /* ======================== Interrupt handlers ======================== */
 
-IFX_INTERRUPT(BRIDGE_ECU_RX_ISR, 0, BRIDGE_ECU_RX_ISR_PRIO)
+/* Both RX ISRs are installed in CPU2's vector table (vectab index 2) and the
+ * RX service requests are routed to CPU2 (IfxSrc_Tos_cpu2 in the ASCLIN cfg).
+ * Running the forwarding on the otherwise-idle CPU2 keeps CPU0 free for the
+ * real-time LVDS capture/parse/Ethernet pipeline, which the high-rate Direct-
+ * mode bridge traffic was previously starving (corrupting LVDS frames). */
+IFX_INTERRUPT(BRIDGE_ECU_RX_ISR, 2, BRIDGE_ECU_RX_ISR_PRIO)
 {
     bridge_relay_pump();
 }
 
-IFX_INTERRUPT(BRIDGE_LSM_RX_ISR, 0, BRIDGE_LSM_RX_ISR_PRIO)
+IFX_INTERRUPT(BRIDGE_LSM_RX_ISR, 2, BRIDGE_LSM_RX_ISR_PRIO)
 {
     bridge_relay_pump();
 }
@@ -414,12 +437,13 @@ static void bridge_asclin_configure(IfxAsclin_Asc *asc,
     cfg.fifo.txFifoInterruptLevel = IfxAsclin_TxFifoInterruptLevel_0;
     cfg.fifo.buffMode             = IfxAsclin_ReceiveBufferMode_rxFifo;
 
-    /* RX serviced by CPU0 at the given priority; TX/ER unused (we write the
-     * TX FIFO directly from the forwarding ISR, no driver TX ring). */
+    /* RX serviced by CPU2 at the given priority (forwarding runs off the CPU0
+     * critical path); TX/ER unused (we write the TX FIFO directly from the
+     * forwarding ISR, no driver TX ring). */
     cfg.interrupt.txPriority    = 0;
     cfg.interrupt.rxPriority    = rxPriority;
     cfg.interrupt.erPriority    = 0;
-    cfg.interrupt.typeOfService = IfxSrc_Tos_cpu0;
+    cfg.interrupt.typeOfService = IfxSrc_Tos_cpu2;
 
     cfg.pins = pins;
 
@@ -519,30 +543,22 @@ void can_uart_bridge_set_active(boolean enable)
     /* Forwarding state only.  The CAN_SEL / EXT_CAN_SEL routing pins are owned
      * by adapter_ctrl (adapter_ctrl_set_can_uart), driven from the UI adapter
      * command and at boot.  The caller MUST have already routed the bus through
-     * AURIX (Direct CAN-UART mode, CAN_SEL HIGH) before enabling forwarding. */
+     * AURIX (Direct CAN-UART mode, CAN_SEL HIGH) before enabling forwarding.
+     *
+     * This function is called from CPU0 (the GETH command handler), but the RX
+     * ISRs and relay/FIFO state live on CPU2.  To avoid a cross-core race we do
+     * NOT touch the FIFOs/relay here: enabling is requested via s_enableReq and
+     * the clean-start (FIFO drain + relay reset + activate) is performed on CPU2
+     * in can_uart_bridge_tick().  Disabling is a single volatile write the CPU2
+     * RX ISR observes per byte, so it is safe to do directly from CPU0. */
     if (enable)
     {
-        /* Start from a clean relay/accumulator state so a stale lock or echo
-         * count cannot drop the first real byte after CAN_SEL closes.  Also
-         * flush both RX FIFOs so bytes that arrived mid-transaction while the
-         * bus was still routed elsewhere (live switch) do not corrupt the
-         * first real transaction. */
-        boolean intState = IfxCpu_disableInterrupts();
-        s_relay        = BRIDGE_RELAY_IDLE;
-        s_fwdCount     = 0u;
-        s_echoCount    = 0u;
-        s_relayLastStm = IfxStm_getLower(&MODULE_STM0);
-        s_monLen       = 0u;
-        bridge_drain_rx(s_ascEcu.asclin);
-        bridge_drain_rx(s_ascLsm.asclin);
-        IfxCpu_restoreInterrupts(intState);
-
-        s_bridgeActive = 1u;
-        g_canUartBridgeStats.active = 1u;
+        s_enableReq = 1u;
     }
     else
     {
         s_bridgeActive = 0u;
+        s_enableReq    = 0u;
         g_canUartBridgeStats.active = 0u;
     }
 }
@@ -666,9 +682,30 @@ static boolean bridge_mon_parse_step(DiagUartFrame *out, boolean *haveFrame)
     return TRUE;
 }
 
+/* ---- Cross-core SPSC handoff (CPU2 producer) ---------------------------- */
+
+/* Publish one completed monitor frame to the CPU0 consumer ring.  Single
+ * producer (CPU2 bridge_mon_tick).  The __dsync() guarantees the frame payload
+ * is globally visible before the head index advances so the CPU0 consumer never
+ * reads a half-written slot. */
+static boolean bridge_out_push(const DiagUartFrame *f)
+{
+    uint16 head = s_outHead;
+    uint16 next = (uint16)((head + 1u) % BRIDGE_OUT_RING_LEN);
+
+    if (next == s_outTail)
+        return FALSE;                       /* ring full — caller counts drop */
+
+    memcpy((void *)&s_outRing[head], f, sizeof(*f));
+    __dsync();
+    s_outHead = next;
+    return TRUE;
+}
+
 /* Drain the shared parse buffer, pushing every complete length-framed
- * transaction to the diagnostic UI queue.  A header whose remainder never
- * arrives is discarded after a long bus-quiet so the parser resynchronises. */
+ * transaction to the cross-core handoff ring (drained on CPU0 into can_diag).
+ * A header whose remainder never arrives is discarded after a long bus-quiet so
+ * the parser resynchronises.  Runs on CPU2. */
 static void bridge_mon_tick(void)
 {
     boolean progress = TRUE;
@@ -683,8 +720,10 @@ static void bridge_mon_tick(void)
 
         if (haveFrame)
         {
-            if (can_diag_bridge_uart_frame(&frame, (uint8)s_deviceId))
+            if (bridge_out_push(&frame))
                 s_monFramesBridged++;
+            else
+                s_outDropped++;
         }
     }
 
@@ -711,29 +750,86 @@ void can_uart_bridge_tick(void)
     if (g_canUartBridgeStats.initOk == 0u)
         return;
 
+    /* Service a pending enable request from CPU0 (cross-core handshake).  This
+     * runs on CPU2 so the RX-FIFO drain + relay reset happen on the same core as
+     * the RX ISRs, with no cross-core race.  Start from a clean relay/accumulator
+     * state so a stale lock or echo count cannot drop the first real byte, and
+     * flush both RX FIFOs so bytes that arrived mid-transaction during the live
+     * bus switch do not corrupt the first real transaction. */
+    if (s_enableReq != 0u)
+    {
+        boolean intState = IfxCpu_disableInterrupts();
+        s_relay        = BRIDGE_RELAY_IDLE;
+        s_fwdCount     = 0u;
+        s_echoCount    = 0u;
+        s_relayLastStm = IfxStm_getLower(&MODULE_STM0);
+        s_monLen       = 0u;
+        bridge_drain_rx(s_ascEcu.asclin);
+        bridge_drain_rx(s_ascLsm.asclin);
+        s_bridgeActive = 1u;
+        s_enableReq    = 0u;
+        IfxCpu_restoreInterrupts(intState);
+
+        g_canUartBridgeStats.active = 1u;
+    }
+
     bridge_mon_tick();
 
-    /* Mirror counters for the debugger / telemetry. */
-    g_canUartBridgeStats.ecuRxBytes       = s_ecuDir.rxBytes;
-    g_canUartBridgeStats.ecuTxForwarded   = s_ecuDir.txForwarded;
-    g_canUartBridgeStats.ecuTxDropped     = s_ecuDir.txDropped;
-    g_canUartBridgeStats.ecuFramesBridged = s_monFramesBridged;
-    g_canUartBridgeStats.ecuOverflow      = s_monOverflow;
-    g_canUartBridgeStats.ecuEchoDiscarded = s_ecuDir.echoDiscarded;
-    g_canUartBridgeStats.ecuNoiseSkipped  = s_monNoiseSkipped;
+    /* Mirror counters for the debugger / telemetry at a BOUNDED rate.  This
+     * struct lives in shared SRAM; writing all ~20 fields on every CPU2 loop
+     * iteration floods the SRI crossbar and starves the LVDS HDMA, overflowing
+     * the ASCLIN1 RX FIFO -> CRC errors and visible flicker on both the PC LVDS
+     * monitor and the TFT.  A few refreshes per second is plenty for telemetry,
+     * and the live `active` flag is already updated immediately above. */
+    {
+        static uint32 s_lastStatsStm = 0u;
+        uint32        nowStm = IfxStm_getLower(&MODULE_STM0);
 
-    g_canUartBridgeStats.lsmRxBytes       = s_lsmDir.rxBytes;
-    g_canUartBridgeStats.lsmTxForwarded   = s_lsmDir.txForwarded;
-    g_canUartBridgeStats.lsmTxDropped     = s_lsmDir.txDropped;
-    g_canUartBridgeStats.lsmFramesBridged = s_monFramesBridged;
-    g_canUartBridgeStats.lsmOverflow      = s_monOverflow;
-    g_canUartBridgeStats.lsmEchoDiscarded = s_lsmDir.echoDiscarded;
-    g_canUartBridgeStats.lsmNoiseSkipped  = s_monNoiseSkipped;
+        if ((uint32)(nowStm - s_lastStatsStm) >= (5000u * s_ticksPerUs))
+        {
+            s_lastStatsStm = nowStm;
 
-    g_canUartBridgeStats.relayState       = (uint32)s_relay;
-    g_canUartBridgeStats.relayReqCount    = s_relayReqCount;
-    g_canUartBridgeStats.relayRspCount    = s_relayRspCount;
-    g_canUartBridgeStats.relayResyncs     = s_relayResyncs;
+            g_canUartBridgeStats.ecuRxBytes       = s_ecuDir.rxBytes;
+            g_canUartBridgeStats.ecuTxForwarded   = s_ecuDir.txForwarded;
+            g_canUartBridgeStats.ecuTxDropped     = s_ecuDir.txDropped;
+            g_canUartBridgeStats.ecuFramesBridged = s_monFramesBridged;
+            g_canUartBridgeStats.ecuOverflow      = s_monOverflow;
+            g_canUartBridgeStats.ecuEchoDiscarded = s_ecuDir.echoDiscarded;
+            g_canUartBridgeStats.ecuNoiseSkipped  = s_monNoiseSkipped;
+
+            g_canUartBridgeStats.lsmRxBytes       = s_lsmDir.rxBytes;
+            g_canUartBridgeStats.lsmTxForwarded   = s_lsmDir.txForwarded;
+            g_canUartBridgeStats.lsmTxDropped     = s_lsmDir.txDropped;
+            g_canUartBridgeStats.lsmFramesBridged = s_monFramesBridged;
+            g_canUartBridgeStats.lsmOverflow      = s_monOverflow;
+            g_canUartBridgeStats.lsmEchoDiscarded = s_lsmDir.echoDiscarded;
+            g_canUartBridgeStats.lsmNoiseSkipped  = s_monNoiseSkipped;
+
+            g_canUartBridgeStats.relayState       = (uint32)s_relay;
+            g_canUartBridgeStats.relayReqCount    = s_relayReqCount;
+            g_canUartBridgeStats.relayRspCount    = s_relayRspCount;
+            g_canUartBridgeStats.relayResyncs     = s_relayResyncs;
+        }
+    }
+}
+
+/* Consume monitor frames produced by the CPU2 bridge and feed them into the
+ * single-core can_diag queue.  MUST run on CPU0 (the same core as the can_diag
+ * pop + the GETH diagnostic TX), so the can_diag ring stays single-producer /
+ * single-consumer on one core exactly as before the CPU2 migration. */
+void can_uart_bridge_poll_out(void)
+{
+    while (s_outTail != s_outHead)
+    {
+        DiagUartFrame f;
+        uint16        tail = s_outTail;
+
+        memcpy(&f, (const void *)&s_outRing[tail], sizeof(f));
+        __dsync();
+        s_outTail = (uint16)((tail + 1u) % BRIDGE_OUT_RING_LEN);
+
+        (void)can_diag_bridge_uart_frame(&f, (uint8)s_deviceId);
+    }
 }
 
 void can_uart_bridge_reset_state(void)

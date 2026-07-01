@@ -1224,7 +1224,7 @@ boolean frame_eth_send_can_diag_pending(void)
 #include "device_mode.h"   /* device_mode_set() */
 #include "adapter_ctrl.h"  /* adapter_ctrl_set_mode/can_uart/apply() */
 #include "can_uart_bridge.h" /* can_uart_bridge_set_active() */
-#include "can_hw.h"        /* diag_uart_init_for_device() */
+#include "can_hw.h"        /* g_diagSniffEnabled */
 
 void frame_eth_poll_rx(void)
 {
@@ -1268,18 +1268,16 @@ void frame_eth_poll_rx(void)
                 }
                 else if (cmdId == FE_CMD_DIAG_SNIFF)
                 {
-                    /* START (payload != 0): do FULL hardware reinit of ASCLIN9
-                     * + DMA to recover from any stalled state, then reset
-                     * counters + queue for a clean trace.
-                     * STOP (payload == 0): pause Ethernet TX only — the UART
-                     * parser runs unconditionally in the main loop to keep the
-                     * DMA consumer warm and prevent stale-state bugs.           */
+                    /* START (payload != 0): reset the monitor sequence number +
+                     * queue for a clean trace.
+                     * STOP (payload == 0): pause the Ethernet TX of monitor
+                     * records only; the ASCLIN4/ASCLIN5 bridge keeps running. */
                     uint8 newState = (cmdPayload != 0u) ? 1u : 0u;
                     if (newState)
                     {
-                        /* Full hardware reinit — recovers from ASCLIN9/DMA stalls
-                         * that otherwise require a board reset.                   */
-                        diag_uart_init_for_device((uint8)device_mode_get());
+                        /* START: reset the monitor sequence + queue for a clean
+                         * trace.  The CAN-UART data now comes from the ASCLIN4/
+                         * ASCLIN5 bridge (CPU2); there is no ASCLIN9 to reinit. */
                         s_diagSeq = 0u;               /* restart Nr from 0     */
                         can_diag_reset();             /* clear send queue + stats     */
                     }

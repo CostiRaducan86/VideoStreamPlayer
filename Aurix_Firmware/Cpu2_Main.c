@@ -28,6 +28,7 @@
 #include "IfxCpu.h"
 #include "IfxScuWdt.h"
 #include "Ifx_Cfg_Ssw.h"
+#include "can_uart_bridge.h"
 
 extern IfxCpu_syncEvent cpuSyncEvent;
 
@@ -44,7 +45,15 @@ void core2_main(void)
     IfxCpu_emitEvent(&cpuSyncEvent);
     IfxCpu_waitEvent(&cpuSyncEvent, 1);
     
+    /* CPU2 owns the CAN-UART bridge: the transparent byte forwarding runs in
+     * the ASCLIN4/ASCLIN5 RX ISRs (routed to CPU2), and this tight loop services
+     * the monitoring half (enable handshake from CPU0, frame extraction, telemetry).
+     * Keeping this work off CPU0 protects the real-time LVDS capture/parse path
+     * from being starved by high-rate Direct-mode bridge traffic.  The loop runs
+     * unthrottled (CPU2 has no other work and its watchdog is disabled) so the
+     * shared parse accumulator is drained well before it can overflow. */
     while(1)
     {
+        can_uart_bridge_tick();
     }
 }

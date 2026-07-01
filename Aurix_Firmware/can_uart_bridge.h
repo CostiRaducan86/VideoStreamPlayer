@@ -97,9 +97,17 @@ void can_uart_bridge_set_active(boolean enable);
 /** TRUE if the active bridge is currently forwarding (CAN_SEL HIGH). */
 boolean can_uart_bridge_is_active(void);
 
-/** Poll for completed directional frames (idle-gap delimited) and bridge them
- *  to the diagnostic UI queue.  Call every main-loop iteration. */
+/** Service the bridge: handle a pending enable request, extract completed
+ *  monitor frames and mirror telemetry counters.  Runs the byte forwarding's
+ *  monitoring half.  MUST be called from CPU2 (the core that owns the bridge RX
+ *  ISRs); the forwarding itself runs in those ISRs.  Call as fast as practical
+ *  (tight loop) so the shared parse accumulator never overflows. */
 void can_uart_bridge_tick(void);
+
+/** Drain monitor frames produced by the CPU2 bridge into the can_diag queue.
+ *  MUST be called from CPU0 (same core as can_diag + the GETH diagnostic TX),
+ *  once per main-loop iteration. */
+void can_uart_bridge_poll_out(void);
 
 /** Reset soft counters and parser/accumulator state (does NOT re-init the
  *  ASCLIN channels). */

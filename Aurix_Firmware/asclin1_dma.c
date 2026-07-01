@@ -29,7 +29,26 @@
 #include "asclin1_dma.h"
 
 /* ===================== Module State ===================== */
-IFX_ALIGN(32) Asclin1Dma g_asclin1_dma;
+/*
+ * Place the LVDS DMA ping-pong buffers in CPU3's Data Scratch-Pad RAM (dsram3)
+ * instead of the default dsram0.
+ *
+ * Root cause of the LVDS CRC errors / flicker: the CAN-UART bridge runs on CPU2
+ * and accesses its state (s_monAcc, s_ecuDir, s_lsmDir, ...) which the linker
+ * placed in dsram0.  CPU2 reaches dsram0 over the SRI crossbar at a high rate,
+ * contending with the LVDS HDMA that writes THESE ping-pong buffers in the SAME
+ * dsram0 slave port.  When the DMA's writes are delayed the ASCLIN1 RX FIFO
+ * overflows and pixel bytes are lost -> frame CRC fails, and the corrupted frame
+ * is seen on both the PC monitor and the TFT.
+ *
+ * CPU3 executes only an empty idle loop, so dsram3's data port is otherwise
+ * unused: the DMA gets uncontended, deterministic write bandwidth.  The linker
+ * routes the ".bss.bss_cpu3" section to dsram3 at its SRI-global alias
+ * (0x40000000), which both CPU0 (the parser / DMA-completion ISR) and the DMA
+ * engine can address.  This is purely a memory-placement change; the ASCLIN
+ * baud rate, DMA channel, buffer size and protocol handling are unchanged.
+ */
+IFX_ALIGN(32) __attribute__((section(".bss.bss_cpu3"))) Asclin1Dma g_asclin1_dma;
 
 /* ASCLIN handle (used for baudrate/pin config; RX data path is DMA) */
 static IfxAsclin_Asc g_asc1;
