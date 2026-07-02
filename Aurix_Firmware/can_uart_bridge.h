@@ -16,13 +16,13 @@
  *
  * AURIX then becomes an inline, transparent, bidirectional UART forwarder and
  * must keep the ECU<->LSM diagnostic link alive while tapping the traffic for
- * the PC UI (same role ASCLIN9 had on the previous adapter).
+ * the PC UI.
  *
  * Pin assignment (all on X103, verified against Infineon Application Kit
  * TC3X7 manual section 6 and the iLLD TC39xB LFBGA292 pin map):
- *   ECU side = ASCLIN5  RX P00.6 (X103 pin 24)   TX P00.7 (X103 pin 25)
- *   LSM side = ASCLIN4  RX P00.12 (X103 pin 30)  TX P00.9 (X103 pin 27)
- *   CAN_SEL  = P14.6 GPIO (X103 pin 5), driven via adapter_ctrl.
+ *   ECU side = ASCLIN5  RX P00.6 (X103 pin 28)   TX P00.7 (X103 pin 29)
+ *   LSM side = ASCLIN4  RX P00.12 (X103 pin 34)  TX P00.9 (X103 pin 31)
+ *   CAN_SEL  = P14.6 GPIO (X103 pin 9), driven via adapter_ctrl.
  *
  * Latency note: a transparent forwarder MUST have ~byte-level latency or the
  * request/response diagnostic protocol breaks.  Therefore forwarding is done

@@ -545,7 +545,7 @@ void can_uart_bridge_init(uint8 deviceId)
 
 void can_uart_bridge_set_active(boolean enable)
 {
-    /* Forwarding state only.  The CAN_SEL / EXT_CAN_SEL routing pins are owned
+    /* Forwarding state only.  The CAN_SEL routing pin is owned
      * by adapter_ctrl (adapter_ctrl_set_can_uart), driven from the UI adapter
      * command and at boot.  The caller MUST have already routed the bus through
      * AURIX (Direct CAN-UART mode, CAN_SEL HIGH) before enabling forwarding.

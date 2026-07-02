@@ -24,38 +24,21 @@ X103 is a 2x20 connector. The project-relevant pins are:
 
 | X103 pin | AURIX port | Note |
 | --- | --- | --- |
+| 2 | V_UC | 5V0 |
 | 3 | GND | Ground |
 | 4 | GND | Ground |
 | 7 | P14.8 | ASCLIN1 RX (LVDS existing path) |
-| 8 | P14.7 | GPIO (LOCAL_RL_DET in current adapter_ctrl) |
-| 9 | P14.6 | CAN_SEL control |
-| 10 | P20.0 | EXT_CAN_SEL (legacy/optional) |
+| 8 | P14.7 | LOCAL_RL_DET ( GPIO in current adapter_ctrl) |
+| 9 | P14.6 | CAN_SEL |
+| 10 | P20.0 | TTL_SEL |
 | 11 | P21.4 | LED_POWER_SEL |
-| 13 | P02.0 | ECU_5V_EN |
-| 14 | P02.1 | LOCAL_5V_EN |
+| 13 | P02.0 | RL_DET_SEL |
+| 14 | P02.1 | LOGIC_5V_SEL |
 | 15 | P02.2 | ASCLIN1 TX (LVDS existing path) |
 | 28 | P00.6 | ASCLIN5 RX (CAN_RX_ECU) |
 | 29 | P00.7 | ASCLIN5 TX (CAN_TX_ECU) |
 | 31 | P00.9 | ASCLIN4 TX (CAN_TX_LSM) |
 | 34 | P00.12 | ASCLIN4 RX (CAN_RX_LSM) |
-
-## Adapter_V2 LOCAL_J3 Signal Map
-
-LOCAL_J3 relevant signals:
-
-| LOCAL_J3 pin | Signal |
-| --- | --- |
-| 2 | RL_DET_SEL |
-| 4 | TTL_SEL |
-| 5 | LOGIC_5V_SEL / ECU_5V_EN path |
-| 7 | LOCAL_5V_EN path |
-| 8 | CAN_TX_LSM |
-| 10 | CAN_RX_LSM |
-| 11 | CAN_RX_ECU |
-| 12 | CAN_SEL |
-| 13 | CAN_TX_ECU |
-| 15 | LED_POWER_SEL |
-| 1,9 | GND |
 
 ## Adapter Connector Pinouts (From Captures)
 
@@ -150,12 +133,22 @@ Use this as the 1:1 cabling checklist.
 
 | Function | AURIX port | X103 pin | LOCAL_J3 pin | Direction |
 | --- | --- | --- | --- | --- |
-| CAN_RX_ECU | P00.6 (ASCLIN5 RXA) | 28 | 11 | Adapter -> AURIX |
-| CAN_TX_ECU | P00.7 (ASCLIN5 TX) | 29 | 13 | AURIX -> Adapter |
-| CAN_RX_LSM | P00.12 (ASCLIN4 RXA) | 34 | 10 | Adapter -> AURIX |
+| GND | GND | 3 | 1 | Common reference |
+| TTL_SEL | P20.0 (GPIO) | 10 | 2 | AURIX -> Adapter |
+| TTL_FROM_ECU_3V3 | P14.8 (ASCLIN1 RX LVDS) | 7 | 3 | Adapter -> AURIX |
+| TTL_FROM_LOCAL | P02.2 (ASCLIN1 TX LVDS) | 15 | 4 | AURIX -> Adapter |
+| LOGIC_5V_SEL | P02.1 (GPIO) | 14 | 5 | AURIX -> Adapter |
+| LOCAL_RL_DET | P14.7 (GPIO) | 8 | 6 | AURIX -> Adapter |
+| RL_DET_SEL | P02.0 (GPIO) | 13 | 7 | AURIX -> Adapter |
 | CAN_TX_LSM | P00.9 (ASCLIN4 TX) | 31 | 8 | AURIX -> Adapter |
+| GND | GND | 4 | 9 | Common reference |
+| CAN_RX_LSM | P00.12 (ASCLIN4 RXA) | 34 | 10 | Adapter -> AURIX |
+| CAN_RX_ECU | P00.6 (ASCLIN5 RXA) | 28 | 11 | Adapter -> AURIX |
 | CAN_SEL | P14.6 (GPIO) | 9 | 12 | AURIX -> Adapter |
-| GND | GND | 3 or 4 | 1 or 9 | Common reference |
+| CAN_TX_ECU | P00.7 (ASCLIN5 TX) | 29 | 13 | AURIX -> Adapter |
+| 3v3_LOCAL | ------------- | -- | 14 | Adapter -> OUT |
+| LED_POWER_SEL | P21.4 (GPIO) | 11 | 15 | AURIX -> Adapter |
+| AURIX_5V_IN | V_UC (5V0) | 2 | 16 | AURIX -> Adapter |
 
 ## ASCLIN Assignment for Active CAN-UART Bridge
 

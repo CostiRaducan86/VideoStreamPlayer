@@ -663,9 +663,9 @@ void frame_eth_init(FrameEthDevice device)
     g_feStats.initStep = 1;
 
     /* ╔═══════════════════════════════════════════════════════════════════════╗
-     * ║  STANDALONE FIX: 3-second boot delay + explicit module enable.       ║
-     * ║  Without debugger, CPU boots instantly; PHY CLK125 (GREFCLK on      ║
-     * ║  P11.5) needs time to stabilize. Without this, GETH TX hangs.       ║
+     * ║  STANDALONE FIX: 3-second boot delay + explicit module enable.        ║
+     * ║  Without debugger, CPU boots instantly; PHY CLK125 (GREFCLK on        ║
+     * ║  P11.5) needs time to stabilize. Without this, GETH TX hangs.         ║
      * ╚═══════════════════════════════════════════════════════════════════════╝ */
     {
         uint32 bootDelay = (uint32)IfxStm_getTicksFromMilliseconds(&MODULE_STM0, 3000u);
@@ -1396,7 +1396,7 @@ void frame_eth_poll_rx(void)
                     if (canMode == 1u) canEnum = CAN_UART_DIRECT;
                     else if (canMode == 2u) canEnum = CAN_UART_EXTERNAL;
 
-                    /* Route the bus FIRST (sets CAN_SEL / EXT_CAN_SEL), then
+                    /* Route the bus FIRST (set CAN_SEL), then
                      * start or stop the active forwarding bridge.  AURIX
                      * forwards bytes only in Direct CAN-UART mode; in ECU and
                      * External modes it must not drive the bus, so forwarding

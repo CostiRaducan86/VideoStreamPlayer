@@ -9,9 +9,7 @@
  * @file asclin1_dma.h
  * @brief ASCLIN1 RX with DMA + dual buffer (ping-pong) for LVDS pixel data.
  *
- * Replaces the former asclin9_dma module.  LVDS pixel data now arrives on
- * ASCLIN1 via P14.8 (X103 pin 7), freeing ASCLIN9 for diagnostic UART
- * on P20.7 (TLE9251V CAN transceiver).
+ * LVDS pixel data now arrives on ASCLIN1 via P14.8 (X103 pin 7)
  *
  * DMA reads 8-bit data from ASCLIN1 RXDATA register.  Source address is
  * kept fixed via TC3xx circular buffer mode (SCBE=1, CBLS=0).

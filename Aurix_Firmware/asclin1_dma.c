@@ -9,9 +9,6 @@
  * - DMA completion ISR atomically swaps buffers & signals parser
  * - Main loop: consume completed buffer while DMA fills next one
  *
- * Replaces former asclin9_dma.c — LVDS moved from ASCLIN9/P14.7 to
- * ASCLIN1/P14.8 so ASCLIN9 can be dedicated to diagnostic UART on P20.7.
- *
  * Source address fix:
  * - TC3xx DMA CBLS=0 with SCBE=1 → source address is never modified
  * - This allows 8-bit moves from the fixed ASCLIN RXDATA register
