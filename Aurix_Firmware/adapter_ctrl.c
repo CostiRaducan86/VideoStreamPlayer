@@ -5,7 +5,8 @@
  * SmartVisio Adapter GPIO control implementation.
  *
  * All pins configured as push-pull outputs (strong driver).
- * Default state = ECU mode (TTL_SEL HIGH, ECU_5V_EN HIGH, LOCAL_5V_EN LOW, relays OFF).
+ * Default state = ECU control mode + Direct CAN-UART
+ * (TTL_SEL LOW, ECU_5V_EN HIGH, LOCAL_5V_EN LOW, CAN_SEL HIGH, EXT_CAN_SEL LOW).
  */
 
 /* ─── Pin definitions ─────────────────────────────────────────────── */
@@ -44,9 +45,9 @@ void adapter_ctrl_init(void)
     IfxPort_setPinModeOutput(PIN_ECU_5V_EN,     IfxPort_OutputMode_pushPull, IfxPort_OutputIdx_general);
     IfxPort_setPinModeOutput(PIN_LOCAL_5V_EN,   IfxPort_OutputMode_pushPull, IfxPort_OutputIdx_general);
 
-    /* Default: ECU mode, all relays OFF */
+    /* Default after reset/run: ECU control mode + Direct CAN-UART */
     adapter_ctrl_set_mode(ADAPTER_MODE_ECU);
-    adapter_ctrl_set_can_uart(CAN_UART_ECU);
+    adapter_ctrl_set_can_uart(CAN_UART_DIRECT);
 }
 
 void adapter_ctrl_set_mode(adapter_control_mode_t mode)
