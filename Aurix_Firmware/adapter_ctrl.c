@@ -54,8 +54,8 @@ void adapter_ctrl_set_mode(adapter_control_mode_t mode)
     if (mode == ADAPTER_MODE_ECU)
     {
         /* ECU in chain: ECU drives LVDS, ECU provides 5V logic */
-        pin_set(PIN_TTL_SEL,       TRUE);   /* ECU LVDS path */
-        pin_set(PIN_RL_DET_SEL,    TRUE);   /* ECU RL detect */
+        pin_set(PIN_TTL_SEL,       FALSE);  /* ECU LVDS path */
+        pin_set(PIN_RL_DET_SEL,    FALSE);  /* ECU RL detect GND*/
         pin_set(PIN_LOCAL_RL_DET,  FALSE);  /* Local RL level irrelevant (ECU drives) */
         pin_set(PIN_ECU_5V_EN,     TRUE);   /* Enable ECU 5V */
         pin_set(PIN_LOCAL_5V_EN,   FALSE);  /* Disable Local 5V */
@@ -64,8 +64,8 @@ void adapter_ctrl_set_mode(adapter_control_mode_t mode)
     else /* ADAPTER_MODE_DIRECT */
     {
         /* No ECU: Aurix drives LVDS via P02.2 (ASCLIN1 TX), Local 5V powers adapter */
-        pin_set(PIN_TTL_SEL,       FALSE);  /* Local (Aurix) LVDS path */
-        pin_set(PIN_RL_DET_SEL,    FALSE);  /* Local RL detect */
+        pin_set(PIN_TTL_SEL,       TRUE);  /* Local (Aurix) LVDS path */
+        pin_set(PIN_RL_DET_SEL,    TRUE);  /* Local RL detect */
         pin_set(PIN_LOCAL_RL_DET,  FALSE);  /* Default LOW = GND = low resolution */
         pin_set(PIN_ECU_5V_EN,     FALSE);  /* Disable ECU 5V */
         pin_set(PIN_LOCAL_5V_EN,   TRUE);   /* Enable Local 5V */

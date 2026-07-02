@@ -687,6 +687,207 @@ static boolean bridge_mon_parse_step(DiagUartFrame *out, boolean *haveFrame)
     return TRUE;
 }
 
+/* ---- Nichia TLD816K parse step (length-framing via DLC_FUN) ---------------
+ * Mirrors the logic of diag_uart_try_receive_nichia() from can_hw.c but
+ * operates on the bridge's shared linear parse buffer (s_monAcc).
+ *
+ * Nichia frame on the half-duplex bus:
+ *   [0] SYNC = 0x55
+ *   [1] MasterRequest byte (device addr / direction marker)
+ *   [2] DLC_FUN: bits[2:0]=FUN, bits[5:3]=DLC, bits[7:6]=reserved(0)
+ *   [3..] address (1 B for REG, 2 B for EEP), data, CRC-8
+ *   For writes: 2 ACK bytes may follow the CRC.
+ *
+ * Read requests (ECU→LSM) are header+address only — they are SKIPPED so the
+ * response that follows becomes the emitted record.
+ */
+#define BRIDGE_NICHIA_SYNC         0x55u
+#define BRIDGE_NICHIA_HDR_LEN      3u
+#define BRIDGE_NICHIA_REG_ADDR_LEN 1u
+#define BRIDGE_NICHIA_EEP_ADDR_LEN 2u
+#define BRIDGE_NICHIA_CRC_LEN      1u
+#define BRIDGE_NICHIA_ACK_LEN      2u
+#define BRIDGE_NICHIA_FUN_WRITE_REG  4u
+#define BRIDGE_NICHIA_FUN_READ_REG   5u
+#define BRIDGE_NICHIA_FUN_WRITE_EEP  6u
+#define BRIDGE_NICHIA_FUN_READ_EEP   7u
+#define BRIDGE_NICHIA_FUN_MASK       0x07u
+#define BRIDGE_NICHIA_DLC_MASK       0x38u
+#define BRIDGE_NICHIA_DLC_FUN_RES_MASK 0xC0u
+
+static uint8 bridge_nichia_data_length(uint8 dlc)
+{
+    static const uint8 s_len[8] = { 1u, 2u, 4u, 8u, 16u, 24u, 32u, 64u };
+    return s_len[dlc & 0x07u];
+}
+
+static uint8 bridge_nichia_addr_length(uint8 fun)
+{
+    return ((fun == BRIDGE_NICHIA_FUN_WRITE_EEP) || (fun == BRIDGE_NICHIA_FUN_READ_EEP))
+        ? BRIDGE_NICHIA_EEP_ADDR_LEN : BRIDGE_NICHIA_REG_ADDR_LEN;
+}
+
+static boolean bridge_nichia_fun_valid(uint8 fun)
+{
+    return ((fun >= BRIDGE_NICHIA_FUN_WRITE_REG) && (fun <= BRIDGE_NICHIA_FUN_READ_EEP))
+        ? TRUE : FALSE;
+}
+
+/* Check if a valid Nichia header starts at offset 'off' in s_monAcc. */
+static boolean bridge_nichia_header_valid_at(uint16 off)
+{
+    uint8 dlcFun;
+    uint8 fun;
+
+    if ((uint16)(off + BRIDGE_NICHIA_HDR_LEN) > s_monLen)
+        return FALSE;
+
+    if (s_monAcc[off] != BRIDGE_NICHIA_SYNC)
+        return FALSE;
+
+    dlcFun = (uint8)s_monAcc[off + 2u];
+    fun    = (uint8)(dlcFun & BRIDGE_NICHIA_FUN_MASK);
+
+    if ((dlcFun & BRIDGE_NICHIA_DLC_FUN_RES_MASK) != 0u)
+        return FALSE;
+
+    return bridge_nichia_fun_valid(fun);
+}
+
+static boolean bridge_mon_parse_step_nichia(DiagUartFrame *out, boolean *haveFrame)
+{
+    uint8  dlcFun;
+    uint8  fun;
+    uint8  dlc;
+    uint8  addrLen;
+    uint8  dataLen;
+    uint8  hasCrc;
+    uint8  reqLen;
+    uint8  dataFrameLen;
+    uint8  fullLen;
+    uint8  copyLen;
+    uint16 i;
+
+    *haveFrame = FALSE;
+
+    if (s_monLen < BRIDGE_NICHIA_HDR_LEN)
+        return FALSE;
+
+    /* Hunt the 0x55 sync at the front of the buffer. */
+    if (s_monAcc[0] != BRIDGE_NICHIA_SYNC)
+    {
+        for (i = 1u; i < s_monLen; i++)
+        {
+            if (s_monAcc[i] == BRIDGE_NICHIA_SYNC)
+                break;
+        }
+        s_monNoiseSkipped += i;
+        bridge_mon_compact(i);
+        return (s_monLen >= BRIDGE_NICHIA_HDR_LEN) ? TRUE : FALSE;
+    }
+
+    /* Validate header (DLC_FUN reserved bits + function range). */
+    dlcFun = (uint8)s_monAcc[2];
+    fun    = (uint8)(dlcFun & BRIDGE_NICHIA_FUN_MASK);
+
+    if ((dlcFun & BRIDGE_NICHIA_DLC_FUN_RES_MASK) != 0u || !bridge_nichia_fun_valid(fun))
+    {
+        /* Invalid header at position 0 — skip this 0x55 and re-hunt. */
+        s_monNoiseSkipped++;
+        bridge_mon_compact(1u);
+        return TRUE;
+    }
+
+    dlc     = (uint8)((dlcFun & BRIDGE_NICHIA_DLC_MASK) >> 3u);
+    dataLen = bridge_nichia_data_length(dlc);
+    addrLen = bridge_nichia_addr_length(fun);
+    hasCrc  = (fun == BRIDGE_NICHIA_FUN_READ_EEP) ? 0u : 1u;
+    reqLen  = (uint8)(BRIDGE_NICHIA_HDR_LEN + addrLen);
+    dataFrameLen = (uint8)(reqLen + dataLen + (hasCrc ? BRIDGE_NICHIA_CRC_LEN : 0u));
+
+    /* --- Read request (ECU→LSM): header+address only, no data/CRC.
+     * Skip it so the following response frame becomes the emitted record. */
+    if (fun == BRIDGE_NICHIA_FUN_READ_REG || fun == BRIDGE_NICHIA_FUN_READ_EEP)
+    {
+        if (s_monLen < reqLen)
+            return FALSE;   /* wait for the rest of the short request */
+
+        /* If the next bytes form a valid header → this was just a short request. */
+        if (bridge_nichia_header_valid_at(reqLen))
+        {
+            /* Skip the request and let the response be emitted next loop. */
+            s_monNoiseSkipped += reqLen;
+            bridge_mon_compact(reqLen);
+            return TRUE;
+        }
+
+        /* No next header yet: maybe it IS a response (data follows), or we
+         * need more bytes to decide.  Fall through to emit the data frame. */
+        if (s_monLen < dataFrameLen)
+            return FALSE;   /* wait for full response frame */
+    }
+    else
+    {
+        /* --- Write request/response: needs full dataFrameLen bytes. */
+        if (s_monLen < dataFrameLen)
+            return FALSE;
+
+        /* Writes may have 2 ACK bytes after CRC.  Include them if present
+         * and the byte after them looks like a new sync. */
+        fullLen = dataFrameLen;
+        if (s_monLen >= (uint16)(dataFrameLen + BRIDGE_NICHIA_ACK_LEN) &&
+            !bridge_nichia_header_valid_at(dataFrameLen))
+        {
+            fullLen = (uint8)(dataFrameLen + BRIDGE_NICHIA_ACK_LEN);
+        }
+
+        copyLen = (fullLen <= (uint8)sizeof(out->data)) ? fullLen : (uint8)sizeof(out->data);
+        memcpy(out->data, (const void *)s_monAcc, copyLen);
+        out->len             = copyLen;
+        out->timestampUs     = s_monStartStm / s_ticksPerUs;
+        out->responseDelayUs = 0u;
+
+        if (s_monPrevEndStm != 0u)
+        {
+            uint32 gap = s_monStartStm - s_monPrevEndStm;
+            uint32 us  = gap / s_ticksPerUs;
+            out->interFrameDelayUs = (us > 0xFFFFu) ? 0xFFFFu : (uint16)us;
+        }
+        else
+        {
+            out->interFrameDelayUs = 0u;
+        }
+        s_monPrevEndStm = s_monLastStm;
+
+        bridge_mon_compact(fullLen);
+        *haveFrame = TRUE;
+        return TRUE;
+    }
+
+    /* Emit the read response (dataFrameLen bytes). */
+    copyLen = (dataFrameLen <= (uint8)sizeof(out->data)) ? dataFrameLen : (uint8)sizeof(out->data);
+    memcpy(out->data, (const void *)s_monAcc, copyLen);
+    out->len             = copyLen;
+    out->timestampUs     = s_monStartStm / s_ticksPerUs;
+    out->responseDelayUs = BRIDGE_RD_DELAY_US;
+
+    if (s_monPrevEndStm != 0u)
+    {
+        uint32 gap = s_monStartStm - s_monPrevEndStm;
+        uint32 us  = gap / s_ticksPerUs;
+        out->interFrameDelayUs = (us > 0xFFFFu) ? 0xFFFFu : (uint16)us;
+    }
+    else
+    {
+        out->interFrameDelayUs = 0u;
+    }
+    s_monPrevEndStm = s_monLastStm;
+
+    bridge_mon_compact(dataFrameLen);
+    *haveFrame = TRUE;
+    return TRUE;
+}
+
 /* ---- Cross-core SPSC handoff (CPU2 producer) ---------------------------- */
 
 /* Publish one completed monitor frame to the CPU0 consumer ring.  Single
@@ -720,7 +921,12 @@ static void bridge_mon_tick(void)
         DiagUartFrame frame;
         boolean       haveFrame = FALSE;
         boolean       intState  = IfxCpu_disableInterrupts();
-        progress = bridge_mon_parse_step(&frame, &haveFrame);
+
+        if (s_deviceId == BRIDGE_DEVICE_NICHIA)
+            progress = bridge_mon_parse_step_nichia(&frame, &haveFrame);
+        else
+            progress = bridge_mon_parse_step(&frame, &haveFrame);
+
         IfxCpu_restoreInterrupts(intState);
 
         if (haveFrame)

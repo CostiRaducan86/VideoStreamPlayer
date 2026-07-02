@@ -90,6 +90,25 @@ FeStats g_feStats;
  * under transient MAC/DMA glitches. */
 #define FE_TX_FRAG_BURST_MAX         6u
 #define FE_RX_POLL_BUDGET            64u
+/* RX freeze detection via DMA hardware state (traffic-independent).
+ * RBU = Receive Buffer Unavailable, DMA_CHx.STATUS bit 7 (write-1-to-clear).
+ * It latches when the DMA received a packet but had no CPU-freed descriptor to
+ * store it.  We clear it every poll, so a set bit means "a packet arrived
+ * since the previous poll".  If packets keep arriving (RBU) but none ever
+ * surface (isRxDataAvailable stays FALSE / no buffer processed) for
+ * FE_RX_STALL_MS while the link is up, the RX descriptor ring is
+ * desynchronised (the command freeze) and a cheap wakeup cannot fix it -> a
+ * full ring re-init is required (same effect as a winIDEA reset+run).
+ * On a genuinely silent link RBU never re-latches, so this never false-fires. */
+#define FE_DMA_STATUS_RBU            (1u << 7)
+#define FE_RX_STALL_MS               2000u
+/* CAN-diag Ethernet TX pacing.  In Direct CAN-UART + Recording the monitor
+ * produces a high record rate; unpaced TX floods the single GETH TX channel
+ * and keeps CPU0 busy in the TX spin, so the LVDS RX DMA ping-pong buffers are
+ * not drained in time -> LVDS CRC errors and pane-B/TFT flicker.  Pace the diag
+ * TX so LVDS transport keeps priority.  ECU mode has almost no monitor traffic,
+ * so it is unaffected. */
+#define FE_DIAG_TX_INTERVAL_US       250u
 
 #define PHY_BMSR_LINK_STATUS         0x0004u
 #define PHY_BMSR_AUTONEG_COMPLETE    0x0020u
@@ -124,11 +143,13 @@ static uint32 s_lastTxRecoveryStm = 0u;
 static uint32 s_lastRxRecoveryStm = 0u;
 static uint32 s_lastLinkUp = 0u;
 static uint8  s_macSynced = 0u;
+static uint32 s_lastDiagTxStm = 0u;
 
-/* RX watchdog: if command RX makes no progress for too long while link is up,
- * reinitialize the RX descriptor ring in-place (no full GETH reinit needed). */
-static uint32 s_lastRxCmdCount = 0u;
-static uint32 s_lastRxProgressStm = 0u;
+/* RX freeze watchdog state.  Sporadic PC commands are NOT a valid liveness
+ * signal; instead we use the DMA RBU hardware evidence (packets arriving) vs
+ * actual buffer progress. */
+static uint32 s_lastRxBufStm = 0u;        /* STM ticks at last processed buffer */
+static uint8  s_rxRbuSinceProgress = 0u;  /* RBU re-latched since last progress */
 
 /* ==================== RGMII pin configuration ==================== */
 /*
@@ -636,8 +657,9 @@ void frame_eth_init(FrameEthDevice device)
     s_lastRxRecoveryStm = 0u;
     s_lastLinkUp = 0u;
     s_macSynced = 0u;
-    s_lastRxCmdCount = 0u;
-    s_lastRxProgressStm = (uint32)IfxStm_getLower(&MODULE_STM0);
+    s_lastDiagTxStm = 0u;
+    s_lastRxBufStm = (uint32)IfxStm_getLower(&MODULE_STM0);
+    s_rxRbuSinceProgress = 0u;
     g_feStats.initStep = 1;
 
     /* ╔═══════════════════════════════════════════════════════════════════════╗
@@ -1250,7 +1272,6 @@ boolean frame_eth_send_can_diag_pending(void)
 {
     CanDiagRecord record;
     boolean sent = FALSE;
-    uint8 burst = 0u;
 
     if (s_txActive != 0u || s_frameReady)
         return FALSE;
@@ -1259,16 +1280,24 @@ boolean frame_eth_send_can_diag_pending(void)
     if (g_feStats.linkUp == 0u || s_macSynced == 0u)
         return FALSE;
 
-    /* Send at most 2 diagnostic records per call.  The previous
-     * burst of 8 caused GETH TX channel contention that delayed
-     * LVDS frame fragment sending → visible flicker on pane B.
-     * At ~30 diagnostic frames/sec vs 50 LVDS FPS, 2 per iteration
-     * is more than sufficient to keep up without starving LVDS.  */
-    while (burst < 2u && can_diag_pop_record(&record))
+    /* Pace the diag TX: at most one record per FE_DIAG_TX_INTERVAL_US.  This
+     * caps GETH TX pressure so the CPU0 loop keeps draining the LVDS RX DMA in
+     * time (no LVDS CRC bursts / flicker) while still forwarding the monitor
+     * trace fast enough for the UART Monitor.  Excess records stay in the
+     * bounded can_diag queue (oldest dropped) — acceptable for telemetry. */
+    {
+        uint32 now = (uint32)IfxStm_getLower(&MODULE_STM0);
+        uint32 minGap = (uint32)IfxStm_getTicksFromMicroseconds(&MODULE_STM0,
+                                                                FE_DIAG_TX_INTERVAL_US);
+        if ((uint32)(now - s_lastDiagTxStm) < minGap)
+            return FALSE;
+        s_lastDiagTxStm = now;
+    }
+
+    if (can_diag_pop_record(&record))
     {
         if (send_can_diag_record(&record, s_diagSeq++))
             sent = TRUE;
-        burst++;
     }
 
     return sent;
@@ -1284,8 +1313,9 @@ boolean frame_eth_send_can_diag_pending(void)
 void frame_eth_poll_rx(void)
 {
     uint32 budget = FE_RX_POLL_BUDGET;
+    uint8  processedThisPass = 0u;
     uint32 now;
-    uint32 watchdogTicks;
+    uint32 rxStatus;
 
     frame_eth_update_link_status(FALSE);
 
@@ -1302,6 +1332,8 @@ void frame_eth_poll_rx(void)
             g_feStats.rxPollBudgetHits++;
             break;
         }
+
+        processedThisPass = 1u;   /* RX ring is making progress */
 
         uint8 *pRxBuf = (uint8 *)IfxGeth_Eth_getReceiveBuffer(&s_geth, IfxGeth_RxDmaChannel_0);
         if (pRxBuf == NULL_PTR)
@@ -1380,21 +1412,41 @@ void frame_eth_poll_rx(void)
         IfxGeth_Eth_freeReceiveBuffer(&s_geth, IfxGeth_RxDmaChannel_0);
     }
 
-    /* RX command-path watchdog: if link is up but command counter has not
-     * progressed for a long time, recover the RX descriptor ring in place. */
+    /* ---- RX freeze watchdog (DMA hardware evidenced, traffic-independent) ----
+     * Snapshot + clear the RBU latch.  A freshly set RBU means the DMA received
+     * a packet since the previous poll but had no free descriptor to store it.
+     * Try a cheap wakeup on every fresh RBU.  If packets keep arriving (RBU)
+     * yet no buffer surfaces for FE_RX_STALL_MS while the link is up, the ring
+     * is desynchronised (the command freeze): escalate to a full in-place
+     * re-init, which is the only thing that reliably un-sticks it. */
     now = (uint32)IfxStm_getLower(&MODULE_STM0);
-    watchdogTicks = (uint32)IfxStm_getTicksFromMilliseconds(&MODULE_STM0, 2000u);
+    rxStatus = s_geth.gethSFR->DMA_CH[IfxGeth_DmaChannel_0].STATUS.U;
+    g_feStats.rxDmaStatus = rxStatus;
 
-    if (g_feStats.cmdPacketsReceived != s_lastRxCmdCount)
+    if ((rxStatus & FE_DMA_STATUS_RBU) != 0u)
     {
-        s_lastRxCmdCount = g_feStats.cmdPacketsReceived;
-        s_lastRxProgressStm = now;
+        /* Write-1-to-clear the latch so the next poll reflects fresh activity. */
+        s_geth.gethSFR->DMA_CH[IfxGeth_DmaChannel_0].STATUS.U = FE_DMA_STATUS_RBU;
+        s_rxRbuSinceProgress = 1u;
+        /* First-line, non-destructive resume attempt. */
+        IfxGeth_Eth_wakeupReceiver(&s_geth, IfxGeth_RxDmaChannel_0);
+    }
+
+    if (processedThisPass != 0u)
+    {
+        s_lastRxBufStm = now;
+        s_rxRbuSinceProgress = 0u;
     }
     else if (g_feStats.linkUp != 0u &&
-             (uint32)(now - s_lastRxProgressStm) >= watchdogTicks)
+             s_rxRbuSinceProgress != 0u &&
+             (uint32)(now - s_lastRxBufStm) >=
+                 (uint32)IfxStm_getTicksFromMilliseconds(&MODULE_STM0, FE_RX_STALL_MS))
     {
+        /* Packets are arriving but never surface: the freeze.  Reinitialise the
+         * RX descriptor ring in place (force = bypass the rate limiter). */
         g_feStats.rxNoProgressEvents++;
-        frame_eth_recover_rx_ring(FALSE);
-        s_lastRxProgressStm = now;
+        frame_eth_recover_rx_ring(TRUE);
+        s_lastRxBufStm = now;
+        s_rxRbuSinceProgress = 0u;
     }
 }
