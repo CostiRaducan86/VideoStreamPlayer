@@ -228,18 +228,19 @@ void core0_main(void)
     g_diagSniffEnabled = 1u;
 
     /* SmartVisio Adapter: configure all GPIO selectors.
-     * MUST be called early — pins default to LOW (floating),
-     * which puts adapter in Direct mode and breaks ECU path. */
-    adapter_ctrl_init();  /* Sets ECU mode: TTL_SEL=HIGH, ECU_5V_EN=HIGH, relays OFF */
+     * Current default after reset/run = ECU control mode + Direct CAN-UART
+     * routing (CAN_SEL HIGH), so CAN traffic goes through AURIX bridge path. */
+    adapter_ctrl_init();
+
+    /* Boot default: start active forwarding bridge immediately so Direct
+     * CAN-UART has communication without waiting for a UI command.
+     * CPU2 performs the actual clean-start via s_enableReq handshake. */
+    can_uart_bridge_set_active(TRUE);
 
     /* Adapter_V2 active CAN-UART bridge.
-     * device_mode_init() already configured ASCLIN5 (ECU) + ASCLIN4 (LSM) and
-     * initialised the bridge with forwarding OFF.  adapter_ctrl_init() left the
-     * adapter in ECU CAN-UART mode (CAN_SEL LOW): the ECU and LSM are wired
-     * directly in hardware and AURIX only sniffs the bus.  This is the safe
-     * default so the ECU never enters fail-safe after a reset+run.
-     * The active forwarding bridge (CAN_SEL HIGH) is started on demand only
-     * when "Direct CAN UART" is selected from the UI (FE_CMD_SET_ADAPTER). */
+     * device_mode_init() already configured ASCLIN5 (ECU) + ASCLIN4 (LSM).
+     * With Direct CAN-UART as boot default, bridge forwarding is enabled above
+     * so reset+run comes up in a fully operational Direct path. */
 
     /* Basler trigger on P23.1 -> camera Pin 3 (Line3), GND -> Pin 6 */
     camera_trigger_init();
