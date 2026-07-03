@@ -31,7 +31,8 @@
 
 /**
  * Initialize device mode at startup.
- * Configures ASCLIN9, parsers, and Ethernet for the specified device.
+ * Configures ASCLIN1 LVDS path, CAN-UART bridge framing, parsers, and Ethernet
+ * for the specified device.
  * Call once from core0_main() after watchdog disable.
  *
  * @param device  Initial device type
@@ -41,7 +42,8 @@ void device_mode_init(FrameEthDevice device);
 /**
  * Switch to a different device type at runtime.
  *   1. Drains pending DMA buffers
- *   2. Reconfigures ASCLIN9 (baud + parity)
+ *   2. Reconfigures ASCLIN1 LVDS (baud + parity)
+ *      and CAN-UART bridge framing (ASCLIN5/ASCLIN4)
  *   3. Resets frame parsers (rxmon + osram_frame)
  *   4. Resets Ethernet frame assembly
  *

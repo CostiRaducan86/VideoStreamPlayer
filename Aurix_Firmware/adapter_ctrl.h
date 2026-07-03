@@ -63,8 +63,8 @@ typedef enum {
     CAN_UART_ECU      = 0,   /* K2=0,K3=0 — ECU↔direct passthrough↔LSM (default) */
     CAN_UART_DIRECT   = 1,   /* K2=1,K3=1 — ECU↔Aurix↔LSM (Firmware forwards ECU→LSM and LSM→ECU 
 *                               traffic) */
-    CAN_UART_EXTERNAL = 2    /* K2=1,K3=1 — Aurix↔LSM (only when Control mode = ADAPTER_MODE_DIRECT → 
-*                               ECU decoupled) */
+    CAN_UART_EXTERNAL = 2    /* Adapter_V2: mapped to same CAN_SEL=HIGH path as DIRECT
+*                               (reserved for protocol compatibility with UI) */
 } adapter_can_uart_mode_t;
 
 /* Initialise all adapter GPIO pins as outputs with ECU-default state. */

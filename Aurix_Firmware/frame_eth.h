@@ -165,6 +165,15 @@ typedef struct
     volatile uint32 rxRecoveries;          /* RX descriptor ring recoveries  */
     volatile uint32 rxDmaStatus;           /* DMA CH0 STATUS snapshot        */
     volatile uint32 rxNoProgressEvents;    /* prolonged no-progress events   */
+
+    /* MAC/MTL-level RX health (upstream of the DMA descriptor ring).
+     * These catch a command freeze that stalls at the MAC/FIFO stage
+     * (never reaches the DMA, so rxDmaStatus/RBU never reflects it).
+     * MAC_DEBUG.RPESTS/RFCFCSTS: 0 = idle in both fields when healthy.
+     * rxFifoOverflowPackets: cumulative HW counter, must stay 0.        */
+    volatile uint32 macDebugRpeSts;        /* MAC_DEBUG.RPESTS (0=idle)      */
+    volatile uint32 macDebugRfcfcSts;      /* MAC_DEBUG.RFCFCSTS (0=idle)    */
+    volatile uint32 rxFifoOverflowPackets; /* GETH_RX_FIFO_OVERFLOW_PACKETS  */
 } FeStats;
 
 extern FeStats g_feStats;

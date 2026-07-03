@@ -70,18 +70,19 @@ void adapter_ctrl_set_can_uart(adapter_can_uart_mode_t mode)
     switch (mode)
     {
         case CAN_UART_ECU:
-            /* State 1: K2=0,K3=0 → ECU↔direct passthrough↔LSM*/
+            /* ECU passthrough mode: CAN_SEL LOW */
             pin_set(PIN_CAN_SEL,     FALSE);
             break;
 
         case CAN_UART_DIRECT:
-            /* State 2: K2=1,K3=1 → ECU↔Aurix↔LSM */
+            /* Active bridge mode: CAN_SEL HIGH (ECU↔AURIX↔LSM) */
             pin_set(PIN_CAN_SEL,     TRUE);
             break;
 
         case CAN_UART_EXTERNAL:
-            /* State 3: K2=1,K3=1 → ECU decoupled, Aurix↔LSM */
-            pin_set(PIN_CAN_SEL,     TRUE);   /* MUST decouple ECU first! */
+            /* Adapter_V2 has no separate EXT_CAN_SEL path.
+             * Keep protocol compatibility: map EXTERNAL to active bridge. */
+            pin_set(PIN_CAN_SEL,     TRUE);
             break;
 
         default:

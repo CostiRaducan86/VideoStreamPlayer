@@ -6,7 +6,15 @@
  ******************************************************************************/
 
 #include "Ifx_Types.h"
-#include "can_hw.h"   /* DiagUartFrame */
+
+typedef struct
+{
+    uint8   data[72];
+    uint8   len;
+    uint32  timestampUs;
+    uint16  responseDelayUs;
+    uint16  interFrameDelayUs;
+} DiagUartFrame;
 
 /* Protocol version: v2 extends payload to include raw UART frame bytes */
 #define CAN_DIAG_PROTOCOL_VERSION      2u

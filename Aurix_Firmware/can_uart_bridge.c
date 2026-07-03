@@ -51,8 +51,7 @@
 #define BRIDGE_OSRAM_SYNC0        0x80u  /* Osram diagnostic frame SYNC0 */
 
 /* ---- Osram diagnostic frame structure (KEWGBXXD1U) ----------------------
- * The merged monitor stream is framed by LENGTH, exactly like the legacy
- * ASCLIN9 sniffer (diag_uart_try_receive_osram), NOT by an idle gap.  An idle
+ * The merged monitor stream is framed by LENGTH, NOT by an idle gap.  An idle
  * gap that landed mid-transaction (e.g. the ~13 us request->response turnaround
  * or any inter-byte stretch) used to split a frame into a short head record
  * ("Malformed") and a discarded tail.  Length framing derives the exact frame
@@ -86,7 +85,7 @@ CanUartBridgeStats g_canUartBridgeStats;
 /* Per-direction state.  One instance for ECU->LSM, one for LSM->ECU.
  * Holds only the byte-level forwarding telemetry; the monitoring capture is a
  * single shared stream (see s_mon* below) so request+response of one logical
- * transaction land in ONE record, exactly like the old ASCLIN9 sniffer saw on
+ * transaction land in ONE record, preserving the original single-wire view on
  * the shared half-duplex wire. */
 typedef struct bridge_dir_s
 {
@@ -149,8 +148,8 @@ static volatile uint32 s_relayResyncs;  /* telemetry: idle/overflow resyncs  */
 /* ---- Shared monitoring stream -------------------------------------------
  * Genuine (echo-filtered) bytes from BOTH directions are appended here in
  * processing order: the ECU request bytes first, then the LSM response bytes
- * ~6 us later.  This reproduces the single-wire view the legacy ASCLIN9 sniffer
- * captured, so one read transaction = one record "80A5BE00 + <response> + CRC".
+ * ~6 us later.  This reproduces the original single-wire bus view, so one
+ * read transaction = one record "80A5BE00 + <response> + CRC".
  * The buffer is a linear parse buffer drained by bridge_mon_tick(), which
  * extracts complete frames by LENGTH (see BRIDGE_FRAME_* above). */
 static volatile uint8  s_monAcc[BRIDGE_ACC_MAX];
@@ -574,7 +573,7 @@ boolean can_uart_bridge_is_active(void)
 }
 
 /* Total Osram frame length (header + data + CRC) decoded from the HCTRL byte,
- * identical to the legacy sniffer's diag_full_frame_length().  The HCTRL nRegs
+ * matching the historical full-length formula.  The HCTRL nRegs
  * field describes both write-data and read-response register counts, so this is
  * the full merged length for either operation. */
 static uint8 bridge_mon_full_len(uint8 hctrl)
@@ -601,7 +600,7 @@ static void bridge_mon_compact(uint16 n)
  * int-lock).  Returns TRUE when it made progress (a frame was produced into
  * *out, or noise/a bare request was discarded) so the caller loops again;
  * FALSE when the buffer holds only an incomplete frame and must wait for more
- * bytes.  Mirrors diag_uart_try_receive_osram() but on the merged relay stream. */
+ * bytes. */
 static boolean bridge_mon_parse_step(DiagUartFrame *out, boolean *haveFrame)
 {
     uint8  hctrl;

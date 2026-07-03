@@ -150,6 +150,14 @@ static uint32 s_lastDiagTxStm = 0u;
  * actual buffer progress. */
 static uint32 s_lastRxBufStm = 0u;        /* STM ticks at last processed buffer */
 static uint8  s_rxRbuSinceProgress = 0u;  /* RBU re-latched since last progress */
+/* MAC-level RX FIFO overflow evidence (upstream of the DMA/RBU signal).  A
+ * confirmed freeze mode: commands are silently dropped at the MAC RX FIFO
+ * and never reach the DMA descriptor ring, so RBU never latches and the
+ * watchdog above never fires (rxRecoveries stays 0 while the freeze is
+ * live).  Track the overflow counter the same way as RBU so the existing,
+ * already-safe frame_eth_recover_rx_ring() also gets a chance to run. */
+static uint32 s_lastRxFifoOverflowCount = 0u;
+static uint8  s_rxFifoOverflowSinceProgress = 0u;
 
 /* ==================== RGMII pin configuration ==================== */
 /*
@@ -1423,6 +1431,23 @@ void frame_eth_poll_rx(void)
     rxStatus = s_geth.gethSFR->DMA_CH[IfxGeth_DmaChannel_0].STATUS.U;
     g_feStats.rxDmaStatus = rxStatus;
 
+    /* MAC/MTL-level RX health snapshot.  A freeze that happens upstream of
+     * the DMA descriptor ring (e.g. RX FIFO stuck/overflowing) never sets
+     * FE_DMA_STATUS_RBU and never triggers frame_eth_recover_rx_ring(), so
+     * rxDmaStatus alone can look perfectly normal while commands stop
+     * arriving.  These read-only registers catch that case for diagnosis. */
+    g_feStats.macDebugRpeSts        = GETH_MAC_DEBUG.B.RPESTS;
+    g_feStats.macDebugRfcfcSts      = GETH_MAC_DEBUG.B.RFCFCSTS;
+    g_feStats.rxFifoOverflowPackets = GETH_RX_FIFO_OVERFLOW_PACKETS.B.RXFIFOOVFL;
+
+    if (g_feStats.rxFifoOverflowPackets != s_lastRxFifoOverflowCount)
+    {
+        /* FIFO keeps dropping packets since the previous poll: same liveness
+         * meaning as a fresh RBU latch, just one stage further upstream. */
+        s_lastRxFifoOverflowCount = g_feStats.rxFifoOverflowPackets;
+        s_rxFifoOverflowSinceProgress = 1u;
+    }
+
     if ((rxStatus & FE_DMA_STATUS_RBU) != 0u)
     {
         /* Write-1-to-clear the latch so the next poll reflects fresh activity. */
@@ -1436,17 +1461,21 @@ void frame_eth_poll_rx(void)
     {
         s_lastRxBufStm = now;
         s_rxRbuSinceProgress = 0u;
+        s_rxFifoOverflowSinceProgress = 0u;
     }
     else if (g_feStats.linkUp != 0u &&
-             s_rxRbuSinceProgress != 0u &&
+             (s_rxRbuSinceProgress != 0u || s_rxFifoOverflowSinceProgress != 0u) &&
              (uint32)(now - s_lastRxBufStm) >=
                  (uint32)IfxStm_getTicksFromMilliseconds(&MODULE_STM0, FE_RX_STALL_MS))
     {
         /* Packets are arriving but never surface: the freeze.  Reinitialise the
-         * RX descriptor ring in place (force = bypass the rate limiter). */
+         * RX descriptor ring in place (force = bypass the rate limiter).  This
+         * now also covers the MAC-level FIFO-overflow freeze mode confirmed
+         * on hardware, not just the DMA/RBU case it was originally written for. */
         g_feStats.rxNoProgressEvents++;
         frame_eth_recover_rx_ring(TRUE);
         s_lastRxBufStm = now;
         s_rxRbuSinceProgress = 0u;
+        s_rxFifoOverflowSinceProgress = 0u;
     }
 }
