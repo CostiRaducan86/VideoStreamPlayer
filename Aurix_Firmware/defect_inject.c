@@ -148,10 +148,20 @@ void defect_inject_frame_begin(uint8 hctrl, uint8 hadr)
     g_defectInjectDbg.lastHctrl = hctrl;
     g_defectInjectDbg.lastHadr  = hadr;
 
-    /* Always reset filter state for the new response frame.
-     * The bridge relay stays in RSP for the full 34-byte LSM response before
-     * transitioning back to REQ, so frame_begin is called exactly once per
-     * request-response cycle (no mid-frame re-lock). */
+    /* Guard: if a frame is already in-flight (relay re-locked RSP mid-response
+     * due to startup echo-count instability), abort the interrupted frame
+     * without classifying the new one.  This prevents forwarding a partially-
+     * computed CRC that would corrupt the in-flight frame and cause ECU failsafe.
+     * The skipped new frame passes through byte-identical (filter stays idle). */
+    if (s_fLen != 0u)
+    {
+        s_fIdx     = 0u;
+        s_fLen     = 0u;
+        s_isTarget = 0u;
+        return;
+    }
+
+    /* Reset filter state for the new response frame. */
     s_fIdx           = 0u;
     s_fLen           = 0u;
     s_isTarget       = 0u;

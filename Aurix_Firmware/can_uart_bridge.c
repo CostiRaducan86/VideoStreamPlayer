@@ -371,8 +371,19 @@ static void bridge_relay_pump(void)
                     /* Genuine LSM response byte -> lock/keep RSP, forward to ECU. */
                     if (s_relay != BRIDGE_RELAY_RSP)
                     {
-                        uint8 hctrl = (s_reqLen >= 3u) ? s_reqBuf[2] : 0u;
-                        uint8 hadr  = (s_reqLen >= 4u) ? s_reqBuf[3] : 0u;
+                        /* Validate sync bytes before trusting HCTRL/HADR.
+                         * If the captured request is not a proper diagnostic
+                         * frame (e.g. bus noise at ECU power-on), pass zeros
+                         * so the filter stays idle for this response. */
+                        uint8 hctrl = 0u;
+                        uint8 hadr  = 0u;
+                        if (s_reqLen >= 4u &&
+                            s_reqBuf[0] == 0x80u &&
+                            s_reqBuf[1] == 0xA5u)
+                        {
+                            hctrl = s_reqBuf[2];
+                            hadr  = s_reqBuf[3];
+                        }
                         s_relay     = BRIDGE_RELAY_RSP;
                         s_fwdCount  = 0u;
                         s_echoCount = 0u;
