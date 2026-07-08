@@ -212,6 +212,17 @@ static void defect_inject_classify(uint8 hadr)
     if ((isRead == 0u) || (nRegs != 16u))
         return;
 
+    /* ELEDERP and ELEDERS registers live in the 0x00xx address range only.
+     * HCTRL bit0 is the 9th address bit (ADR[8]); if it is set the ECU is
+     * reading from the 0x01xx range (pixel-map / calibration data written
+     * during initialisation, e.g. 0x0170, 0x0180 … 0x01E0).  Those block
+     * addresses share the same HADR lower byte (0x70, 0x80 …) but are NOT
+     * diagnostic registers and must never be modified by injection.
+     * Without this guard the filter incorrectly targets 0x0170/0x0180 reads
+     * at startup, corrupts the LSM calibration response and causes ECU failsafe. */
+    if ((s_hctrl & 0x01u) != 0u)
+        return;
+
     if (hadr == 0x70u || hadr == 0x80u || hadr == 0x90u || hadr == 0xA0u)
     {
         base    = (uint8)(hadr - 0x70u);   /* 0, 16, 32, 48 */
