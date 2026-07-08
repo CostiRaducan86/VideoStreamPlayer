@@ -34,6 +34,7 @@
 #include "can_diag.h"        /* can_diag_bridge_uart_frame(), CAN_DIAG_RAW_MAX */
 #include "can_hw.h"          /* DiagUartFrame */
 #include "adapter_ctrl.h"    /* adapter_ctrl_set_can_bridge() */
+#include "defect_inject.h"   /* in-flight ELEDERP/ELEDERS injection (LSM->ECU) */
 
 /* ======================== Configuration ======================== */
 
@@ -109,6 +110,13 @@ static bridge_dir_t  s_lsmDir;    /* RX from LSM  -> forward to ECU TX */
 static volatile uint8 s_bridgeActive;  /* 1 = forwarding + capturing       */
 static uint8          s_deviceId = BRIDGE_DEVICE_OSRAM;
 static uint32         s_ticksPerUs = 100u;  /* STM0 ticks per microsecond  */
+
+/* ---- ECU request capture for defect injection --------------------------
+ * The defect filter sees only LSM response bytes (data+CRC, no header).
+ * We capture the last ECU request bytes here so HCTRL and HADR can be
+ * passed to defect_inject_frame_begin() when the relay locks to RSP. */
+static uint8 s_reqBuf[4];   /* [0x80][0xA5][HCTRL][HADR] from ECU */
+static uint8 s_reqLen;      /* bytes captured (0..4) */
 
 /* ---- Half-duplex relay arbitration --------------------------------------
  * The diagnostic bus is strictly turn-based: the ECU issues a request, the LSM
@@ -331,7 +339,11 @@ static void bridge_relay_pump(void)
                         s_fwdCount  = 0u;
                         s_echoCount = 0u;
                         s_relayReqCount++;
+                        s_reqLen    = 0u;   /* start of new request: reset capture */
                     }
+                    /* Capture first 4 bytes of request for HCTRL/HADR extraction. */
+                    if (s_reqLen < 4u)
+                        s_reqBuf[s_reqLen++] = b;
                     bridge_forward(&s_ecuDir, lsm, b, stm);
                 }
             }
@@ -359,11 +371,20 @@ static void bridge_relay_pump(void)
                     /* Genuine LSM response byte -> lock/keep RSP, forward to ECU. */
                     if (s_relay != BRIDGE_RELAY_RSP)
                     {
+                        uint8 hctrl = (s_reqLen >= 3u) ? s_reqBuf[2] : 0u;
+                        uint8 hadr  = (s_reqLen >= 4u) ? s_reqBuf[3] : 0u;
                         s_relay     = BRIDGE_RELAY_RSP;
                         s_fwdCount  = 0u;
                         s_echoCount = 0u;
                         s_relayRspCount++;
+                        defect_inject_frame_begin(hctrl, hadr);
                     }
+                    /* In-flight ELEDERP/ELEDERS defect injection on the
+                     * response path: substitutes register bytes + overrides the
+                     * trailing CRC-16 for defined defect slots, byte-identical
+                     * otherwise. The substituted byte is what both the ECU and
+                     * the PC monitor (bridge_mon_capture) receive. */
+                    b = defect_inject_filter_byte(b);
                     bridge_forward(&s_lsmDir, ecu, b, stm);
                 }
             }

@@ -20,6 +20,9 @@
                 <MenuItem Header="Camera Configuration" Click="MenuCameraConfig_Click"/>
                 <MenuItem Header="API Configuration" Click="MenuApiConfig_Click"/>
             </MenuItem>
+            <MenuItem Header="_Tools">
+                <MenuItem Header="OSRAM Defect Injection Control" Click="MenuOsramDefectControl_Click"/>
+            </MenuItem>
         </Menu>
 
         <Grid Margin="10">

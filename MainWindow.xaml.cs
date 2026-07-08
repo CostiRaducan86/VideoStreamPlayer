@@ -16,6 +16,7 @@ using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Windows.Shapes;
 using System.Windows.Threading;
+using VilsSharpX.DefectPixel;
 namespace VilsSharpX
 {
     public partial class MainWindow : Window
@@ -160,6 +161,8 @@ namespace VilsSharpX
         private BaslerCameraCapture? _baslerCapture;
         private LsmCanDiagCapture? _canDiagCapture;
         private readonly LsmCanDiagStore _canDiagStore = new(32768);
+        private OsramDefectStore? _osramDefectStore;
+        private OsramDefectControlWindow? _osramDefectControlWindow;
         private readonly ObservableCollection<CanDiagRowView> _canDiagRows = [];
         private int _canDiagCurrentPage = 1;
         private int _canDiagTotalPages = 1;
@@ -1486,6 +1489,56 @@ namespace VilsSharpX
             // CAN capture is independent of the main Start/Stop cycle so the
             // user can Record/Stop on the CAN monitor at any time.
             StartCanDiagCapture();
+
+            InitializeOsramDefectInjection();
+        }
+
+        private void InitializeOsramDefectInjection()
+        {
+            _osramDefectStore ??= new OsramDefectStore();
+            EnsureOsramDefectControlWindow();
+        }
+
+        private void EnsureOsramDefectControlWindow()
+        {
+            if (_osramDefectControlWindow != null)
+                return;
+
+            if (_osramDefectStore == null)
+                return;
+
+            _osramDefectControlWindow = new OsramDefectControlWindow(_osramDefectStore);
+            _osramDefectControlWindow.DefectStateChanged += SendOsramDefectListToAurix;
+            _osramDefectControlWindow.Closed += (_, _) => _osramDefectControlWindow = null;
+        }
+
+        /// <summary>
+        /// Pushes the current OSRAM defect table to the Aurix firmware over Ethernet.
+        /// Sent only on state changes (enable/disable/add/remove) from the control window.
+        /// The actual ELEDERP/ELEDERS injection into the CAN-UART stream runs in Aurix.
+        /// </summary>
+        private void SendOsramDefectListToAurix()
+        {
+            if (_osramDefectStore == null)
+                return;
+
+            try
+            {
+                string? txDev = GetTxPcapDeviceNameOrNull();
+                if (string.IsNullOrWhiteSpace(txDev))
+                {
+                    AppendDiagLog("[cmd] No NIC selected — SET_DEFECT_LIST not sent");
+                    return;
+                }
+
+                bool enable = _osramDefectStore.InjectionEnabled;
+                var defects = _osramDefectStore.GetActiveDefects();
+                SetDefectListCommand.Send(txDev, enable, defects, AppendDiagLog);
+            }
+            catch (Exception ex)
+            {
+                AppendDiagLog($"[cmd] SET_DEFECT_LIST error: {ex.Message}");
+            }
         }
 
         private void StartCanDiagCapture()
@@ -1495,6 +1548,10 @@ namespace VilsSharpX
                 StopCanDiagCapture();
                 string? nicHint = LiveNicSelector.GetSelectedDeviceName(CmbLiveNic) ?? _avtpLiveDeviceHint;
                 _canDiagCapture = LsmCanDiagCapture.Start(nicHint, AppendDiagLog);
+                // NOTE: OSRAM defect injection is NOT applied to the displayed trace here.
+                // The C# side only DEFINES defects (via OsramDefectControlWindow); the actual
+                // ELEDERP/ELEDERS injection into the CAN-UART stream is performed in the Aurix
+                // firmware (LSM -> Aurix -> ECU). Records are shown unmodified.
                 _canDiagCapture.OnRecordReady += record => Dispatcher.BeginInvoke(() => HandleCanDiagRecord(record));
                 AppendDiagLog("[can] diagnostic capture started");
                 UpdateCanDiagStatusText();
@@ -2702,6 +2759,7 @@ namespace VilsSharpX
             catch { /* ignore */ }
             try { StopDiagRetryTimer(); } catch { /* ignore */ }
             try { _canDiagWatchdogTimer?.Stop(); } catch { /* ignore */ }
+            try { _osramDefectControlWindow?.Close(); } catch { /* ignore */ }
             try { StopCanDiagCapture(); } catch { /* ignore */ }
             try { StopNichiaEthCapture(); } catch { /* ignore */ }
             try { StopOsramEthCapture(); } catch { /* ignore */ }
@@ -4667,6 +4725,27 @@ namespace VilsSharpX
             };
             _apiConfigWindow.Closed += (_, _) => _apiConfigWindow = null;
             _apiConfigWindow.Show();
+        }
+
+        private void MenuOsramDefectControl_Click(object sender, RoutedEventArgs e)
+        {
+            InitializeOsramDefectInjection();
+            EnsureOsramDefectControlWindow();
+
+            if (_osramDefectControlWindow == null)
+                return;
+
+            if (_osramDefectControlWindow.IsVisible)
+            {
+                _osramDefectControlWindow.Activate();
+                return;
+            }
+
+            if (_osramDefectControlWindow.Owner == null)
+                _osramDefectControlWindow.Owner = this;
+
+            _osramDefectControlWindow.Show();
+            _osramDefectControlWindow.Activate();
         }
     }
 

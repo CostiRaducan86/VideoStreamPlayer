@@ -1317,6 +1317,7 @@ boolean frame_eth_send_can_diag_pending(void)
 #include "adapter_ctrl.h"  /* adapter_ctrl_set_mode/can_uart/apply() */
 #include "can_uart_bridge.h" /* can_uart_bridge_set_active() */
 #include "can_hw.h"        /* g_diagSniffEnabled */
+#include "defect_inject.h" /* defect_inject_set_list() */
 
 void frame_eth_poll_rx(void)
 {
@@ -1412,6 +1413,19 @@ void frame_eth_poll_rx(void)
                     adapter_ctrl_apply(ctrlEnum, canEnum);
                     can_uart_bridge_set_active(
                         (canEnum == CAN_UART_DIRECT) ? TRUE : FALSE);
+                }
+                else if (cmdId == FE_CMD_SET_DEFECT_LIST)
+                {
+                    /* Payload: [17] = enable (0/1)
+                     *          [18] = count  (0..64 defect records)
+                     *          [19..] = count x 5 bytes:
+                     *              [slot][x_hi][x_lo][y][status]
+                     *              status = (pxState << 2) | (pxDiag & 0x03)
+                     * The list only DEFINES defects; the actual ELEDERP/ELEDERS
+                     * injection is done in-flight by the CPU2 bridge filter. */
+                    uint8 enable = cmdPayload;      /* byte [17] */
+                    uint8 count  = pRxBuf[18];      /* byte [18] */
+                    defect_inject_set_list(enable, &pRxBuf[19], count);
                 }
             }
         }

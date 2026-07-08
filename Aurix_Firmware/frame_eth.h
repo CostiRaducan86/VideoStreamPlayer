@@ -47,6 +47,7 @@
 #define FE_CMD_SET_DEVICE         0x01u       /* Command: set device mode */
 #define FE_CMD_DIAG_SNIFF         0x02u       /* Command: start/stop diag sniffing */
 #define FE_CMD_SET_ADAPTER        0x03u       /* Command: set adapter mode (control + CAN UART) */
+#define FE_CMD_SET_DEFECT_LIST    0x04u       /* Command: set OSRAM defect injection list */
 #define FE_HDR_LEN                18u
 #define FE_DIAG_HDR_LEN           8u
 /* v2 payload: 22 fixed bytes + 72 raw UART bytes = 94 bytes

@@ -1,0 +1,122 @@
+<Window x:Class="VilsSharpX.DefectPixel.OsramDefectControlWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="OSRAM Defect Injection Control" 
+        Width="800" Height="600"
+        WindowStartupLocation="CenterOwner"
+        Background="#F0F0F0">
+    
+    <Grid Margin="10">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="1*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <!-- Title -->
+        <TextBlock Grid.Row="0" 
+                   FontSize="16" FontWeight="Bold"
+                   Foreground="DarkBlue"
+                   Margin="0,0,0,10"
+                   Text="OSRAM Defect Pixel Injection Control"/>
+
+        <!-- Injection Enable/Disable -->
+        <StackPanel Grid.Row="1" Orientation="Horizontal" Margin="0,0,0,10">
+            <CheckBox x:Name="InjectionEnabledCheckBox"
+                      VerticalAlignment="Center"
+                      Margin="0,0,10,0"/>
+            <TextBlock VerticalAlignment="Center" 
+                       FontWeight="Bold"
+                       Text="Injection Enabled"/>
+            <TextBlock VerticalAlignment="Center"
+                       Margin="20,0,0,0"
+                       Foreground="DarkGreen"
+                       x:Name="StatusText"
+                       Text="[Disabled]"/>
+        </StackPanel>
+
+        <!-- Add Defect Form -->
+        <GroupBox Grid.Row="2" Header="Add Defect" Padding="10" Margin="0,0,0,10">
+            <StackPanel>
+                <!-- X and Y Coordinates -->
+                <StackPanel Orientation="Horizontal" Margin="0,0,0,5">
+                    <TextBlock Width="60" VerticalAlignment="Center" Text="X (0-319):"/>
+                    <TextBox x:Name="XCoordInput" Width="80" Padding="3" Margin="0,0,20,0"/>
+                    
+                    <TextBlock Width="60" VerticalAlignment="Center" Text="Y (0-79):"/>
+                    <TextBox x:Name="YCoordInput" Width="80" Padding="3" Margin="0,0,20,0"/>
+                    
+                    <TextBlock Width="70" VerticalAlignment="Center" Text="Slot (0-63):"/>
+                    <TextBox x:Name="SlotInput" Width="80" Padding="3" Margin="0,0,20,0"/>
+                </StackPanel>
+
+                <!-- Defect Type Selection -->
+                <StackPanel Orientation="Horizontal" Margin="0,0,0,5">
+                    <TextBlock Width="120" VerticalAlignment="Center" Text="Defect Type:"/>
+                    <ComboBox x:Name="DefectTypeCombo" Width="150" Padding="5" Margin="0,0,20,0">
+                        <ComboBoxItem Content="None" Tag="0"/>
+                        <ComboBoxItem Content="Short-to-GND (S2G)" Tag="1"/>
+                        <ComboBoxItem Content="Open" Tag="2" IsSelected="True"/>
+                        <ComboBoxItem Content="Stuck" Tag="3"/>
+                    </ComboBox>
+
+                    <!-- Expected State -->
+                    <TextBlock Width="100" VerticalAlignment="Center" Text="Expected State:"/>
+                    <ComboBox x:Name="ExpectedStateCombo" Width="80" Padding="5">
+                        <ComboBoxItem Content="OFF" Tag="0"/>
+                        <ComboBoxItem Content="ON" Tag="1" IsSelected="True"/>
+                    </ComboBox>
+                </StackPanel>
+
+                <!-- Add Button -->
+                <StackPanel Orientation="Horizontal">
+                    <Button x:Name="AddDefectButton"
+                            Background="DodgerBlue" Foreground="White"
+                            Padding="10,5" Margin="0,0,10,0"
+                            Content="Add Defect"/>
+                    <TextBlock x:Name="AddStatusText" VerticalAlignment="Center" Foreground="Red"/>
+                </StackPanel>
+            </StackPanel>
+        </GroupBox>
+
+        <!-- Active Defects List -->
+        <GroupBox Grid.Row="3" Header="Active Defects" Padding="10" Margin="0,0,0,10">
+            <Grid>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="30"/>
+                    <RowDefinition Height="1*"/>
+                </Grid.RowDefinitions>
+
+                <!-- Column Headers -->
+                <StackPanel Grid.Row="0" Orientation="Horizontal" Background="LightGray">
+                    <TextBlock Width="60" Text="Slot" FontWeight="Bold" Padding="3"/>
+                    <TextBlock Width="70" Text="X" FontWeight="Bold" Padding="3"/>
+                    <TextBlock Width="70" Text="Y" FontWeight="Bold" Padding="3"/>
+                    <TextBlock Width="90" Text="PixelID" FontWeight="Bold" Padding="3"/>
+                    <TextBlock Width="100" Text="Defect Type" FontWeight="Bold" Padding="3"/>
+                    <TextBlock Width="70" Text="PXState" FontWeight="Bold" Padding="3"/>
+                    <TextBlock Width="80" Text="DarkVisible" FontWeight="Bold" Padding="3"/>
+                    <TextBlock Width="80" Text="Action" FontWeight="Bold" Padding="3"/>
+                </StackPanel>
+
+                <!-- Defects List -->
+                <ScrollViewer Grid.Row="1">
+                    <StackPanel x:Name="DefectListPanel"/>
+                </ScrollViewer>
+            </Grid>
+        </GroupBox>
+
+        <!-- Statistics -->
+        <GroupBox Grid.Row="4" Header="Statistics" Padding="10">
+            <StackPanel Orientation="Horizontal">
+                <TextBlock FontWeight="Bold" VerticalAlignment="Center" Text="Active Defects:"/>
+                <TextBlock x:Name="ActiveDefectsCountText" Foreground="DarkRed" Text="0"
+                           FontSize="14" VerticalAlignment="Center" Margin="8,0,0,0"/>
+                <TextBlock VerticalAlignment="Center" Margin="20,0,0,0" Foreground="Gray"
+                           Text="Injection is performed in Aurix firmware; the list is pushed on every change."/>
+            </StackPanel>
+        </GroupBox>
+    </Grid>
+</Window>
