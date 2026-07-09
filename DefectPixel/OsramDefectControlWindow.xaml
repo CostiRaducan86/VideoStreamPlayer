@@ -107,6 +107,9 @@
                         </ComboBox>
                     </StackPanel>
 
+                    <!-- Separator between form fields and action buttons -->
+                    <Rectangle Height="1" Fill="Gray" Margin="0,12,0,12" HorizontalAlignment="Stretch"/>
+
                     <!-- Action buttons -->
                     <StackPanel Orientation="Horizontal">
                         <Button x:Name="AddDefectButton"
