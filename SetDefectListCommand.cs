@@ -53,7 +53,7 @@ public static class SetDefectListCommand
         IReadOnlyList<OsramDefectEntry> defects,
         Action<string>? log = null)
     {
-        defects ??= Array.Empty<OsramDefectEntry>();
+        defects ??= [];
         int count = Math.Min(defects.Count, MaxDefects);
 
         int frameLen = Math.Max(MinFrameSize, HeaderOffset + count * BytesPerDefect);

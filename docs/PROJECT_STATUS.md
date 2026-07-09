@@ -441,7 +441,7 @@ User clicks "Toggle TX"
 **Report Structure:**
 
 - **Main Sheet:** `FrameNr_XX`
-  - Columns: `PixelID`, `LinNr`, `ColNr`, `PixelValue_A`, `PixelValue_B`, `Diff_B_A`
+  - Columns: `Pixel_ID`, `LinNr`, `ColNr`, `PixelValue_A`, `PixelValue_B`, `Diff_B_A`
   - All 25,600 pixels listed
 - **DarkPixels Sheet:** Only rows where A>0 && B==0
   - Same columns as main sheet
