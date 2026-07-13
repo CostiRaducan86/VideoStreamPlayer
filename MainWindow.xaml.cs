@@ -4840,8 +4840,7 @@ namespace VilsSharpX
                 return;
             }
 
-            if (_osramDefectControlWindow.Owner == null)
-                _osramDefectControlWindow.Owner = this;
+            _osramDefectControlWindow.Owner ??= this;
 
             _osramDefectControlWindow.Show();
             _osramDefectControlWindow.Activate();
