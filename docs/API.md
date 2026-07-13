@@ -339,9 +339,9 @@ Returns the most recent comparison statistics (updated each render cycle).
 {
   "max_positive_dev": 12,
   "max_negative_dev": -3,
-  "average_pixels_dev": 2.7,
+  "average_dev": 2.7,
   "total_pixels_dev": 1450,
-  "total_dark_pixels": 0
+  "dark_pixels": 0
 }
 ```
 
@@ -349,9 +349,9 @@ Returns the most recent comparison statistics (updated each render cycle).
 | -------------------- | ----------------------------------------------- |
 | `max_positive_dev`   | Maximum B>A deviation (positive)                |
 | `max_negative_dev`   | Maximum B<A deviation (negative)                |
-| `average_pixels_dev` | Mean absolute deviation across all pixels       |
+| `average_dev`        | Mean absolute deviation across all pixels       |
 | `total_pixels_dev`   | Number of pixels exceeding the deadband         |
-| `total_dark_pixels`  | Pixels where A>0 but B==0 (dark pixel defects)  |
+| `dark_pixels`        | Pixels where A>0 but B==0 (dark pixel defects)  |
 
 ### GetFrameSnapshot
 

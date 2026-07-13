@@ -22,9 +22,9 @@
  *   Pin 2:  TTL_SEL          ←→  P20.0  (X103-10) [GPIO]
  *   Pin 3:  TTL_FROM_ECU_3V3 ←→  P14.8  (X103-7)  [ASCLIN1 RX LVDS]
  *   Pin 4:  TTL_FROM_LOCAL   ←→  P02.2  (X103-15) [ASCLIN1 TX LVDS]
- *   Pin 5:  LOGIC_5V_SEL     ←→  P02.1  (X103-14) [GPIO]
+ *   Pin 5:  LOGIC_5V_SEL     ←→  P21.3  (X103-6)  [GPIO]
  *   Pin 6:  LOCAL_RL_DET     ←→  P14.7  (X103-8)  [GPIO]
- *   Pin 7:  RL_DET_SEL       ←→  P02.0  (X103-13) [GPIO]
+ *   Pin 7:  RL_DET_SEL       ←→  P21.2  (X103-5)  [GPIO]
  *   Pin 8:  CAN_TX_LSM       ←→  P00.9  (X103-31) [ASCLIN4 TX CAN_UART]
  *   Pin 9:  GND              ←→  GND    (X103-4)
  *   Pin 10: CAN_RX_LSM       ←→  P00.12 (X103-34) [ASCLIN4 RX CAN_UART]

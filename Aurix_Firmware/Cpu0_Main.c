@@ -242,7 +242,7 @@ void core0_main(void)
      * With Direct CAN-UART as boot default, bridge forwarding is enabled above
      * so reset+run comes up in a fully operational Direct path. */
 
-    /* Basler trigger on P23.1 -> camera Pin 3 (Line3), GND -> Pin 6 */
+    /* Basler trigger on P02.3 -> camera Pin 3 (Line3), GND -> Pin 6 */
     camera_trigger_init();
     /* SYNC mode: trigger fires on each LVDS frame-complete (from osram_frame.c).
      * Pulse width 200µs is enough for the camera to detect rising edge.

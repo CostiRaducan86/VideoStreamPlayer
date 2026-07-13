@@ -15,16 +15,16 @@ class ComparisonStats:
 
     max_positive_dev: int
     max_negative_dev: int
-    average_pixels_dev: float
+    average_dev: float
     total_pixels_dev: int
-    total_dark_pixels: int
+    dark_pixels: int
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "ComparisonStats":
         return cls(
             max_positive_dev=int(data.get("max_positive_dev", 0)),
             max_negative_dev=int(data.get("max_negative_dev", 0)),
-            average_pixels_dev=float(data.get("average_pixels_dev", 0.0)),
+            average_dev=float(data.get("average_dev", 0.0)),
             total_pixels_dev=int(data.get("total_pixels_dev", 0)),
-            total_dark_pixels=int(data.get("total_dark_pixels", 0)),
+            dark_pixels=int(data.get("dark_pixels", 0)),
         )

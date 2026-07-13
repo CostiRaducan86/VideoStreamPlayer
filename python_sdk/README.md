@@ -33,7 +33,7 @@ Every response uses the same shape:
 | `PauseSimulation` | `{}` | `{ paused }` |
 | `ResumeSimulation` | `{}` | `{ resumed }` |
 | `SetComparisonSettings` | `{ "mode": 0, "deadband": 5, "bDelta": 0 }` | `{ updated, mode, deadband, bDelta }` |
-| `GetComparisonStats` | `{}` | `{ max_positive_dev, max_negative_dev, average_pixels_dev, total_pixels_dev, total_dark_pixels }` |
+| `GetComparisonStats` | `{}` | `{ max_positive_dev, max_negative_dev, average_dev, total_pixels_dev, dark_pixels }` |
 | `GetFrameSnapshot` | `{ "pane": "D" }` | `{ pane, format, image (base64 PNG) }` |
 
 ## Usage

@@ -4,8 +4,8 @@
  * See can_uart_bridge.h for the full architecture description.
  *
  * Summary:
- *   ECU side = ASCLIN5  RX P00.6  / TX P00.7   (X103 pins 24 / 25)
- *   LSM side = ASCLIN4  RX P00.12 / TX P00.9   (X103 pins 30 / 27)
+ *   ECU side = ASCLIN5  RX P00.6  / TX P00.7   (X103 pins 28 / 29)
+ *   LSM side = ASCLIN4  RX P00.12 / TX P00.9   (X103 pins 34 / 31)
  *
  *   ECU RX ISR (prio 11): drain RX FIFO -> write each byte to LSM TX FIFO
  *                         (forward request ECU->LSM) + capture for monitoring.

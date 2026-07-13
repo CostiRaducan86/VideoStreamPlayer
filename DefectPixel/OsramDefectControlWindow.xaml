@@ -77,16 +77,19 @@
 
                 <!-- Left: Add Defect Form (2/3) -->
                 <StackPanel Grid.Column="0">
-                    <!-- X and Y Coordinates -->
+                    <!-- Pixel_ID, X and Y Coordinates.
+                         Pixel_ID and X/Y are kept in sync automatically; the Slot is
+                         assigned automatically in the implementation and is shown only
+                         in the Active Defects list. -->
                     <StackPanel Orientation="Horizontal" Margin="0,0,0,5">
+                        <TextBlock Width="110" VerticalAlignment="Center" Text="Pixel_ID (1-25600):"/>
+                        <TextBox x:Name="PixelIdInput" Width="80" Padding="3" Margin="0,0,20,0"/>
+
                         <TextBlock Width="60" VerticalAlignment="Center" Text="X (0-319):"/>
                         <TextBox x:Name="XCoordInput" Width="80" Padding="3" Margin="0,0,20,0"/>
-                        
+
                         <TextBlock Width="60" VerticalAlignment="Center" Text="Y (0-79):"/>
                         <TextBox x:Name="YCoordInput" Width="80" Padding="3" Margin="0,0,20,0"/>
-                        
-                        <TextBlock Width="70" VerticalAlignment="Center" Text="Slot (0-63):"/>
-                        <TextBox x:Name="SlotInput" Width="80" Padding="3" Margin="0,0,20,0"/>
                     </StackPanel>
 
                     <!-- Defect Type Selection -->

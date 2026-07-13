@@ -191,7 +191,7 @@ namespace VilsSharpX
             StoreComparisonStats(maxDiff, minDiff, meanAbsDiff, aboveDeadband, totalDarkPixels);
 
             string modeLabel = ComparisonModeLabels[Math.Clamp(_comparisonMode, 0, ComparisonModeLabels.Length - 1)];
-            return $"[{modeLabel}]: max_positive_dev={Math.Max(0, maxDiff)} | max_negative_dev={Math.Min(0, minDiff)} | average_pixels_dev={meanAbsDiff:F0} | total_pixels_dev={aboveDeadband} | total_dark_pixels={totalDarkPixels}";
+            return $"[{modeLabel}]: max_positive_dev={Math.Max(0, maxDiff)} | max_negative_dev={Math.Min(0, minDiff)} | average_dev={meanAbsDiff:F0} | total_pixels_dev={aboveDeadband} | dark_pixels={totalDarkPixels}";
         }
 
         private Frame? _latestA;

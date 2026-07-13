@@ -6,11 +6,11 @@
 
 /* --------------------------------------------------------------------------
  * Hardware mapping
- * P23.1 -> Basler Pin 3 (Line3)
+ * P02.3 -> Basler Pin 3 (Line3)
  * GND   -> Basler Pin 6
  * -------------------------------------------------------------------------- */
-#define CAM_TRIG_PORT        (&MODULE_P23)
-#define CAM_TRIG_PIN         (1U)
+#define CAM_TRIG_PORT        (&MODULE_P02)
+#define CAM_TRIG_PIN         (3U)
 #define CAM_TRIG_STM         (&MODULE_STM0)
 
 /* Use STM comparator 1 to avoid possible conflicts */

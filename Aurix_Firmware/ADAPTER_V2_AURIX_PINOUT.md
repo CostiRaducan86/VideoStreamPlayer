@@ -32,9 +32,10 @@ X103 is a 2x20 connector. The project-relevant pins are:
 | 9 | P14.6 | CAN_SEL |
 | 10 | P20.0 | TTL_SEL |
 | 11 | P21.4 | LED_POWER_SEL |
-| 13 | P02.0 | RL_DET_SEL |
-| 14 | P02.1 | LOGIC_5V_SEL |
+| 5 | P21.2 | RL_DET_SEL |
+| 6 | P21.3 | LOGIC_5V_SEL |
 | 15 | P02.2 | ASCLIN1 TX (LVDS existing path) |
+| 16 | P02.3 | CAMERA TRIGGER (Basler Camera hw trigger) |
 | 28 | P00.6 | ASCLIN5 RX (CAN_RX_ECU) |
 | 29 | P00.7 | ASCLIN5 TX (CAN_TX_ECU) |
 | 31 | P00.9 | ASCLIN4 TX (CAN_TX_LSM) |
@@ -137,9 +138,9 @@ Use this as the 1:1 cabling checklist.
 | TTL_SEL | P20.0 (GPIO) | 10 | 2 | AURIX -> Adapter |
 | TTL_FROM_ECU_3V3 | P14.8 (ASCLIN1 RX LVDS) | 7 | 3 | Adapter -> AURIX |
 | TTL_FROM_LOCAL | P02.2 (ASCLIN1 TX LVDS) | 15 | 4 | AURIX -> Adapter |
-| LOGIC_5V_SEL | P02.1 (GPIO) | 14 | 5 | AURIX -> Adapter |
+| LOGIC_5V_SEL | P21.3 (GPIO) | 6 | 5 | AURIX -> Adapter |
 | LOCAL_RL_DET | P14.7 (GPIO) | 8 | 6 | AURIX -> Adapter |
-| RL_DET_SEL | P02.0 (GPIO) | 13 | 7 | AURIX -> Adapter |
+| RL_DET_SEL | P21.2 (GPIO) | 5 | 7 | AURIX -> Adapter |
 | CAN_TX_LSM | P00.9 (ASCLIN4 TX) | 31 | 8 | AURIX -> Adapter |
 | GND | GND | 4 | 9 | Common reference |
 | CAN_RX_LSM | P00.12 (ASCLIN4 RXA) | 34 | 10 | Adapter -> AURIX |
@@ -149,6 +150,7 @@ Use this as the 1:1 cabling checklist.
 | 3v3_LOCAL | ------------- | -- | 14 | Adapter -> OUT |
 | LED_POWER_SEL | P21.4 (GPIO) | 11 | 15 | AURIX -> Adapter |
 | AURIX_5V_IN | V_UC (5V0) | 2 | 16 | AURIX -> Adapter |
+| AURIX_CAM_TRIGGER | P02.3 (GPIO) | 16 | 3 (Camera) | AURIX -> Camera |
 
 ## ASCLIN Assignment for Active CAN-UART Bridge
 

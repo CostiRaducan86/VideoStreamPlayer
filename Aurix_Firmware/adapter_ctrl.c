@@ -11,9 +11,9 @@
 
 /* ─── Pin definitions ────────────────────────────────────────────── */
 #define PIN_TTL_SEL         &MODULE_P20, 0   /* X103-10 → LOCAL_J3-2  */
-#define PIN_LOGIC_5V_SEL    &MODULE_P02, 1   /* X103-14 → LOCAL_J3-5  */
+#define PIN_LOGIC_5V_SEL    &MODULE_P21, 3   /* X103-6  → LOCAL_J3-5  */
 #define PIN_LOCAL_RL_DET    &MODULE_P14, 7   /* X103-8  → LOCAL_J3-6  */
-#define PIN_RL_DET_SEL      &MODULE_P02, 0   /* X103-13 → LOCAL_J3-7  */
+#define PIN_RL_DET_SEL      &MODULE_P21, 2   /* X103-5  → LOCAL_J3-7  */
 #define PIN_CAN_SEL         &MODULE_P14, 6   /* X103-9  → LOCAL_J3-12 */
 #define PIN_LED_POWER_SEL   &MODULE_P21, 4   /* X103-11 → LOCAL_J3-15 */
 

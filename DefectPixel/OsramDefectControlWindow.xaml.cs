@@ -65,6 +65,11 @@ public partial class OsramDefectControlWindow : Window
         InjectionEnabledCheckBox.Unchecked += (s, e) => DisableInjection();
         AddDefectButton.Click += (s, e) => AddDefect_Click();
         ClearButton.Click += (s, e) => ClearAllDefects_Click();
+
+        // Keep Pixel_ID and X/Y in sync automatically (guarded against re-entrancy).
+        PixelIdInput.TextChanged += (s, e) => SyncFromPixelId();
+        XCoordInput.TextChanged += (s, e) => SyncFromXY();
+        YCoordInput.TextChanged += (s, e) => SyncFromXY();
         SaveButton.Click += (s, e) => SaveDefects_Click();
         OpenButton.Click += (s, e) => OpenDefects_Click();
         PreviewImage.MouseDown += PreviewImage_MouseDown;
@@ -86,6 +91,65 @@ public partial class OsramDefectControlWindow : Window
     {
         // Single click opens the fullscreen preview.
         ShowFullscreenPreview();
+    }
+
+    // Guards the two-way coordinate sync so that programmatic updates do not
+    // re-trigger the opposite handler and cause infinite recursion.
+    private bool m_suppressCoordSync;
+
+    /// <summary>
+    /// When a valid 1-based Pixel_ID is entered, compute and fill X and Y.
+    /// The Slot is assigned automatically at Add time, not here.
+    /// </summary>
+    private void SyncFromPixelId()
+    {
+        if (m_suppressCoordSync)
+            return;
+        if (!int.TryParse(PixelIdInput.Text, out int pixelIdDisplay))
+            return;
+        if (pixelIdDisplay < 1 || pixelIdDisplay > PreviewW * PreviewH)
+            return;
+
+        int pixelId0 = pixelIdDisplay - 1;
+        int x = pixelId0 % PreviewW;
+        int y = pixelId0 / PreviewW;
+
+        m_suppressCoordSync = true;
+        try
+        {
+            XCoordInput.Text = x.ToString();
+            YCoordInput.Text = y.ToString();
+        }
+        finally
+        {
+            m_suppressCoordSync = false;
+        }
+    }
+
+    /// <summary>
+    /// When valid X and Y are entered, compute and fill the 1-based Pixel_ID.
+    /// The Slot is assigned automatically at Add time, not here.
+    /// </summary>
+    private void SyncFromXY()
+    {
+        if (m_suppressCoordSync)
+            return;
+        if (!int.TryParse(XCoordInput.Text, out int x) || x < 0 || x >= PreviewW)
+            return;
+        if (!int.TryParse(YCoordInput.Text, out int y) || y < 0 || y >= PreviewH)
+            return;
+
+        int pixelIdDisplay = y * PreviewW + x + 1;
+
+        m_suppressCoordSync = true;
+        try
+        {
+            PixelIdInput.Text = pixelIdDisplay.ToString();
+        }
+        finally
+        {
+            m_suppressCoordSync = false;
+        }
     }
 
     /// <summary>Update all UI elements with the current state.</summary>
@@ -208,8 +272,6 @@ public partial class OsramDefectControlWindow : Window
                 throw new FormatException("X coordinate must be an integer");
             if (!int.TryParse(YCoordInput.Text, out int y))
                 throw new FormatException("Y coordinate must be an integer");
-            if (!int.TryParse(SlotInput.Text, out int slot))
-                throw new FormatException("Slot must be an integer");
 
             if (DefectTypeCombo.SelectedItem is not ComboBoxItem defectItem)
                 throw new InvalidOperationException("Defect type not selected");
@@ -223,13 +285,21 @@ public partial class OsramDefectControlWindow : Window
 
             var defectType = (OsramDefectType)defectTypeVal;
             int pixelId0 = y * 320 + x;
+
+            // Slot is assigned automatically: reuse the slot if this pixel is already
+            // a defect, otherwise take the next free slot (0 when the list is empty).
+            var existing = m_store.GetActiveDefects().Find(d => d.PixelId0 == pixelId0);
+            int slot = existing?.Slot ?? NextFreeSlot();
+            if (slot > 63)
+                throw new InvalidOperationException("Defect table full (max 64 slots)");
+
             var entry = new OsramDefectEntry(slot, x, y, pixelId0, pxState, defectType);
 
             m_store.AddDefect(entry);
 
+            PixelIdInput.Clear();
             XCoordInput.Clear();
             YCoordInput.Clear();
-            SlotInput.Clear();
             ShowAddStatus("\u2713 Defect added", Colors.Green);
 
             RefreshUI();
@@ -452,20 +522,13 @@ public partial class OsramDefectControlWindow : Window
             if (defect.X < 0 || defect.X >= PreviewW || defect.Y < 0 || defect.Y >= PreviewH)
                 continue;
 
-            byte c;
-            switch (defect.DefectType)
+            byte c = defect.DefectType switch
             {
-                case OsramDefectType.Open:
-                case OsramDefectType.ShortToGnd:
-                    c = 0;      // Black
-                    break;
-                case OsramDefectType.Stuck:
-                    c = 0xFF;   // White
-                    break;
-                default:
-                    c = 0x80;   // Grey
-                    break;
-            }
+                OsramDefectType.Open => 0,        // Black
+                OsramDefectType.ShortToGnd => 0,  // Black
+                OsramDefectType.Stuck => 0xFF,    // White
+                _ => 0x80,                        // Grey
+            };
 
             int idx = (defect.Y * PreviewW + defect.X) * 4;
             px[idx] = c; px[idx + 1] = c; px[idx + 2] = c; px[idx + 3] = 0xFF;
