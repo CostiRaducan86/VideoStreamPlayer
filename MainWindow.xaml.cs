@@ -191,7 +191,28 @@ namespace VilsSharpX
             StoreComparisonStats(maxDiff, minDiff, meanAbsDiff, aboveDeadband, totalDarkPixels);
 
             string modeLabel = ComparisonModeLabels[Math.Clamp(_comparisonMode, 0, ComparisonModeLabels.Length - 1)];
-            return $"[{modeLabel}]: max_positive_dev={Math.Max(0, maxDiff)} | max_negative_dev={Math.Min(0, minDiff)} | average_dev={meanAbsDiff:F0} | total_pixels_dev={aboveDeadband} | dark_pixels={totalDarkPixels}";
+            int brightPixels = GetInjectedBrightPixelCount();
+            return $"[{modeLabel}]: max_pos_dev={Math.Max(0, maxDiff)} | max_neg_dev={Math.Min(0, minDiff)} | average_dev={meanAbsDiff:F0} | total_pixels_dev={aboveDeadband} | dark_pixels={totalDarkPixels} | bright_pixels={brightPixels}";
+        }
+
+        /// <summary>
+        /// Number of injected "bright" (Stuck) pixels currently in the OSRAM Active Defects
+        /// list. Returns 0 unless injection is enabled, so the label only reflects pixels
+        /// that are actually being simulated/injected.
+        /// </summary>
+        private int GetInjectedBrightPixelCount()
+        {
+            var store = _osramDefectStore;
+            if (store == null || !store.InjectionEnabled)
+                return 0;
+
+            int count = 0;
+            foreach (var d in store.GetActiveDefects())
+            {
+                if (d.DefectType == OsramDefectType.Stuck)
+                    count++;
+            }
+            return count;
         }
 
         private Frame? _latestA;
@@ -1446,6 +1467,12 @@ namespace VilsSharpX
             }
 
             _latestC = new Frame(w, h, frame, DateTime.UtcNow);
+
+            // Simulate injected "bright" (Stuck) pixels directly on the camera frame so the
+            // user gets a visual confirmation on pane C (and, in LSM comparison modes, on
+            // pane D via the downscaled buffer). Only active when injection is enabled.
+            PaintInjectedBrightPixelsOnCamera(frame, w, h);
+
             BitmapUtils.Blit(_wbC, frame, w);
 
             // Pre-compute downscaled camera frame for comparison modes (avoids redundant work in RenderAll)
@@ -1461,6 +1488,78 @@ namespace VilsSharpX
 
             // Show live image, hide "Signal not available" overlay
             if (NoSignalC != null) NoSignalC.Visibility = Visibility.Collapsed;
+        }
+
+        /// <summary>
+        /// Minimum on-screen size (in native camera pixels) of a simulated bright pixel,
+        /// so a single LED pixel remains clearly visible on the higher-resolution camera
+        /// frame even when the block-average ratio is small.
+        /// </summary>
+        private const int InjectedBrightPixelMinSize = 6;
+
+        /// <summary>
+        /// Paints injected "bright" (Stuck) defect pixels as white (255) blocks onto the
+        /// native-resolution camera frame. Each LVDS pixel (0..319 × 0..79) is mapped to
+        /// the corresponding camera block (block-average geometry) and drawn at least
+        /// <see cref="InjectedBrightPixelMinSize"/> pixels wide/high so it stays visible.
+        /// No-op unless OSRAM injection is enabled.
+        /// </summary>
+        private void PaintInjectedBrightPixelsOnCamera(byte[] frame, int camW, int camH)
+        {
+            var store = _osramDefectStore;
+            if (store == null || !store.InjectionEnabled)
+                return;
+
+            int dstW = _currentWidth;
+            int dstH = _currentHeight;
+            if (dstW <= 0 || dstH <= 0 || camW <= 0 || camH <= 0)
+                return;
+            if (frame.Length < camW * camH)
+                return;
+
+            double blockW = (double)camW / dstW;
+            double blockH = (double)camH / dstH;
+
+            foreach (var d in store.GetActiveDefects())
+            {
+                if (d.DefectType != OsramDefectType.Stuck)
+                    continue;
+                if (d.X < 0 || d.X >= dstW || d.Y < 0 || d.Y >= dstH)
+                    continue;
+
+                // Map the LVDS pixel to its camera block (same geometry as the downscaler).
+                int sx0 = (int)(d.X * blockW);
+                int sy0 = (int)(d.Y * blockH);
+                int sx1 = (int)((d.X + 1) * blockW);
+                int sy1 = (int)((d.Y + 1) * blockH);
+
+                // Enforce a minimum visible size (grow the block symmetrically if needed).
+                if (sx1 - sx0 < InjectedBrightPixelMinSize)
+                {
+                    int cx = (sx0 + sx1) / 2;
+                    sx0 = cx - InjectedBrightPixelMinSize / 2;
+                    sx1 = sx0 + InjectedBrightPixelMinSize;
+                }
+                if (sy1 - sy0 < InjectedBrightPixelMinSize)
+                {
+                    int cy = (sy0 + sy1) / 2;
+                    sy0 = cy - InjectedBrightPixelMinSize / 2;
+                    sy1 = sy0 + InjectedBrightPixelMinSize;
+                }
+
+                // Clamp to camera bounds.
+                if (sx0 < 0) sx0 = 0;
+                if (sy0 < 0) sy0 = 0;
+                if (sx1 > camW) sx1 = camW;
+                if (sy1 > camH) sy1 = camH;
+
+                for (int sy = sy0; sy < sy1; sy++)
+                {
+                    int row = sy * camW;
+                    for (int sx = sx0; sx < sx1; sx++)
+                        frame[row + sx] = 0xFF;
+                }
+            }
         }
 
         private DispatcherTimer? _canDiagStatusTimer;
