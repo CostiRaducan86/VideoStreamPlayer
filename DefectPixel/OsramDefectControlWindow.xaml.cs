@@ -409,6 +409,10 @@ public partial class OsramDefectControlWindow : Window
 
             DiagnosticLogger.Log($"[OsramDefectControlWindow] Saved {ordered.Count} defects to {dlg.FileName}");
             ShowAddStatus($"\u2713 Saved {ordered.Count} defects", Colors.Green);
+
+            var timer = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromSeconds(3) };
+            timer.Tick += (s, e) => { ClearAddStatus(); timer.Stop(); };
+            timer.Start();
         }
         catch (Exception ex)
         {
@@ -449,6 +453,10 @@ public partial class OsramDefectControlWindow : Window
             RefreshUI();
             DefectStateChanged?.Invoke();
             ShowAddStatus($"\u2713 Loaded {loaded.Count} defects", Colors.Green);
+
+            var timer = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromSeconds(3) };
+            timer.Tick += (s, e) => { ClearAddStatus(); timer.Stop(); };
+            timer.Start();
         }
         catch (Exception ex)
         {
