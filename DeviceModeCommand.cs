@@ -6,7 +6,7 @@ using SharpPcap.LibPcap;
 namespace VilsSharpX;
 
 /// <summary>
-/// Sends a device-mode command packet to the Aurix ECU via Ethernet.
+/// Sends a device-mode command packet to the SmartVisio Box via Ethernet.
 /// Protocol: ethertype 0x88B5, magic "CM" (0x434D), cmd 0x01 = SET_DEVICE_MODE.
 /// </summary>
 public static class DeviceModeCommand
@@ -20,7 +20,7 @@ public static class DeviceModeCommand
     private const byte FeDeviceOsram  = 1;
 
     /// <summary>
-    /// Sends SET_DEVICE_MODE command to the ECU.
+    /// Sends SET_DEVICE_MODE command to the SmartVisio Box.
     /// Sends the packet 3× for reliability (UDP-style, no ACK).
     /// </summary>
     public static void SendDeviceMode(string? pcapDeviceName, LsmDeviceType deviceType, Action<string>? log = null)
@@ -28,7 +28,7 @@ public static class DeviceModeCommand
         // Validate NIC name
         if (string.IsNullOrWhiteSpace(pcapDeviceName))
         {
-            log?.Invoke($"[cmd] Error: NIC device name is null or empty. Device type change NOT sent to Aurix.");
+            log?.Invoke($"[cmd] Error: NIC device name is null or empty. Device type change NOT sent to SmartVisio Box.");
             return;
         }
 

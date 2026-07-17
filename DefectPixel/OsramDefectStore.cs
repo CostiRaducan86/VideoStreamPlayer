@@ -8,15 +8,15 @@ namespace VilsSharpX.DefectPixel;
 ///
 /// This class only holds the active defect list and the injection enable flag.
 /// The actual ELEDERP/ELEDERS injection into the CAN-UART stream is performed by
-/// the Aurix firmware (see defect_inject.c). The PC pushes this list to Aurix via
+/// the SmartVisio Box firmware (see defect_inject.c). The PC pushes this list to the SmartVisio Box via
 /// <see cref="SetDefectListCommand"/> whenever the state changes.
 /// </summary>
 public class OsramDefectStore
 {
     /// <summary>Active defects (key: pixelId0, value: defect entry).</summary>
-    private readonly Dictionary<int, OsramDefectEntry> m_activeDefects = new();
+    private readonly Dictionary<int, OsramDefectEntry> m_activeDefects = [];
 
-    /// <summary>Enable/disable injection globally (mirrored to Aurix).</summary>
+    /// <summary>Enable/disable injection globally (mirrored to the SmartVisio Box).</summary>
     public bool InjectionEnabled { get; set; }
 
     /// <summary>
@@ -24,8 +24,7 @@ public class OsramDefectStore
     /// </summary>
     public void AddDefect(OsramDefectEntry defect)
     {
-        if (defect == null)
-            throw new ArgumentNullException(nameof(defect));
+        ArgumentNullException.ThrowIfNull(defect);
 
         if (defect.X < 0 || defect.X > 319)
             throw new ArgumentException($"Invalid X coordinate: {defect.X}", nameof(defect));
@@ -59,7 +58,7 @@ public class OsramDefectStore
     /// <summary>Snapshot of all active defects.</summary>
     public List<OsramDefectEntry> GetActiveDefects()
     {
-        return new List<OsramDefectEntry>(m_activeDefects.Values);
+        return [.. m_activeDefects.Values];
     }
 
     /// <summary>Reset to safe state: injection disabled and all defects cleared.</summary>

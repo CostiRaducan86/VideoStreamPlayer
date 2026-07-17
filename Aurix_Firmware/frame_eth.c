@@ -102,11 +102,11 @@ FeStats g_feStats;
  * On a genuinely silent link RBU never re-latches, so this never false-fires. */
 #define FE_DMA_STATUS_RBU            (1u << 7)
 #define FE_RX_STALL_MS               2000u
-/* CAN-diag Ethernet TX pacing.  In Direct CAN-UART + Recording the monitor
+/* CAN-diag Ethernet TX pacing. In ECU↔SmartVisio↔LSM + Recording the monitor
  * produces a high record rate; unpaced TX floods the single GETH TX channel
  * and keeps CPU0 busy in the TX spin, so the LVDS RX DMA ping-pong buffers are
- * not drained in time -> LVDS CRC errors and pane-B/TFT flicker.  Pace the diag
- * TX so LVDS transport keeps priority.  ECU mode has almost no monitor traffic,
+ * not drained in time -> LVDS CRC errors and pane-B/TFT flicker. Pace the diag
+ * TX so LVDS transport keeps priority. ECU mode has almost no monitor traffic,
  * so it is unaffected. */
 #define FE_DIAG_TX_INTERVAL_US       250u
 
@@ -1401,18 +1401,18 @@ void frame_eth_poll_rx(void)
                     uint8 canMode  = pRxBuf[18];       /* byte [18] */
                     adapter_control_mode_t ctrlEnum = (ctrlMode != 0u)
                         ? ADAPTER_MODE_DIRECT : ADAPTER_MODE_ECU;
-                    adapter_can_uart_mode_t canEnum = CAN_UART_ECU;
-                    if (canMode == 1u) canEnum = CAN_UART_DIRECT;
-                    else if (canMode == 2u) canEnum = CAN_UART_EXTERNAL;
+                    adapter_can_uart_mode_t canEnum = CAN_UART_ECU_LSM;
+                    if (canMode == 1u) canEnum = CAN_UART_ECU_SMARTVISIO_LSM;
+                    else if (canMode == 2u) canEnum = CAN_UART_SMARTVISIO_LSM;
 
                     /* Route the bus FIRST (set CAN_SEL), then
                      * start or stop the active forwarding bridge.  AURIX
-                     * forwards bytes only in Direct CAN-UART mode; in ECU and
+                     * forwards bytes only in ECU↔SmartVisio↔LSM mode; in ECU and
                      * External modes it must not drive the bus, so forwarding
                      * stays OFF and the bus is a hardware passthrough. */
                     adapter_ctrl_apply(ctrlEnum, canEnum);
                     can_uart_bridge_set_active(
-                        (canEnum == CAN_UART_DIRECT) ? TRUE : FALSE);
+                        (canEnum == CAN_UART_ECU_SMARTVISIO_LSM) ? TRUE : FALSE);
                 }
                 else if (cmdId == FE_CMD_SET_DEFECT_LIST)
                 {

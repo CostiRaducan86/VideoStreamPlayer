@@ -6,7 +6,7 @@ using SharpPcap.LibPcap;
 namespace VilsSharpX;
 
 /// <summary>
-/// Sends a diagnostic sniffing start/stop command to the Aurix ECU via Ethernet.
+/// Sends a diagnostic sniffing start/stop command to the SmartVisio Box via Ethernet.
 /// Protocol: ethertype 0x88B5, magic "CM" (0x434D), cmd 0x02 = DIAG_SNIFF.
 /// Payload: 0x01 = start, 0x00 = stop.
 /// </summary>

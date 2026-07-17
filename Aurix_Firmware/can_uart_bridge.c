@@ -579,7 +579,7 @@ void can_uart_bridge_set_active(boolean enable)
     /* Forwarding state only.  The CAN_SEL routing pin is owned
      * by adapter_ctrl (adapter_ctrl_set_can_uart), driven from the UI adapter
      * command and at boot.  The caller MUST have already routed the bus through
-     * AURIX (Direct CAN-UART mode, CAN_SEL HIGH) before enabling forwarding.
+     * AURIX (ECU↔SmartVisio↔LSM CAN-UART mode, CAN_SEL HIGH) before enabling forwarding.
      *
      * This function is called from CPU0 (the GETH command handler), but the RX
      * ISRs and relay/FIFO state live on CPU2.  To avoid a cross-core race we do

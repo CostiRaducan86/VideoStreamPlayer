@@ -12,8 +12,8 @@ namespace VilsSharpX.DefectPixel;
 /// WPF window for defining OSRAM defect pixels.
 ///
 /// This window only DEFINES defects and toggles injection. The actual
-/// ELEDERP/ELEDERS injection is performed by the Aurix firmware; the host
-/// (MainWindow) pushes the list to Aurix on every <see cref="DefectStateChanged"/>.
+/// ELEDERP/ELEDERS injection is performed by the SmartVisio Box firmware; the host
+/// (MainWindow) pushes the list to SmartVisio Box on every <see cref="DefectStateChanged"/>.
 /// </summary>
 public partial class OsramDefectControlWindow : Window
 {

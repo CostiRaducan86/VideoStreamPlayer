@@ -41,7 +41,7 @@
  *   LOCAL_RL_DET:  LOW/default = GND (low resolution) [default LOW], HIGH = 5.0V (high resolution)
  *   LOGIC_5V_SEL:  LOW/default = ECU_5V_LOGIC powers LSM_5V_LOGIC, HIGH = LOCAL_5V powers LSM_5V_LOGIC.
  *   LED_POWER_SEL: LOW/default = ECU_LED_POWER to LSM, HIGH = EXT_LED_POWER to LSM.
- *   CAN_SEL:       LOW = direct ECU_CAN_H/L to LSM_CAN_H/L bridge, HIGH/default = active AURIX CAN_UART mode 
+ *   CAN_SEL:       LOW = direct ECU_CAN_H/L to LSM_CAN_H/L bridge, HIGH/default = active ECU↔SmartVisio CAN_UART mode
  *                  using two TJA1051T-3 transceivers.
  *
  * CAN_UART active mode:
@@ -60,10 +60,10 @@ typedef enum {
 
 /* CAN UART Mode */
 typedef enum {
-    CAN_UART_ECU      = 0,   /* K2=0,K3=0 — ECU↔direct passthrough↔LSM (default) */
-    CAN_UART_DIRECT   = 1,   /* K2=1,K3=1 — ECU↔Aurix↔LSM (Firmware forwards ECU→LSM and LSM→ECU 
+    CAN_UART_ECU_LSM   = 0,   /* K2=0,K3=0 — ECU↔direct passthrough↔LSM (default) */
+    CAN_UART_ECU_SMARTVISIO_LSM   = 1,   /* K2=1,K3=1 — ECU↔SmartVisio↔LSM (Firmware forwards ECU→LSM and LSM→ECU 
 *                               traffic) */
-    CAN_UART_EXTERNAL = 2    /* Adapter_V2: mapped to same CAN_SEL=HIGH path as DIRECT
+    CAN_UART_SMARTVISIO_LSM = 2    /* Adapter_V2: mapped to same CAN_SEL=HIGH path as DIRECT
 *                               (reserved for protocol compatibility with UI) */
 } adapter_can_uart_mode_t;
 
@@ -77,7 +77,7 @@ void adapter_ctrl_set_mode(adapter_control_mode_t mode);
 void adapter_ctrl_set_can_uart(adapter_can_uart_mode_t mode);
 
 /* Adapter_V2 active CAN-UART bridge selector (drives CAN_SEL only).
- *   enable = TRUE  -> CAN_SEL HIGH: bus routed through AURIX transceivers
+ *   enable = TRUE  -> CAN_SEL HIGH: bus routed through SmartVisio Adapter transceivers
  *                     (active CAN-UART forwarding via can_uart_bridge.c).
  *   enable = FALSE -> CAN_SEL LOW : fail-safe direct bridge ECU<->LSM.*/
 void adapter_ctrl_set_can_bridge(boolean enable);

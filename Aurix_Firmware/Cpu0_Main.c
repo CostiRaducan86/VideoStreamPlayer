@@ -219,28 +219,20 @@ void core0_main(void)
      * This configures ASCLIN1 (LVDS), parsers, the CAN-UART bridge and
      * GETH all in one call.
      */
-    device_mode_init(FE_DEVICE_NICHIA);
+    device_mode_init(FE_DEVICE_OSRAM);
 
-    /* Enable CAN-UART monitor TX at boot so records flow immediately.
-     * g_diagSniffEnabled now only gates the Ethernet TX of the monitor
-     * records produced by the ASCLIN4/ASCLIN5 bridge; the PC's START
-     * command still resets counters for a clean trace.                 */
-    g_diagSniffEnabled = 1u;
+    /* Disable CAN-UART monitor TX at boot  */
+    g_diagSniffEnabled = 0u;
 
     /* SmartVisio Adapter: configure all GPIO selectors.
-     * Current default after reset/run = ECU control mode + Direct CAN-UART
-     * routing (CAN_SEL HIGH), so CAN traffic goes through AURIX bridge path. */
+     * Current default after reset/run = ECU control mode + ECU↔LSM
+     * routing (CAN_SEL Low), so CAN traffic goes through SmartVisio adapter directly
+     * from the ECU to the LSM and vice versa. */
     adapter_ctrl_init();
 
-    /* Boot default: start active forwarding bridge immediately so Direct
-     * CAN-UART has communication without waiting for a UI command.
-     * CPU2 performs the actual clean-start via s_enableReq handshake. */
-    can_uart_bridge_set_active(TRUE);
-
-    /* Adapter_V2 active CAN-UART bridge.
-     * device_mode_init() already configured ASCLIN5 (ECU) + ASCLIN4 (LSM).
-     * With Direct CAN-UART as boot default, bridge forwarding is enabled above
-     * so reset+run comes up in a fully operational Direct path. */
+    /* Boot default: forwarding bridge inactive so Direct ECU↔LSM
+     * has CAN-UART communication without waiting for a UI command.*/
+    can_uart_bridge_set_active(FALSE);
 
     /* Basler trigger on P02.3 -> camera Pin 3 (Line3), GND -> Pin 6 */
     camera_trigger_init();

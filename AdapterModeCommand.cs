@@ -6,7 +6,7 @@ using SharpPcap.LibPcap;
 namespace VilsSharpX;
 
 /// <summary>
-/// Sends adapter-mode command packets to the Aurix ECU via Ethernet.
+/// Sends adapter-mode command packets to the SmartVisio Box via Ethernet.
 /// Protocol: ethertype 0x88B5, magic "CM" (0x434D), cmd 0x03 = SET_ADAPTER_MODE.
 /// Payload byte [17] = control_mode (0=ECU, 1=Direct), byte [18] = can_uart_mode (0/1/2).
 /// </summary>
@@ -17,7 +17,7 @@ public static class AdapterModeCommand
     private const byte CmdSetAdapter = 0x03;
 
     /// <summary>
-    /// Sends SET_ADAPTER_MODE command to the Aurix ECU.
+    /// Sends SET_ADAPTER_MODE command to the SmartVisio Box.
     /// Sends 3× for reliability (no ACK protocol).
     /// </summary>
     public static void SendAdapterMode(string pcapDeviceName, int controlMode, int canUartMode, Action<string>? log = null)
@@ -66,7 +66,7 @@ public static class AdapterModeCommand
                 txDev.SendPacket(pkt);
 
             string ctrlName = ctrlByte == 0 ? "ECU" : "Direct";
-            string canName = canByte switch { 0 => "ECU CAN", 1 => "Direct CAN", _ => "External CAN" };
+            string canName = canByte switch { 0 => "ECU LSM", 1 => "ECU SmartVisio LSM", _ => "SmartVisio LSM" };
             log?.Invoke($"[cmd] Sent SET_ADAPTER_MODE → Control={ctrlName}, CAN={canName}");
         }
         catch (Exception ex)

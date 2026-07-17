@@ -219,7 +219,7 @@
                 <TextBlock x:Name="ActiveDefectsCountText" Foreground="DarkRed" Text="0"
                            FontSize="14" VerticalAlignment="Center" Margin="8,0,0,0"/>
                 <TextBlock x:Name="InjectionInfoText" VerticalAlignment="Center" Margin="20,0,0,0" Foreground="Gray"
-                           Text="Injection is performed in Aurix firmware; the list is pushed on every change."/>
+                           Text="Injection is performed in SmartVisio firmware; the list is pushed on every change."/>
                 <TextBlock x:Name="AddStatusText" VerticalAlignment="Center" Margin="20,0,0,0"
                            Foreground="Red" Visibility="Collapsed"/>
             </StackPanel>

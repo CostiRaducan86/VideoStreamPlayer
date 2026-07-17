@@ -52,7 +52,7 @@ public sealed class AppSettings
     // Control Mode (0 = ECU, 1 = Direct control)
     public int ControlMode { get; set; } = 0;
 
-    // CAN UART Mode (0 = ECU CAN UART, 1 = Direct CAN UART, 2 = External CAN UART)
+    // CAN UART Mode (0 = ECU↔LSM, 1 = ECU↔SmartVisio↔LSM, 2 = SmartVisio↔LSM)
     public int CanUartMode { get; set; } = 0;
 
     // Automation REST API settings

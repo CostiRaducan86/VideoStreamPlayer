@@ -125,7 +125,7 @@ namespace VilsSharpX
 
         private ModeOfOperation _modeOfOperation = ModeOfOperation.AvtpLiveMonitor;
         private int _controlMode = 0; // 0 = ECU, 1 = Direct control
-        private int _canUartMode = 0; // 0 = ECU CAN UART, 1 = Direct CAN UART, 2 = External CAN UART
+        private int _canUartMode = 0; // 0 = ECU↔LSM, 1 = ECU↔SmartVisio↔LSM, 2 = SmartVisio↔LSM
 
         // Fallback image / generator base
         private byte[] _pgmFrame = null!;
@@ -154,7 +154,7 @@ namespace VilsSharpX
 
         // Live NIC selector
 
-        // Ethernet capture from Aurix GETH → raw ethertype 0x88B5 (pane B)
+        // Ethernet capture from SmartVisio Box GETH → raw ethertype 0x88B5 (pane B)
         private NichiaEthCapture? _nichiaEthCapture;
         private OsramEthCapture? _osramEthCapture;
         // Basler USB3 camera capture (pane C)
@@ -921,12 +921,12 @@ namespace VilsSharpX
             // immediately matches the persisted device type from settings.
             _ = TrySyncDeviceModeToAurixAsync("startup");
 
-            // Keep Aurix aligned even after board reset/run while WPF stays open.
+            // Keep SmartVisio Box aligned even after board reset/run while WPF stays open.
             _deviceModeSyncTimer.Start();
         }
 
         /// <summary>
-        /// Tries to sync the current WPF device type to Aurix with short retries.
+        /// Tries to sync the current WPF device type to SmartVisio Box with short retries.
         /// Startup can race NIC enumeration, so we retry for a brief window.
         /// </summary>
         private async Task TrySyncDeviceModeToAurixAsync(string reason)
@@ -1297,7 +1297,7 @@ namespace VilsSharpX
                 // Direct → ECU CAN UART (index 0) invalid
                 ((System.Windows.Controls.ComboBoxItem)CmbCanUartMode.Items[0]).IsEnabled = !isDirect;
 
-                // If Direct and currently on ECU CAN UART, switch to Direct CAN UART
+                // If Direct and currently on ECU CAN UART, switch to ECU↔SmartVisio↔LSM
                 if (isDirect && CmbCanUartMode.SelectedIndex == 0)
                 {
                     CmbCanUartMode.SelectedIndex = 1;
@@ -1307,7 +1307,7 @@ namespace VilsSharpX
         }
 
         /// <summary>
-        /// Sends the current adapter mode (control + CAN UART) to the Aurix ECU via Ethernet.
+        /// Sends the current adapter mode (control + CAN UART) to the SmartVisio Box via Ethernet.
         /// </summary>
         private void SendAdapterModeCommand()
         {
@@ -1351,7 +1351,7 @@ namespace VilsSharpX
 
         private void BtnRefreshNics_Click(object sender, RoutedEventArgs e) => RefreshLiveNicList();
 
-        // ── LVDS Ethernet Capture (Aurix GETH → pane B) ──────────────
+        // ── LVDS Ethernet Capture (SmartVisio Box GETH → pane B) ──────────────
 
         private void StartNichiaEthCapture()
         {
@@ -1650,7 +1650,7 @@ namespace VilsSharpX
                 // NOTE: OSRAM defect injection is NOT applied to the displayed trace here.
                 // The C# side only DEFINES defects (via OsramDefectControlWindow); the actual
                 // ELEDERP/ELEDERS injection into the CAN-UART stream is performed in the Aurix
-                // firmware (LSM -> Aurix -> ECU). Records are shown unmodified.
+                // firmware (LSM -> SmartVisio Box -> ECU). Records are shown unmodified.
                 _canDiagCapture.OnRecordReady += record => Dispatcher.BeginInvoke(() => HandleCanDiagRecord(record));
                 AppendDiagLog("[can] diagnostic capture started");
                 UpdateCanDiagStatusText();
@@ -1703,7 +1703,7 @@ namespace VilsSharpX
                 _canDiagRecording = false;
                 UpdateCanDiagRecordingButtons();
 
-                // Tell Aurix to stop sniffing (same as manual Stop button)
+                // Tell SmartVisio Box to stop sniffing (same as manual Stop button)
                 try
                 {
                     string? txDev = GetTxPcapDeviceNameOrNull();
@@ -1957,7 +1957,7 @@ namespace VilsSharpX
             _canDiagConsecutiveRestarts = 0;
             _canDiagWatchdogRecovering = false;
 
-            // Tell Aurix to start diagnostic sniffing.
+            // Tell SmartVisio Box to start diagnostic sniffing.
             // Firmware always resets on START (no 0→1 guard), so this works
             // even if g_diagSniffEnabled was already 1 from a previous session.
             SendDiagSniffStart();
@@ -1982,7 +1982,7 @@ namespace VilsSharpX
             StartDiagRetryTimer();
         }
 
-        /// <summary>Sends DiagSniff START to Aurix (3× broadcast for reliability).</summary>
+        /// <summary>Sends DiagSniff START to SmartVisio Box (3× broadcast for reliability).</summary>
         private void SendDiagSniffStart()
         {
             try
@@ -2107,7 +2107,7 @@ namespace VilsSharpX
             StopDiagRetryTimer();
             UpdateCanDiagRecordingButtons();
 
-            // Tell Aurix to stop diagnostic sniffing
+            // Tell SmartVisio Box to stop diagnostic sniffing
             try
             {
                 string? txDev = GetTxPcapDeviceNameOrNull();
@@ -2708,7 +2708,7 @@ namespace VilsSharpX
             _avtpLiveDeviceHint = LiveNicSelector.GetSelectedDeviceName(CmbLiveNic);
             SaveUiSettings();
 
-            // Re-sync selected device type to Aurix when NIC selection changes.
+            // Re-sync selected device type to SmartVisio Box when NIC selection changes.
             _ = TrySyncDeviceModeToAurixAsync("nic-change");
         }
 
@@ -2848,7 +2848,7 @@ namespace VilsSharpX
             SaveUiSettings();
             if (_recordingManager.IsRecording) StopRecording();
             StopAll();
-            // Send STOP to Aurix so g_diagSniffEnabled is cleared for the next C# session
+            // Send STOP to SmartVisio Box so g_diagSniffEnabled is cleared for the next C# session
             try
             {
                 string? txDev = GetTxPcapDeviceNameOrNull();
@@ -3419,7 +3419,7 @@ namespace VilsSharpX
                 _liveCapture.StartEthernetCapture(deviceHint);
             }
 
-            // Pane B real LVDS over Ethernet (Aurix GETH), managed by Start/Stop.
+            // Pane B real LVDS over Ethernet (SmartVisio Box GETH), managed by Start/Stop.
             if (_currentDeviceType == LsmDeviceType.Nichia)
             {
                 StartNichiaEthCapture();

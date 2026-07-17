@@ -8,12 +8,12 @@ using VilsSharpX.DefectPixel;
 namespace VilsSharpX;
 
 /// <summary>
-/// Sends the OSRAM defect-injection list to the Aurix ECU via Ethernet.
+/// Sends the OSRAM defect-injection list to the SmartVisio Box via Ethernet.
 /// Protocol: ethertype 0x88B5, magic "CM" (0x434D), cmd 0x04 = SET_DEFECT_LIST.
 ///
 /// The C# side only DEFINES defects. The actual ELEDERP/ELEDERS injection into the
-/// CAN-UART stream (LSM -> Aurix -> ECU) is performed by the Aurix firmware while the
-/// received enable flag is set. This command pushes the current defect table to Aurix.
+/// CAN-UART stream (LSM -> SmartVisio Box -> ECU) is performed by the SmartVisio Box firmware while the
+/// received enable flag is set. This command pushes the current defect table to the SmartVisio Box.
 ///
 /// Payload layout (after 14-byte Ethernet header):
 ///   [14..15] magic 0x434D
@@ -41,10 +41,10 @@ public static class SetDefectListCommand
     private const int MinFrameSize = 60;
 
     /// <summary>
-    /// Sends SET_DEFECT_LIST to the Aurix ECU. Sends 3x for reliability (no ACK protocol).
+    /// Sends SET_DEFECT_LIST to the SmartVisio Box. Sends 3x for reliability (no ACK protocol).
     /// </summary>
     /// <param name="pcapDeviceName">TX NIC device name.</param>
-    /// <param name="enable">True to enable injection in Aurix, false to disable.</param>
+    /// <param name="enable">True to enable injection in the SmartVisio Box, false to disable.</param>
     /// <param name="defects">Active defect definitions (truncated to <see cref="MaxDefects"/>).</param>
     /// <param name="log">Optional diagnostic logger.</param>
     public static void Send(

@@ -5,7 +5,10 @@
  * SmartVisio Adapter GPIO control implementation.
  *
  * All pins configured as push-pull outputs (strong driver).
- * Default state = ECU control mode + Direct CAN-UART
+ * Default state = ECU control mode + ECU↔SmartVisio↔LSM CAN-UART passthrough.
+ * (TTL_SEL LOW, RL_DET_SEL LOW, LOGIC_5V_SEL LOW, CAN_SEL LOW, LED_POWER_SEL LOW).
+ *
+ * Active bridge mode (ECU↔SmartVisio↔LSM) is enabled by setting CAN_SEL
  * (TTL_SEL LOW, RL_DET_SEL LOW, LOGIC_5V_SEL LOW, CAN_SEL HIGH, LED_POWER_SEL LOW).
  */
 
@@ -38,9 +41,9 @@ void adapter_ctrl_init(void)
     IfxPort_setPinModeOutput(PIN_LED_POWER_SEL, IfxPort_OutputMode_pushPull, IfxPort_OutputIdx_general);
     IfxPort_setPinModeOutput(PIN_LOGIC_5V_SEL,     IfxPort_OutputMode_pushPull, IfxPort_OutputIdx_general);
 
-    /* Default after reset/run: ECU control mode + Direct CAN-UART */
+    /* Default after reset/run: ECU control mode + ECU↔SmartVisio↔LSM */
     adapter_ctrl_set_mode(ADAPTER_MODE_ECU);
-    adapter_ctrl_set_can_uart(CAN_UART_DIRECT);
+    adapter_ctrl_set_can_uart(CAN_UART_ECU_LSM);
 }
 
 void adapter_ctrl_set_mode(adapter_control_mode_t mode)
@@ -56,8 +59,8 @@ void adapter_ctrl_set_mode(adapter_control_mode_t mode)
     }
     else /* ADAPTER_MODE_DIRECT */
     {
-        /* No ECU: Aurix drives LVDS via P02.2 (ASCLIN1 TX), Local 5V powers adapter */
-        pin_set(PIN_TTL_SEL,       TRUE);  /* Local (Aurix) LVDS path */
+        /* No ECU: SmartVisio drives LVDS via P02.2 (ASCLIN1 TX), Local 5V powers adapter */
+        pin_set(PIN_TTL_SEL,       TRUE);  /* Local (SmartVisio) LVDS path */
         pin_set(PIN_LOGIC_5V_SEL,  TRUE);  /* Enable Local 5V */
         pin_set(PIN_LOCAL_RL_DET,  FALSE); /* Default LOW = GND = low resolution */
         pin_set(PIN_RL_DET_SEL,    TRUE);  /* Local RL detect path*/
@@ -69,17 +72,17 @@ void adapter_ctrl_set_can_uart(adapter_can_uart_mode_t mode)
 {
     switch (mode)
     {
-        case CAN_UART_ECU:
+        case CAN_UART_ECU_LSM:
             /* ECU passthrough mode: CAN_SEL LOW */
             pin_set(PIN_CAN_SEL,     FALSE);
             break;
 
-        case CAN_UART_DIRECT:
-            /* Active bridge mode: CAN_SEL HIGH (ECU↔AURIX↔LSM) */
+        case CAN_UART_ECU_SMARTVISIO_LSM:
+            /* Active bridge mode: CAN_SEL HIGH (ECU↔SMARTVISIO↔LSM) */
             pin_set(PIN_CAN_SEL,     TRUE);
             break;
 
-        case CAN_UART_EXTERNAL:
+        case CAN_UART_SMARTVISIO_LSM:
             /* Adapter_V2 has no separate EXT_CAN_SEL path.
              * Keep protocol compatibility: map EXTERNAL to active bridge. */
             pin_set(PIN_CAN_SEL,     TRUE);
