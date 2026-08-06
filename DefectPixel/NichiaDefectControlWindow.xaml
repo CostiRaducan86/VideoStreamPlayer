@@ -1,0 +1,211 @@
+<Window x:Class="VilsSharpX.DefectPixel.NichiaDefectControlWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="NICHIA Defect Injection Control"
+        Width="880" Height="608"
+        WindowStartupLocation="CenterOwner"
+        Background="#F0F0F0">
+
+    <Window.Resources>
+        <!-- Subtle per-pixel grid: exactly 256x64 cells, autoscaled to fill any area. -->
+        <DrawingBrush x:Key="PixelGridBrush"
+                      TileMode="Tile"
+                      Viewport="0,0,0.00390625,0.015625"
+                      ViewportUnits="RelativeToBoundingBox"
+                      Viewbox="0,0,1,1"
+                      ViewboxUnits="Absolute"
+                      Stretch="Fill">
+            <DrawingBrush.Drawing>
+                <GeometryDrawing>
+                    <GeometryDrawing.Geometry>
+                        <RectangleGeometry Rect="0,0,1,1"/>
+                    </GeometryDrawing.Geometry>
+                    <GeometryDrawing.Pen>
+                        <Pen Brush="#55000000" Thickness="0.12"/>
+                    </GeometryDrawing.Pen>
+                </GeometryDrawing>
+            </DrawingBrush.Drawing>
+        </DrawingBrush>
+    </Window.Resources>
+
+    <Grid Margin="10">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="1*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <!-- Title -->
+        <TextBlock Grid.Row="0"
+                   FontSize="16" FontWeight="Bold"
+                   Foreground="DarkBlue"
+                   Margin="0,0,0,10"
+                   Text="NICHIA / TLD816K Defect Pixel Injection Control"/>
+
+        <!-- Injection Enable/Disable -->
+        <StackPanel Grid.Row="1" Orientation="Horizontal" Margin="0,0,0,10">
+            <CheckBox x:Name="InjectionEnabledCheckBox"
+                      VerticalAlignment="Center"
+                      Margin="0,0,10,0"/>
+            <TextBlock VerticalAlignment="Center"
+                       FontWeight="Bold"
+                       Text="Injection Enabled"/>
+            <TextBlock VerticalAlignment="Center"
+                       Margin="20,0,0,0"
+                       Foreground="DarkGreen"
+                       x:Name="StatusText"
+                       Text="[Disabled]"/>
+        </StackPanel>
+
+        <!-- Add Defect Form + Preview -->
+        <GroupBox Grid.Row="2" Padding="10" Margin="0,0,0,10">
+            <GroupBox.Header>
+                <StackPanel Orientation="Horizontal">
+                    <TextBlock Text="Add Defect"/>
+                </StackPanel>
+            </GroupBox.Header>
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="2*"/>
+                    <ColumnDefinition Width="1*"/>
+                </Grid.ColumnDefinitions>
+
+                <!-- Left: Add Defect Form (2/3) -->
+                <StackPanel Grid.Column="0">
+                    <StackPanel Orientation="Horizontal" Margin="0,0,0,5">
+                        <TextBlock Width="120" VerticalAlignment="Center" Text="Pixel_ID (1-16384):"/>
+                        <TextBox x:Name="PixelIdInput" Width="80" Padding="3" Margin="0,0,20,0"/>
+
+                        <TextBlock Width="60" VerticalAlignment="Center" Text="X (0-255):"/>
+                        <TextBox x:Name="XCoordInput" Width="80" Padding="3" Margin="0,0,20,0"/>
+
+                        <TextBlock Width="60" VerticalAlignment="Center" Text="Y (0-63):"/>
+                        <TextBox x:Name="YCoordInput" Width="80" Padding="3" Margin="0,0,20,0"/>
+                    </StackPanel>
+
+                    <!-- Defect Type Selection -->
+                    <StackPanel Orientation="Horizontal" Margin="0,0,0,5">
+                        <TextBlock Width="120" VerticalAlignment="Center" Text="Defect Type:"/>
+                        <ComboBox x:Name="DefectTypeCombo" Width="150" Padding="5" Margin="0,0,20,0">
+                            <ComboBoxItem Content="Dark" Tag="0" IsSelected="True"/>
+                            <ComboBoxItem Content="Bright" Tag="1"/>
+                        </ComboBox>
+                    </StackPanel>
+
+                    <!-- Separator between form fields and action buttons -->
+                    <Rectangle Height="1" Fill="Gray" Margin="0,12,0,12" HorizontalAlignment="Stretch"/>
+
+                    <!-- Action buttons -->
+                    <StackPanel Orientation="Horizontal">
+                        <Button x:Name="AddDefectButton"
+                                Background="DodgerBlue" Foreground="White"
+                                Padding="10,5" Margin="0,0,10,0"
+                                Content="Add Defect"/>
+                        <Button x:Name="ClearButton" Content="Clear"
+                                Padding="10,4" Margin="0,0,6,0"
+                                ToolTip="Remove all defects from the list and preview"/>
+                        <Button x:Name="SaveButton" Content="💾 Save"
+                                Padding="10,4" Margin="0,0,6,0"
+                                ToolTip="Save defect list to a .csv file"/>
+                        <Button x:Name="OpenButton" Content="📂 Open"
+                                Padding="10,4" Margin="0,0,6,0"
+                                ToolTip="Load a defect list from a .csv file"/>
+                    </StackPanel>
+                </StackPanel>
+
+                <!-- Right: Preview Cadran (1/3, autoscale Fill, subtle pixel grid) -->
+                <Border Grid.Column="1" Margin="15,0,0,0"
+                        BorderBrush="#888888" BorderThickness="1">
+                    <Grid ClipToBounds="True">
+                        <Image x:Name="PreviewImage"
+                               Stretch="Fill"
+                               SnapsToDevicePixels="True"
+                               RenderOptions.BitmapScalingMode="NearestNeighbor"
+                               MouseDown="PreviewImage_MouseDown"
+                               ToolTip="Click for fullscreen preview"
+                               Cursor="Hand"/>
+                        <Rectangle IsHitTestVisible="False"
+                                   Fill="{StaticResource PixelGridBrush}"/>
+                    </Grid>
+                </Border>
+            </Grid>
+        </GroupBox>
+
+        <!-- Active Defects List + Fullscreen Preview overlay -->
+        <Grid Grid.Row="3" Margin="0,0,0,10">
+            <GroupBox Header="Active Defects" Padding="10">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="30"/>
+                        <RowDefinition Height="1*"/>
+                    </Grid.RowDefinitions>
+
+                    <!-- Column Headers: Seg pair (slot equivalent), X, Y, Pixel_ID, Type, Remove -->
+                    <StackPanel Grid.Row="0" Orientation="Horizontal" Background="LightGray">
+                        <TextBlock Width="70" Text="Seg pair" FontWeight="Bold" Padding="3"/>
+                        <TextBlock Width="70" Text="X" FontWeight="Bold" Padding="3"/>
+                        <TextBlock Width="70" Text="Y" FontWeight="Bold" Padding="3"/>
+                        <TextBlock Width="90" Text="Pixel_ID" FontWeight="Bold" Padding="3"/>
+                        <TextBlock Width="100" Text="Defect Type" FontWeight="Bold" Padding="3"/>
+                        <TextBlock Width="50" Text="Remove" FontWeight="Bold" Padding="3"/>
+                    </StackPanel>
+
+                    <!-- Defects List -->
+                    <ScrollViewer Grid.Row="1">
+                        <StackPanel x:Name="DefectListPanel"/>
+                    </ScrollViewer>
+                </Grid>
+            </GroupBox>
+
+            <!-- Fullscreen Preview overlay (covers Active Defects, autoscale) -->
+            <Border x:Name="FullscreenOverlay" Visibility="Collapsed"
+                    BorderBrush="#888888" BorderThickness="1"
+                    Background="#F0F0F0">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="30"/>
+                        <RowDefinition Height="1*"/>
+                    </Grid.RowDefinitions>
+
+                    <!-- Header bar (title on left, pixel info at center only) -->
+                    <Grid Grid.Row="0" Background="LightGray">
+                        <TextBlock Text="FullScreen Preview" FontWeight="Bold" Padding="3"
+                                   HorizontalAlignment="Left" VerticalAlignment="Center"/>
+                        <TextBlock x:Name="FullscreenInfoText" Text="x=-, y=-, Pixel_ID=-"
+                                   Foreground="DarkBlue" FontWeight="Bold"
+                                   HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                    </Grid>
+
+                    <!-- Zoomable image host -->
+                    <Grid Grid.Row="1" x:Name="FullscreenImageHost" ClipToBounds="True" Background="#404040">
+                        <Grid x:Name="FullscreenContent" RenderTransformOrigin="0,0">
+                            <Image x:Name="FullscreenImage"
+                                   Stretch="Fill"
+                                   SnapsToDevicePixels="True"
+                                   RenderOptions.BitmapScalingMode="NearestNeighbor"
+                                   Focusable="False"
+                                   FocusVisualStyle="{x:Null}"/>
+                            <Rectangle IsHitTestVisible="False"
+                                       Fill="{StaticResource PixelGridBrush}"/>
+                        </Grid>
+                    </Grid>
+                </Grid>
+            </Border>
+        </Grid>
+
+        <!-- Info -->
+        <GroupBox Grid.Row="4" Header="Info" Padding="10">
+            <StackPanel Orientation="Horizontal">
+                <TextBlock FontWeight="Bold" VerticalAlignment="Center" Text="Active Defects:"/>
+                <TextBlock x:Name="ActiveDefectsCountText" Foreground="DarkRed" Text="0"
+                           FontSize="14" VerticalAlignment="Center" Margin="8,0,0,0"/>
+                <TextBlock x:Name="InjectionInfoText" VerticalAlignment="Center" Margin="20,0,0,0" Foreground="Gray"
+                           Text="Injection is performed in SmartVisio firmware; the list is pushed on every change."/>
+                <TextBlock x:Name="AddStatusText" VerticalAlignment="Center" Margin="20,0,0,0"
+                           Foreground="Red" Visibility="Collapsed"/>
+            </StackPanel>
+        </GroupBox>
+    </Grid>
+</Window>

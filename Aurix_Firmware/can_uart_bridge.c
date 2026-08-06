@@ -35,6 +35,7 @@
 #include "can_hw.h"          /* DiagUartFrame */
 #include "adapter_ctrl.h"    /* adapter_ctrl_set_can_bridge() */
 #include "defect_inject.h"   /* in-flight ELEDERP/ELEDERS injection (LSM->ECU) */
+#include "nichia_defect_inject.h" /* in-flight PIXEL_ID/counter/flag injection (Nichia) */
 
 /* ======================== Configuration ======================== */
 
@@ -117,6 +118,11 @@ static uint32         s_ticksPerUs = 100u;  /* STM0 ticks per microsecond  */
  * passed to defect_inject_frame_begin() when the relay locks to RSP. */
 static uint8 s_reqBuf[4];   /* [0x80][0xA5][HCTRL][HADR] from ECU */
 static uint8 s_reqLen;      /* bytes captured (0..4) */
+
+/* Active response-path injector for the current frame:
+ *   0 = none, 1 = OSRAM (ELEDERP/ELEDERS), 2 = Nichia (PIXEL_ID/counter/flag).
+ * Selected at RSP lock from the captured request sync byte. */
+static uint8 s_injDev;
 
 /* ---- Half-duplex relay arbitration --------------------------------------
  * The diagnostic bus is strictly turn-based: the ECU issues a request, the LSM
@@ -371,31 +377,48 @@ static void bridge_relay_pump(void)
                     /* Genuine LSM response byte -> lock/keep RSP, forward to ECU. */
                     if (s_relay != BRIDGE_RELAY_RSP)
                     {
-                        /* Validate sync bytes before trusting HCTRL/HADR.
-                         * If the captured request is not a proper diagnostic
-                         * frame (e.g. bus noise at ECU power-on), pass zeros
-                         * so the filter stays idle for this response. */
+                        /* Validate sync bytes before trusting the request.
+                         * OSRAM requests start with 0x80 0xA5; Nichia/TLD816K
+                         * requests start with 0x55. Bus noise at ECU power-on
+                         * matches neither -> both filters stay idle. Only the
+                         * selected device's frame_begin arms its filter; the
+                         * other is reset to idle so no stale state leaks. */
                         uint8 hctrl = 0u;
                         uint8 hadr  = 0u;
-                        if (s_reqLen >= 4u &&
-                            s_reqBuf[0] == 0x80u &&
-                            s_reqBuf[1] == 0xA5u)
-                        {
-                            hctrl = s_reqBuf[2];
-                            hadr  = s_reqBuf[3];
-                        }
+
                         s_relay     = BRIDGE_RELAY_RSP;
                         s_fwdCount  = 0u;
                         s_echoCount = 0u;
                         s_relayRspCount++;
-                        defect_inject_frame_begin(hctrl, hadr);
+
+                        if (s_reqLen >= 4u && s_reqBuf[0] == 0x55u)
+                        {
+                            s_injDev = 2u;
+                            defect_inject_frame_begin(0u, 0u);   /* keep OSRAM idle */
+                            nichia_defect_inject_frame_begin(s_reqBuf, s_reqLen);
+                        }
+                        else
+                        {
+                            if (s_reqLen >= 4u &&
+                                s_reqBuf[0] == 0x80u &&
+                                s_reqBuf[1] == 0xA5u)
+                            {
+                                hctrl = s_reqBuf[2];
+                                hadr  = s_reqBuf[3];
+                            }
+                            s_injDev = 1u;
+                            nichia_defect_inject_frame_begin(0, 0); /* keep Nichia idle */
+                            defect_inject_frame_begin(hctrl, hadr);
+                        }
                     }
-                    /* In-flight ELEDERP/ELEDERS defect injection on the
-                     * response path: substitutes register bytes + overrides the
-                     * trailing CRC-16 for defined defect slots, byte-identical
-                     * otherwise. The substituted byte is what both the ECU and
-                     * the PC monitor (bridge_mon_capture) receive. */
-                    b = defect_inject_filter_byte(b);
+                    /* In-flight defect injection on the response path:
+                     * substitutes register bytes + overrides the trailing CRC
+                     * for defined defects, byte-identical otherwise. The
+                     * substituted byte is what both the ECU and the PC monitor
+                     * (bridge_mon_capture) receive. */
+                    b = (s_injDev == 2u)
+                      ? nichia_defect_inject_filter_byte(b)
+                      : defect_inject_filter_byte(b);
                     bridge_forward(&s_lsmDir, ecu, b, stm);
                 }
             }

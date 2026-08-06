@@ -44,7 +44,16 @@ public abstract class LsmDeviceProfile
             ? reg
             : ("Unknown", "");
     }
-    
+
+    /// <summary>
+    /// Resolve register name/description with an explicit address-space hint.
+    /// Devices whose ASIC and EEPROM offsets overlap numerically (e.g. Nichia/TLD816K,
+    /// where the UART FUN field selects the address space) override this.
+    /// The default ignores the hint and behaves like <see cref="ResolveRegister(ushort)"/>.
+    /// </summary>
+    public virtual (string Name, string Description) ResolveRegister(ushort address, bool isEepromAccess)
+        => ResolveRegister(address);
+
     /// <summary>
     /// Get memory type (ASIC, EEPROM, FPGA, or Unknown) for an address.
     /// Context-aware: checks address ranges defined in AddressSpaces.
@@ -58,6 +67,13 @@ public abstract class LsmDeviceProfile
         }
         return "Unknown";
     }
+
+    /// <summary>
+    /// Get memory type with an explicit address-space hint (see
+    /// <see cref="ResolveRegister(ushort, bool)"/>). The default ignores the hint.
+    /// </summary>
+    public virtual string GetMemoryType(ushort address, bool isEepromAccess)
+        => GetMemoryType(address);
     
     /// <summary>
     /// Get the active profile for a device type.

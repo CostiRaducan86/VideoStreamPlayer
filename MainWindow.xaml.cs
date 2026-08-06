@@ -163,6 +163,8 @@ namespace VilsSharpX
         private readonly LsmCanDiagStore _canDiagStore = new(32768);
         private OsramDefectStore? _osramDefectStore;
         private OsramDefectControlWindow? _osramDefectControlWindow;
+        private NichiaDefectStore? _nichiaDefectStore;
+        private NichiaDefectControlWindow? _nichiaDefectControlWindow;
         private readonly ObservableCollection<CanDiagRowView> _canDiagRows = [];
         private int _canDiagCurrentPage = 1;
         private int _canDiagTotalPages = 1;
@@ -1596,6 +1598,8 @@ namespace VilsSharpX
         {
             _osramDefectStore ??= new OsramDefectStore();
             EnsureOsramDefectControlWindow();
+            _nichiaDefectStore ??= new NichiaDefectStore();
+            EnsureNichiaDefectControlWindow();
         }
 
         private void EnsureOsramDefectControlWindow()
@@ -1637,6 +1641,47 @@ namespace VilsSharpX
             catch (Exception ex)
             {
                 AppendDiagLog($"[cmd] SET_DEFECT_LIST error: {ex.Message}");
+            }
+        }
+
+        private void EnsureNichiaDefectControlWindow()
+        {
+            if (_nichiaDefectControlWindow != null)
+                return;
+
+            if (_nichiaDefectStore == null)
+                return;
+
+            _nichiaDefectControlWindow = new NichiaDefectControlWindow(_nichiaDefectStore);
+            _nichiaDefectControlWindow.DefectStateChanged += SendNichiaDefectListToAurix;
+            _nichiaDefectControlWindow.Closed += (_, _) => _nichiaDefectControlWindow = null;
+        }
+
+        /// <summary>
+        /// Pushes the current Nichia defect table to the SmartVisio Box firmware over Ethernet.
+        /// Sent only on state changes (enable/disable/add/remove) from the control window.
+        /// </summary>
+        private void SendNichiaDefectListToAurix()
+        {
+            if (_nichiaDefectStore == null)
+                return;
+
+            try
+            {
+                string? txDev = GetTxPcapDeviceNameOrNull();
+                if (string.IsNullOrWhiteSpace(txDev))
+                {
+                    AppendDiagLog("[cmd] No NIC selected — SET_DEFECT_LIST (Nichia) not sent");
+                    return;
+                }
+
+                bool enable = _nichiaDefectStore.InjectionEnabled;
+                var defects = _nichiaDefectStore.GetActiveDefects();
+                SetDefectListCommand.SendNichia(txDev, enable, defects, AppendDiagLog);
+            }
+            catch (Exception ex)
+            {
+                AppendDiagLog($"[cmd] SET_DEFECT_LIST (Nichia) error: {ex.Message}");
             }
         }
 
@@ -2546,7 +2591,7 @@ namespace VilsSharpX
                 }
                 else
                 {
-                    var resolved = LsmRegisterMap.ResolveFromDeviceId(record.Address, record.DeviceId);
+                    var resolved = LsmRegisterMap.ResolveFromDeviceId(record.Address, record.DeviceId, record.IsNichiaEepromAccess);
                     regName = resolved.Name;
                     memType = resolved.MemType;
                     addrStr = $"0x{record.Address:X4}";
@@ -2859,6 +2904,7 @@ namespace VilsSharpX
             try { StopDiagRetryTimer(); } catch { /* ignore */ }
             try { _canDiagWatchdogTimer?.Stop(); } catch { /* ignore */ }
             try { _osramDefectControlWindow?.Close(); } catch { /* ignore */ }
+            try { _nichiaDefectControlWindow?.Close(); } catch { /* ignore */ }
             try { StopCanDiagCapture(); } catch { /* ignore */ }
             try { StopNichiaEthCapture(); } catch { /* ignore */ }
             try { StopOsramEthCapture(); } catch { /* ignore */ }
@@ -4844,6 +4890,26 @@ namespace VilsSharpX
 
             _osramDefectControlWindow.Show();
             _osramDefectControlWindow.Activate();
+        }
+
+        private void MenuNichiaDefectControl_Click(object sender, RoutedEventArgs e)
+        {
+            InitializeOsramDefectInjection();
+            EnsureNichiaDefectControlWindow();
+
+            if (_nichiaDefectControlWindow == null)
+                return;
+
+            if (_nichiaDefectControlWindow.IsVisible)
+            {
+                _nichiaDefectControlWindow.Activate();
+                return;
+            }
+
+            _nichiaDefectControlWindow.Owner ??= this;
+
+            _nichiaDefectControlWindow.Show();
+            _nichiaDefectControlWindow.Activate();
         }
     }
 

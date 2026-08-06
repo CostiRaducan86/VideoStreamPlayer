@@ -32,11 +32,16 @@ public static class SetDefectListCommand
     private const ushort Ethertype = 0x88B5;
     private const ushort MagicCommand = 0x434D;  // "CM"
     private const byte CmdSetDefectList = 0x04;
+    private const byte CmdSetDefectListNichia = 0x05;  // Nichia/TLD816K layout
 
     /// <summary>Maximum number of defect slots supported by the OSRAM diagnostic register banks.</summary>
     public const int MaxDefects = 64;
 
+    /// <summary>Maximum number of Nichia defect slots (per-segment-pair PIXEL_ID banks).</summary>
+    public const int MaxNichiaDefects = 64;
+
     private const int BytesPerDefect = 5;
+    private const int NichiaBytesPerDefect = 4;   // idx_hi, idx_lo, type, segPair
     private const int HeaderOffset = 19;   // 14 eth + 2 magic + 1 cmd + 1 enable + 1 count
     private const int MinFrameSize = 60;
 
@@ -117,6 +122,95 @@ public static class SetDefectListCommand
         catch (Exception ex)
         {
             log?.Invoke($"[cmd] Defect-list send error: {ex.Message}");
+        }
+        finally
+        {
+            txDev.Close();
+        }
+    }
+
+    /// <summary>
+    /// Sends the Nichia/TLD816K defect-injection list to the SmartVisio Box.
+    /// Same ethertype/magic as the OSRAM command but cmd 0x05 with a Nichia record layout.
+    ///
+    /// Payload layout (after 14-byte Ethernet header):
+    ///   [14..15] magic 0x434D
+    ///   [16]     cmd 0x05
+    ///   [17]     enable (0 = disable, 1 = enable)
+    ///   [18]     count  (number of defect records, 0..64)
+    ///   [19..]   count x 4-byte records:
+    ///              +0 pixelId0 high ((pixelId0 >> 8) & 0xFF)   pixelId0 = row*256 + col, 0..16383
+    ///              +1 pixelId0 low  (pixelId0 & 0xFF)
+    ///              +2 type          (0 = dark, 1 = bright)
+    ///              +3 segPair       (0 = segments 0&amp;1, 1 = segments 2&amp;3)
+    /// </summary>
+    public static void SendNichia(
+        string pcapDeviceName,
+        bool enable,
+        IReadOnlyList<NichiaDefectEntry> defects,
+        Action<string>? log = null)
+    {
+        defects ??= [];
+        int count = Math.Min(defects.Count, MaxNichiaDefects);
+
+        int frameLen = Math.Max(MinFrameSize, HeaderOffset + count * NichiaBytesPerDefect);
+        var pkt = new byte[frameLen];
+
+        // Dst MAC: broadcast
+        pkt[0] = pkt[1] = pkt[2] = pkt[3] = pkt[4] = pkt[5] = 0xFF;
+
+        // Src MAC: locally-administered (same as other CM commands)
+        pkt[6] = 0x02; pkt[7] = 0x0A; pkt[8] = 0xF0;
+        pkt[9] = 0x4E; pkt[10] = 0x49; pkt[11] = 0x02;
+
+        // EtherType
+        pkt[12] = (byte)(Ethertype >> 8);
+        pkt[13] = (byte)(Ethertype & 0xFF);
+
+        // Command header
+        pkt[14] = (byte)(MagicCommand >> 8);
+        pkt[15] = (byte)(MagicCommand & 0xFF);
+        pkt[16] = CmdSetDefectListNichia;
+        pkt[17] = enable ? (byte)0x01 : (byte)0x00;
+        pkt[18] = (byte)count;
+
+        for (int i = 0; i < count; i++)
+        {
+            var d = defects[i];
+            int idx = Math.Clamp(d.PixelId0, 0, NichiaDefectEntry.TotalPixels - 1);
+            int type = d.DefectType == NichiaDefectType.Bright ? 1 : 0;
+            int segPair = d.SegmentPair & 0x01;
+
+            int b = HeaderOffset + i * NichiaBytesPerDefect;
+            pkt[b + 0] = (byte)((idx >> 8) & 0xFF);
+            pkt[b + 1] = (byte)(idx & 0xFF);
+            pkt[b + 2] = (byte)type;
+            pkt[b + 3] = (byte)segPair;
+        }
+
+        var existing = CaptureDeviceList.Instance
+            .OfType<LibPcapLiveDevice>()
+            .FirstOrDefault(d => string.Equals(d.Name, pcapDeviceName, StringComparison.OrdinalIgnoreCase));
+
+        if (existing == null)
+        {
+            log?.Invoke($"[cmd] NIC not found for Nichia defect-list command: {pcapDeviceName}");
+            return;
+        }
+
+        // Independent handle so we don't disrupt ongoing captures.
+        var txDev = new LibPcapLiveDevice(existing.Interface);
+        txDev.Open(DeviceModes.Promiscuous, read_timeout: 1);
+        try
+        {
+            for (int i = 0; i < 3; i++)
+                txDev.SendPacket(pkt);
+
+            log?.Invoke($"[cmd] Sent SET_DEFECT_LIST (Nichia) → enable={(enable ? 1 : 0)} count={count}");
+        }
+        catch (Exception ex)
+        {
+            log?.Invoke($"[cmd] Nichia defect-list send error: {ex.Message}");
         }
         finally
         {

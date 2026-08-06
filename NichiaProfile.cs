@@ -27,6 +27,45 @@ public sealed class NichiaProfile : LsmDeviceProfile
 
     protected override Dictionary<ushort, (string Name, string Description)> RegisterDictionary => s_registers;
 
+    /// <summary>
+    /// Nichia/TLD816K selects the address space with the UART FUN field, not the numeric
+    /// address range: FUN 4/5 = ASIC (1-byte address), FUN 6/7 = EEPROM (2-byte offset).
+    /// The same numeric value means different things per space (e.g. 0x80 = ASIC PIXEL_ID_0
+    /// vs EEPROM offset 0x0080 = Gamma LUT). See docs 13_Nichia_Control_UART_Frame_And_CRC.md.
+    /// </summary>
+    public override string GetMemoryType(ushort address, bool isEepromAccess)
+        => isEepromAccess ? "EEPROM" : "ASIC";
+
+    public override (string Name, string Description) ResolveRegister(ushort address, bool isEepromAccess)
+    {
+        if (!isEepromAccess)
+        {
+            // ASIC space: only the 0x0000..0x00FF register file is valid.
+            return s_registers.TryGetValue(address, out var reg) ? reg : ("Unknown", "");
+        }
+
+        return ResolveEepromOffset(address);
+    }
+
+    /// <summary>
+    /// Name/description for an external EEPROM image offset (2-byte address, FUN 6/7).
+    /// Regions follow the TLD816K C11 EEPROM map; blocks are named per 64-byte (0x40) chunk.
+    /// </summary>
+    private static (string Name, string Description) ResolveEepromOffset(ushort off)
+    {
+        if (off <= 0x0048)
+            return ($"EEPROM_CFG_{off:X4}", "EEPROM TLD816K configuration shadow (loaded at start-up)");
+        if (off <= 0x018A)
+            return ($"EEPROM_GAMMA_LUT_{(off - 0x0049) / 0x40:D2}", "EEPROM Gamma correction LUT block");
+        if (off <= 0x21AA)
+            return ($"EEPROM_FS_PICTURE_{(off - 0x018B) / 0x40:D3}", "EEPROM failsafe picture block");
+        if (off <= 0x61B9)
+            return ($"EEPROM_CAL_MOD_{(off - 0x21AB) / 0x40:D3}", "EEPROM calibration module block");
+        if (off <= 0x623F)
+            return ($"EEPROM_TRACE_{(off - 0x61BA) / 0x40:D2}", "EEPROM traceability data block");
+        return ($"EEPROM_USER_{(off - 0x6240) / 0x40:D3}", "EEPROM user / OEM data block");
+    }
+
     private static Dictionary<ushort, (string Name, string Description)> BuildRegisterDictionary()
     {
         var regs = new Dictionary<ushort, (string Name, string Description)>
@@ -176,58 +215,6 @@ public sealed class NichiaProfile : LsmDeviceProfile
         for (int i = 0; i < 32; i++)
         {
             regs[(ushort)(0xE0 + i)] = ($"PIXEL_ID_{96 + i}", $"Bright pixel ID [{i}] (S23)");
-        }
-
-
-        // EEPROM configuration blocks (0x0049-0x623F, 0x40-byte stepping as seen in traces)
-        // Gamma correction LUT
-        for (ushort addr = 0x0049; addr <= 0x018A; addr += 0x40)
-        {
-            if (!regs.ContainsKey(addr))
-            {
-                int blockIndex = (addr - 0x0049) / 0x40;
-                regs[addr] = ($"EEPROM_BLOCK_{blockIndex:D2}", "EEPROM Gamma correction LUT block");
-            }
-        }
-
-        // FS picture
-        for (ushort addr = 0x018B; addr <= 0x21AA; addr += 0x40)
-        {
-            if (!regs.ContainsKey(addr))
-            {
-                int blockIndex = (addr - 0x018B) / 0x40;
-                regs[addr] = ($"EEPROM_BLOCK_{blockIndex:D2}", "EEPROM FS picture block");
-            }
-        }
-
-        // Calibration module
-        for (ushort addr = 0x21AB; addr <= 0x61B9; addr += 0x40)
-        {
-            if (!regs.ContainsKey(addr))
-            {
-                int blockIndex = (addr - 0x21AB) / 0x40;
-                regs[addr] = ($"EEPROM_BLOCK_{blockIndex:D2}", "EEPROM Calibration module block");
-            }
-        }
-
-        // Traceability data
-        for (ushort addr = 0x61BA; addr <= 0x623F; addr += 0x40)
-        {
-            if (!regs.ContainsKey(addr))
-            {
-                int blockIndex = (addr - 0x61BA) / 0x40;
-                regs[addr] = ($"EEPROM_BLOCK_{blockIndex:D2}", "EEPROM Traceability data block");
-            }
-        }
-
-        // FPGA table/image blocks (0x2000-0x61FF, 0x40-byte stepping as seen in traces)
-        for (ushort addr = 0x6240; addr <= 0x7FFD; addr += 0x40)
-        {
-            if (!regs.ContainsKey(addr))
-            {
-                int blockIndex = (addr - 0x6240) / 0x40;
-                regs[addr] = ($"FPGA_BLOCK_{blockIndex:D3}", "FPGA data block");
-            }
         }
 
         return regs;

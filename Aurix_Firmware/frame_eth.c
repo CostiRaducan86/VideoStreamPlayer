@@ -1318,6 +1318,7 @@ boolean frame_eth_send_can_diag_pending(void)
 #include "can_uart_bridge.h" /* can_uart_bridge_set_active() */
 #include "can_hw.h"        /* g_diagSniffEnabled */
 #include "defect_inject.h" /* defect_inject_set_list() */
+#include "nichia_defect_inject.h" /* nichia_defect_inject_set_list() */
 
 void frame_eth_poll_rx(void)
 {
@@ -1426,6 +1427,19 @@ void frame_eth_poll_rx(void)
                     uint8 enable = cmdPayload;      /* byte [17] */
                     uint8 count  = pRxBuf[18];      /* byte [18] */
                     defect_inject_set_list(enable, &pRxBuf[19], count);
+                }
+                else if (cmdId == FE_CMD_SET_DEFECT_LIST_NICHIA)
+                {
+                    /* Payload: [17] = enable (0/1)
+                     *          [18] = count  (0..64 defect records)
+                     *          [19..] = count x 4 bytes:
+                     *              [idx_hi][idx_lo][type][segPair]
+                     *              idx = pixel_index (row*256+col), type 0=dark/1=bright.
+                     * The list only DEFINES defects; the actual PIXEL_ID/counter/flag
+                     * injection is done in-flight by the CPU2 bridge filter. */
+                    uint8 enable = cmdPayload;      /* byte [17] */
+                    uint8 count  = pRxBuf[18];      /* byte [18] */
+                    nichia_defect_inject_set_list(enable, &pRxBuf[19], count);
                 }
             }
         }

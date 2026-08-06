@@ -22,6 +22,7 @@
             </MenuItem>
             <MenuItem Header="_Tools">
                 <MenuItem Header="OSRAM Defect Injection Control" Click="MenuOsramDefectControl_Click"/>
+                <MenuItem Header="NICHIA Defect Injection Control" Click="MenuNichiaDefectControl_Click"/>
             </MenuItem>
         </Menu>
 

@@ -61,7 +61,7 @@ function Invoke-ApiRequest {
     catch [System.Net.WebException] {
         $ex = $_.Exception
         Write-Fail "WebException: $($ex.Message)"
-        if ($ex.Response -ne $null) {
+        if ($null -ne $ex.Response) {
             $errResp = [System.Net.HttpWebResponse]$ex.Response
             $reader = New-Object System.IO.StreamReader($errResp.GetResponseStream())
             $errBody = $reader.ReadToEnd()
@@ -158,7 +158,7 @@ catch [System.Net.WebException] {
     $ex = $_.Exception
     # Write-Fail "WebException: $($ex.Message)"
 
-    if ($ex.Response -ne $null) {
+    if ($null -ne $ex.Response) {
         $resp = [System.Net.HttpWebResponse]$ex.Response
         # Write-Fail "HTTP $([int]$resp.StatusCode) $($resp.StatusDescription)"
         $reader = New-Object System.IO.StreamReader($resp.GetResponseStream())

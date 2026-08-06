@@ -21,8 +21,9 @@ public partial class CanDetailWindow : Window
             return;
         }
 
-        var (name, memType) = LsmRegisterMap.ResolveFromDeviceId(record.Address, record.DeviceId);
-        string description = LsmRegisterMap.GetDescription(record.Address, record.DeviceId);
+        bool isEep = record.IsNichiaEepromAccess;
+        var (name, memType) = LsmRegisterMap.ResolveFromDeviceId(record.Address, record.DeviceId, isEep);
+        string description = LsmRegisterMap.GetDescription(record.Address, record.DeviceId, isEep);
 
         TxtTitle.Text = name == "/" ? $"0x{record.Address:X4}" : name;
 
@@ -40,8 +41,9 @@ public partial class CanDetailWindow : Window
         TxtDevice.Text = $"0x{record.DeviceId:X2}";
         TxtRw.Text = record.OperationName;
 
-        // Diagnostics — CRC as 16-bit like classic VILS (lower 16 bits of checksum)
-        TxtCrc.Text = $"0x{(record.Checksum & 0xFFFF):X4}";
+        // Diagnostics — Nichia: CRC8 recomputed from raw payload (N/A for FUN=7 EEPROM read);
+        // other devices keep the legacy 16-bit checksum display.
+        TxtCrc.Text = record.CrcDisplay;
         TxtError.Text = record.Status == LsmCanDiagStatus.Ok ? "/" : record.Status.ToString();
         TxtDescription.Text = string.IsNullOrEmpty(description) ? "/" : description;
 
@@ -77,7 +79,7 @@ public partial class CanDetailWindow : Window
             for (int i = 0; i < decoded.Length; i++)
             {
                 var (addr, val) = decoded[i];
-                var (rName, _) = LsmRegisterMap.ResolveFromDeviceId(addr, record.DeviceId);
+                var (rName, _) = LsmRegisterMap.ResolveFromDeviceId(addr, record.DeviceId, isEep);
                 string nameStr = rName == "/" ? "null" : $"\"{rName}\"";
                 sb.Append($"  {{ \"Address\": \"0x{addr:X4}\", \"Value\": \"0x{val:X4}\", " +
                           $"\"Name\": {nameStr}, \"Index\": {i * 4} }}");

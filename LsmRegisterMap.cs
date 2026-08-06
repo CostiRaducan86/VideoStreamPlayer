@@ -49,6 +49,25 @@ public static class LsmRegisterMap
     }
 
     /// <summary>
+    /// Resolve register name and memory type from DeviceId with an explicit address-space
+    /// hint. For Nichia/TLD816K the space is selected by the UART FUN field
+    /// (FUN 4/5 = ASIC 1-byte, FUN 6/7 = EEPROM 2-byte offset), not by numeric range.
+    /// </summary>
+    public static (string Name, string MemType) ResolveFromDeviceId(ushort address, byte deviceId, bool isEepromAccess)
+    {
+        var profile = LsmDeviceProfile.GetProfileFromDeviceId(deviceId);
+        profile ??= OsramProfile.Instance;
+
+        var (name, _) = profile.ResolveRegister(address, isEepromAccess);
+        var memType = profile.GetMemoryType(address, isEepromAccess);
+
+        if (!string.Equals(name, UnknownName, System.StringComparison.Ordinal))
+            return (NormalizeDisplayName(name), memType);
+
+        return (BuildFallbackName(address, memType), memType);
+    }
+
+    /// <summary>
     /// Return description for a known register address using the active profile.
     /// If profile is null, defaults to OSRAM.
     /// </summary>
@@ -80,6 +99,23 @@ public static class LsmRegisterMap
     {
         var profile = LsmDeviceProfile.GetProfileFromDeviceId(deviceId);
         return GetDescription(address, profile);
+    }
+
+    /// <summary>
+    /// Return description for an address from DeviceId with an explicit address-space hint
+    /// (see <see cref="ResolveFromDeviceId(ushort, byte, bool)"/>).
+    /// </summary>
+    public static string GetDescription(ushort address, byte deviceId, bool isEepromAccess)
+    {
+        var profile = LsmDeviceProfile.GetProfileFromDeviceId(deviceId);
+        profile ??= OsramProfile.Instance;
+
+        var (name, description) = profile.ResolveRegister(address, isEepromAccess);
+        if (!string.Equals(name, UnknownName, System.StringComparison.Ordinal))
+            return description;
+
+        var memType = profile.GetMemoryType(address, isEepromAccess);
+        return BuildFallbackDescription(address, memType);
     }
 
     private static string BuildFallbackName(ushort address, string memType)
