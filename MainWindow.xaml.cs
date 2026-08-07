@@ -1128,6 +1128,9 @@ namespace VilsSharpX
                     CmbCanUartMode.SelectedIndex = _canUartMode;
                 }
 
+                ApplyDeviceTypeConstraints();
+                ApplyModeConstraints();
+
                 if (TxtVlanId != null) TxtVlanId.Text = _vlanId.ToString();
                 if (TxtVlanPriority != null) TxtVlanPriority.Text = _vlanPriority.ToString();
                 if (TxtAvtpEtherType != null) TxtAvtpEtherType.Text = _avtpEtherType;
@@ -1216,6 +1219,7 @@ namespace VilsSharpX
             if (newDeviceType == _currentDeviceType) return;
 
             _currentDeviceType = newDeviceType;
+            ApplyDeviceTypeConstraints();
             SaveUiSettings();
 
             // Device type change affects resolution - reinitialize all resolution-dependent objects
@@ -1294,29 +1298,44 @@ namespace VilsSharpX
             SendAdapterModeCommand();
         }
 
+        private void ApplyDeviceTypeConstraints()
+        {
+            bool isNichia = _currentDeviceType == LsmDeviceType.Nichia;
+
+            if (MenuOsramDefectControl != null)
+                MenuOsramDefectControl.IsEnabled = !isNichia;
+            if (MenuNichiaDefectControl != null)
+                MenuNichiaDefectControl.IsEnabled = isNichia;
+        }
+
         /// <summary>
-        /// Enforces hardware constraints between Control Mode and CAN UART Mode.
-        /// Direct mode: ECU CAN UART invalid (ECU is physically disconnected).
-        /// LVDS Mode is independent — ECU mode can also use Generator (TTL_SEL=LOW, TTL_FROM_LOCAL).
+        /// Enforces the hardware constraints between Control Mode, CAN UART Mode and LVDS Mode.
         /// </summary>
         private void ApplyModeConstraints()
         {
-            if (CmbCanUartMode == null) return;
-
             bool isDirect = _controlMode == 1;
 
-            // CAN UART Mode constraints
-            if (CmbCanUartMode.Items.Count >= 3)
+            if (CmbLvdsMode != null && CmbLvdsMode.Items.Count >= 2)
             {
-                // Direct → ECU CAN UART (index 0) invalid
-                ((System.Windows.Controls.ComboBoxItem)CmbCanUartMode.Items[0]).IsEnabled = !isDirect;
+                ((System.Windows.Controls.ComboBoxItem)CmbLvdsMode.Items[0]).IsEnabled = !isDirect;
+                ((System.Windows.Controls.ComboBoxItem)CmbLvdsMode.Items[1]).IsEnabled = isDirect;
 
-                // If Direct and currently on ECU CAN UART, switch to ECU↔SmartVisio↔LSM
-                if (isDirect && CmbCanUartMode.SelectedIndex == 0)
-                {
-                    CmbCanUartMode.SelectedIndex = 1;
-                    _canUartMode = 1;
-                }
+                int requiredLvdsMode = isDirect ? 1 : 0;
+                if (CmbLvdsMode.SelectedIndex != requiredLvdsMode)
+                    CmbLvdsMode.SelectedIndex = requiredLvdsMode;
+            }
+
+            if (CmbCanUartMode == null || CmbCanUartMode.Items.Count < 3) return;
+
+            ((System.Windows.Controls.ComboBoxItem)CmbCanUartMode.Items[0]).IsEnabled = !isDirect;
+            ((System.Windows.Controls.ComboBoxItem)CmbCanUartMode.Items[1]).IsEnabled = !isDirect;
+            ((System.Windows.Controls.ComboBoxItem)CmbCanUartMode.Items[2]).IsEnabled = isDirect;
+
+            int requiredCanUartMode = isDirect ? 2 : Math.Clamp(_canUartMode, 0, 1);
+            if (CmbCanUartMode.SelectedIndex != requiredCanUartMode)
+            {
+                CmbCanUartMode.SelectedIndex = requiredCanUartMode;
+                _canUartMode = requiredCanUartMode;
             }
         }
 

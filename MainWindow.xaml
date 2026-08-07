@@ -21,8 +21,8 @@
                 <MenuItem Header="API Configuration" Click="MenuApiConfig_Click"/>
             </MenuItem>
             <MenuItem Header="_Tools">
-                <MenuItem Header="OSRAM Defect Injection Control" Click="MenuOsramDefectControl_Click"/>
-                <MenuItem Header="NICHIA Defect Injection Control" Click="MenuNichiaDefectControl_Click"/>
+                <MenuItem x:Name="MenuOsramDefectControl" Header="OSRAM Defect Injection Control" Click="MenuOsramDefectControl_Click"/>
+                <MenuItem x:Name="MenuNichiaDefectControl" Header="NICHIA Defect Injection Control" Click="MenuNichiaDefectControl_Click"/>
             </MenuItem>
         </Menu>
 
