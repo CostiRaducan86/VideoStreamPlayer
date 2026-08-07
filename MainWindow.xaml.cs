@@ -198,22 +198,34 @@ namespace VilsSharpX
         }
 
         /// <summary>
-        /// Number of injected "bright" (Stuck) pixels currently in the OSRAM Active Defects
-        /// list. Returns 0 unless injection is enabled, so the label only reflects pixels
-        /// that are actually being simulated/injected.
+        /// Number of injected "bright" pixels currently active (OSRAM Stuck + Nichia Bright).
+        /// Returns 0 unless injection is enabled for the respective store, so the label only
+        /// reflects pixels that are actually being simulated/injected.
         /// </summary>
         private int GetInjectedBrightPixelCount()
         {
-            var store = _osramDefectStore;
-            if (store == null || !store.InjectionEnabled)
-                return 0;
-
             int count = 0;
-            foreach (var d in store.GetActiveDefects())
+
+            var osramStore = _osramDefectStore;
+            if (osramStore != null && osramStore.InjectionEnabled)
             {
-                if (d.DefectType == OsramDefectType.Stuck)
-                    count++;
+                foreach (var d in osramStore.GetActiveDefects())
+                {
+                    if (d.DefectType == OsramDefectType.Stuck)
+                        count++;
+                }
             }
+
+            var nichiaStore = _nichiaDefectStore;
+            if (nichiaStore != null && nichiaStore.InjectionEnabled)
+            {
+                foreach (var d in nichiaStore.GetActiveDefects())
+                {
+                    if (d.DefectType == NichiaDefectType.Bright)
+                        count++;
+                }
+            }
+
             return count;
         }
 
@@ -1500,18 +1512,14 @@ namespace VilsSharpX
         private const int InjectedBrightPixelMinSize = 6;
 
         /// <summary>
-        /// Paints injected "bright" (Stuck) defect pixels as white (255) blocks onto the
-        /// native-resolution camera frame. Each LVDS pixel (0..319 × 0..79) is mapped to
-        /// the corresponding camera block (block-average geometry) and drawn at least
-        /// <see cref="InjectedBrightPixelMinSize"/> pixels wide/high so it stays visible.
-        /// No-op unless OSRAM injection is enabled.
+        /// Paints injected "bright" defect pixels (OSRAM Stuck + Nichia Bright) as white (255)
+        /// blocks onto the native-resolution camera frame. Each LVDS pixel (0..width-1 ×
+        /// 0..height-1) is mapped to the corresponding camera block (block-average geometry)
+        /// and drawn at least <see cref="InjectedBrightPixelMinSize"/> pixels wide/high so it
+        /// stays visible. No-op unless injection is enabled for the respective store.
         /// </summary>
         private void PaintInjectedBrightPixelsOnCamera(byte[] frame, int camW, int camH)
         {
-            var store = _osramDefectStore;
-            if (store == null || !store.InjectionEnabled)
-                return;
-
             int dstW = _currentWidth;
             int dstH = _currentHeight;
             if (dstW <= 0 || dstH <= 0 || camW <= 0 || camH <= 0)
@@ -1522,45 +1530,64 @@ namespace VilsSharpX
             double blockW = (double)camW / dstW;
             double blockH = (double)camH / dstH;
 
-            foreach (var d in store.GetActiveDefects())
+            var osramStore = _osramDefectStore;
+            if (osramStore != null && osramStore.InjectionEnabled)
             {
-                if (d.DefectType != OsramDefectType.Stuck)
-                    continue;
-                if (d.X < 0 || d.X >= dstW || d.Y < 0 || d.Y >= dstH)
-                    continue;
-
-                // Map the LVDS pixel to its camera block (same geometry as the downscaler).
-                int sx0 = (int)(d.X * blockW);
-                int sy0 = (int)(d.Y * blockH);
-                int sx1 = (int)((d.X + 1) * blockW);
-                int sy1 = (int)((d.Y + 1) * blockH);
-
-                // Enforce a minimum visible size (grow the block symmetrically if needed).
-                if (sx1 - sx0 < InjectedBrightPixelMinSize)
+                foreach (var d in osramStore.GetActiveDefects())
                 {
-                    int cx = (sx0 + sx1) / 2;
-                    sx0 = cx - InjectedBrightPixelMinSize / 2;
-                    sx1 = sx0 + InjectedBrightPixelMinSize;
+                    if (d.DefectType == OsramDefectType.Stuck)
+                        PaintInjectedBrightBlock(frame, camW, camH, d.X, d.Y, dstW, dstH, blockW, blockH);
                 }
-                if (sy1 - sy0 < InjectedBrightPixelMinSize)
-                {
-                    int cy = (sy0 + sy1) / 2;
-                    sy0 = cy - InjectedBrightPixelMinSize / 2;
-                    sy1 = sy0 + InjectedBrightPixelMinSize;
-                }
+            }
 
-                // Clamp to camera bounds.
-                if (sx0 < 0) sx0 = 0;
-                if (sy0 < 0) sy0 = 0;
-                if (sx1 > camW) sx1 = camW;
-                if (sy1 > camH) sy1 = camH;
-
-                for (int sy = sy0; sy < sy1; sy++)
+            var nichiaStore = _nichiaDefectStore;
+            if (nichiaStore != null && nichiaStore.InjectionEnabled)
+            {
+                foreach (var d in nichiaStore.GetActiveDefects())
                 {
-                    int row = sy * camW;
-                    for (int sx = sx0; sx < sx1; sx++)
-                        frame[row + sx] = 0xFF;
+                    if (d.DefectType == NichiaDefectType.Bright)
+                        PaintInjectedBrightBlock(frame, camW, camH, d.X, d.Y, dstW, dstH, blockW, blockH);
                 }
+            }
+        }
+
+        /// <summary>Paints a single injected bright pixel block; shared by OSRAM and Nichia.</summary>
+        private static void PaintInjectedBrightBlock(byte[] frame, int camW, int camH, int x, int y, int dstW, int dstH, double blockW, double blockH)
+        {
+            if (x < 0 || x >= dstW || y < 0 || y >= dstH)
+                return;
+
+            // Map the LVDS pixel to its camera block (same geometry as the downscaler).
+            int sx0 = (int)(x * blockW);
+            int sy0 = (int)(y * blockH);
+            int sx1 = (int)((x + 1) * blockW);
+            int sy1 = (int)((y + 1) * blockH);
+
+            // Enforce a minimum visible size (grow the block symmetrically if needed).
+            if (sx1 - sx0 < InjectedBrightPixelMinSize)
+            {
+                int cx = (sx0 + sx1) / 2;
+                sx0 = cx - InjectedBrightPixelMinSize / 2;
+                sx1 = sx0 + InjectedBrightPixelMinSize;
+            }
+            if (sy1 - sy0 < InjectedBrightPixelMinSize)
+            {
+                int cy = (sy0 + sy1) / 2;
+                sy0 = cy - InjectedBrightPixelMinSize / 2;
+                sy1 = sy0 + InjectedBrightPixelMinSize;
+            }
+
+            // Clamp to camera bounds.
+            if (sx0 < 0) sx0 = 0;
+            if (sy0 < 0) sy0 = 0;
+            if (sx1 > camW) sx1 = camW;
+            if (sy1 > camH) sy1 = camH;
+
+            for (int sy = sy0; sy < sy1; sy++)
+            {
+                int row = sy * camW;
+                for (int sx = sx0; sx < sx1; sx++)
+                    frame[row + sx] = 0xFF;
             }
         }
 
