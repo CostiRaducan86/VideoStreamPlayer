@@ -171,6 +171,7 @@ namespace VilsSharpX
         private DateTime _canDiagLastRefresh = DateTime.MinValue;
         private bool _canDiagRefreshPending;
         private bool _canDiagRecording;  // starts false — user presses Record to begin
+        private bool _canDiagTraceLoaded;
         private DateTime _canRecordSessionStart = DateTime.MinValue; // filters stale Dispatcher-queued records
         private DispatcherTimer? _canDiagRetryTimer; // resends START if CD stays 0
         private DispatcherTimer? _canDiagWatchdogTimer; // auto-heals long-run silent recording stalls
@@ -1325,7 +1326,11 @@ namespace VilsSharpX
                     CmbLvdsMode.SelectedIndex = requiredLvdsMode;
             }
 
-            if (CmbCanUartMode == null || CmbCanUartMode.Items.Count < 3) return;
+            if (CmbCanUartMode == null || CmbCanUartMode.Items.Count < 3)
+            {
+                UpdateCanDiagRecordingButtons();
+                return;
+            }
 
             ((System.Windows.Controls.ComboBoxItem)CmbCanUartMode.Items[0]).IsEnabled = !isDirect;
             ((System.Windows.Controls.ComboBoxItem)CmbCanUartMode.Items[1]).IsEnabled = !isDirect;
@@ -1337,6 +1342,8 @@ namespace VilsSharpX
                 CmbCanUartMode.SelectedIndex = requiredCanUartMode;
                 _canUartMode = requiredCanUartMode;
             }
+
+            UpdateCanDiagRecordingButtons();
         }
 
         /// <summary>
@@ -1791,17 +1798,7 @@ namespace VilsSharpX
             // oldest records from being silently discarded.
             if (_canDiagStore.IsFull)
             {
-                _canDiagRecording = false;
-                UpdateCanDiagRecordingButtons();
-
-                // Tell SmartVisio Box to stop sniffing (same as manual Stop button)
-                try
-                {
-                    string? txDev = GetTxPcapDeviceNameOrNull();
-                    if (!string.IsNullOrWhiteSpace(txDev))
-                        DiagSniffCommand.Send(txDev, start: false, AppendDiagLog);
-                }
-                catch (Exception ex) { AppendDiagLog($"[cmd] DiagSniff auto-stop: {ex.Message}"); }
+                StopCanUartRecordingInternal();
             }
 
             /* Throttle UI refresh to avoid freezing under high packet rate.
@@ -2009,6 +2006,7 @@ namespace VilsSharpX
         private void ClearCanUartInternal()
         {
             _canDiagStore.Clear();
+            _canDiagTraceLoaded = false;
             _rawCanLines.Clear();
 
             if (TblRawCan != null)
@@ -2017,6 +2015,7 @@ namespace VilsSharpX
             _canDiagCurrentPage = 1;
             // Reset capture counters so Rx/CD/OS restart from 0
             _canDiagCapture?.ResetCounters();
+            UpdateCanDiagRecordingButtons();
             RefreshCanDiagView();
         }
 
@@ -2033,7 +2032,10 @@ namespace VilsSharpX
 
         private void BtnCanRecord_Click(object sender, RoutedEventArgs e)
         {
-            StartCanUartRecordingInternal();
+            if (_canDiagRecording)
+                StopCanUartRecordingInternal();
+            else
+                StartCanUartRecordingInternal();
         }
         private void StartCanUartRecordingInternal()
         {
@@ -2058,6 +2060,7 @@ namespace VilsSharpX
 
             // Start a fresh recording session: clear previous data
             _canDiagStore.Clear();
+            _canDiagTraceLoaded = false;
             _rawCanLines.Clear();
 
             if (TblRawCan != null)
@@ -2184,10 +2187,6 @@ namespace VilsSharpX
             }
         }
 
-        private void BtnCanStopRecord_Click(object sender, RoutedEventArgs e)
-        {
-            StopCanUartRecordingInternal();
-        }
         private void StopCanUartRecordingInternal()
         {
             _canDiagRecording = false;
@@ -2215,7 +2214,8 @@ namespace VilsSharpX
         {
             if (BtnCanRecord != null)
             {
-                BtnCanRecord.IsEnabled = !_canDiagRecording;
+                BtnCanRecord.IsEnabled = !_canDiagTraceLoaded;
+                BtnCanRecord.Content = _canDiagRecording ? "⏹ Stop" : "⏺ Record";
                 BtnCanRecord.Background = _canDiagRecording
                     ? new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(0xCC, 0x33, 0x33))
                     : new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(0xF6, 0xF6, 0xF6));
@@ -2223,8 +2223,14 @@ namespace VilsSharpX
                     ? System.Windows.Media.Brushes.White
                     : new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(0x44, 0x44, 0x44));
             }
-            if (BtnCanStopRecord != null)
-                BtnCanStopRecord.IsEnabled = _canDiagRecording;
+
+            if (BtnCanReplay != null)
+                BtnCanReplay.IsEnabled = _controlMode == 1 && _canDiagTraceLoaded && !_canDiagRecording;
+        }
+
+        private void BtnCanReplay_Click(object sender, RoutedEventArgs e)
+        {
+            // Replay execution will be implemented in a later iteration.
         }
 
         private void SyncCanUartPageJumpText()
@@ -2395,6 +2401,7 @@ namespace VilsSharpX
                 _rawCanLines.Clear();
                 if (TblRawCan != null) TblRawCan.Text = string.Empty;
                 _canDiagRecording = false;
+                _canDiagTraceLoaded = true;
                 UpdateCanDiagRecordingButtons();
 
                 // Add records oldest-first (store prepends, so last added = newest on top)
