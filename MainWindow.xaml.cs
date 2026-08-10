@@ -3184,7 +3184,11 @@ namespace VilsSharpX
         private void Pause()
         {
             _playback.Pause();
-            _playback.PauseGate.Reset();
+            if (_modeOfOperation == ModeOfOperation.PlayerFromFiles)
+            {
+                // Freeze the UI loop, but keep the generator and AVTP TX alive.
+                _playback.PauseGate.Set();
+            }
 
             // Freeze the currently displayed frames so overlays match the frozen bitmap.
             lock (_frameLock)
@@ -3248,6 +3252,17 @@ namespace VilsSharpX
             _playback.Resume();
             _playback.PauseGate.Set();
 
+            // The ECU may have entered failsafe while Pause stopped the UI
+            // watchdog. Do not reuse the pre-pause LVDS image after Resume;
+            // require a fresh LVDS frame to prove that the ECU is transmitting.
+            lock (_frameLock)
+            {
+                _latestB = null;
+                _matchedAForDiff = null;
+            }
+            _lastLvdsFrameUtc = DateTime.UtcNow;
+            _lvdsSignalLost = true;
+
             // Don't clear the sync ring on resume — it contains valid A frames
             // pushed during pause that correspond to B frames still in the ECU pipeline.
             _matchedAForDiff = null;
@@ -3269,7 +3284,7 @@ namespace VilsSharpX
             if (LblRunInfoA != null)
                 LblRunInfoA.Text = StatusFormatter.FormatRunInfoA(true, false, shownFps, isAviZero);
             if (LblRunInfoB != null)
-                LblRunInfoB.Text = StatusFormatter.FormatRunInfoB(true, false, false, _playback.BFpsEma);
+                LblRunInfoB.Text = StatusFormatter.FormatRunInfoB(true, false, _lvdsSignalLost, _playback.BFpsEma);
 
             LblStatus.Text = _playback.RunningStatusText ?? "Running.";
 
@@ -3886,9 +3901,6 @@ namespace VilsSharpX
         
             while (!ct.IsCancellationRequested)
             {
-                try { _playback.PauseGate.Wait(ct); }
-                catch { break; }
-        
                 next += period;
         
                 // A: either AVTP latest or PGM/AVI/Scene fallback (depending on what you loaded)
@@ -3976,7 +3988,7 @@ namespace VilsSharpX
                         {
                             if (isPcap)
                             {
-                                if (isNewPcapFrame)
+                                if (isNewPcapFrame || _playback.IsPaused)
                                 {
                                     var txFrame = _liveCapture.AvtpTxFrame;
                                     if (txFrame != null)
@@ -4003,22 +4015,19 @@ namespace VilsSharpX
                     break;
                 }
         
-                // If pause was activated exactly during the iteration, do not publish frame
-                if (_playback.IsPaused || !_playback.PauseGate.IsSet)
+                // If pause was activated exactly during the iteration, do not publish frame.
+                // Keep the pacing delay below so AVTP TX remains rate-limited while paused.
+                if (!_playback.IsPaused && _playback.PauseGate.IsSet)
                 {
-                    if (_playback.IncrementLateFramesSkipped() == 1)
-                        AppendDiagLog("[ui] generator skipped publish due to pause race (late frame)");
-                    continue;
+                    lock (_frameLock)
+                    {
+                        _latestA = a;
+                        if (!useRealEthB)
+                            _latestB = b;
+                        _latestD = d;
+                    }
+                    _playback.IncrementCountD();
                 }
-        
-                lock (_frameLock)
-                {
-                    _latestA = a;
-                    if (!useRealEthB)
-                        _latestB = b;
-                    _latestD = d;
-                }
-                _playback.IncrementCountD();
         
                 // pace
                 var now = sw.Elapsed;
@@ -4319,7 +4328,10 @@ namespace VilsSharpX
             bool avtpLiveNoFrame = _modeOfOperation == ModeOfOperation.AvtpLiveMonitor
                 && !_liveCapture.HasAvtpFrame;
             bool paneANoSignal = avtpNoSignal || avtpLiveNoFrame;
-            bool paneBNoSignal = avtpNoSignal || avtpLiveNoFrame || _lvdsSignalLost;
+            // AVTP and LVDS are independent inputs. An AVTP fault must hide A,
+            // but B can still be valid when the ECU continues transmitting real
+            // LVDS frames (including valid black frames).
+            bool paneBNoSignal = avtpLiveNoFrame || _lvdsSignalLost;
             bool isRunning = _playback.Cts != null;
             bool isPaused = _playback.IsPaused;
 
