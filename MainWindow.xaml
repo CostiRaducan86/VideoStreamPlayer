@@ -23,6 +23,7 @@
             <MenuItem Header="_Tools">
                 <MenuItem x:Name="MenuOsramDefectControl" Header="OSRAM Defect Injection Control" Click="MenuOsramDefectControl_Click"/>
                 <MenuItem x:Name="MenuNichiaDefectControl" Header="NICHIA Defect Injection Control" Click="MenuNichiaDefectControl_Click"/>
+                <MenuItem x:Name="MenuCommunicationFaultControl" Header="Communication Fault Injection Control" Click="MenuCommunicationFaultControl_Click"/>
             </MenuItem>
         </Menu>
 

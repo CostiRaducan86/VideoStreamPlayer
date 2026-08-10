@@ -21,6 +21,7 @@ public sealed class AvtpTransmitManager(int width, int height, Action<string> lo
     private AvtpRvfTransmitter? _tx;
     private CancellationTokenSource? _blackCts;
     private Task? _blackTask;
+    private volatile bool _avtpFaultEnabled;
 
     private int _txErrOnce;
     private int _txNoDevOnce;
@@ -36,6 +37,28 @@ public sealed class AvtpTransmitManager(int width, int height, Action<string> lo
     /// Whether transmitter is initialized and ready.
     /// </summary>
     public bool IsReady => _tx != null;
+
+    /// <summary>
+    /// Enables or disables the AVTP communication fault. Enabling the fault
+    /// blocks subsequent sends and stops the black-frame loop without closing
+    /// the shared capture device used by the LVDS receivers.
+    /// </summary>
+    public bool AvtpFaultEnabled
+    {
+        get => _avtpFaultEnabled;
+        set
+        {
+            if (_avtpFaultEnabled == value)
+                return;
+
+            _avtpFaultEnabled = value;
+            if (value)
+            {
+                StopBlackLoop();
+                _log("[avtp-tx] Communication fault enabled: TX sending blocked");
+            }
+        }
+    }
 
     /// <summary>
     /// Initializes the transmitter on the specified device.
@@ -75,6 +98,9 @@ public sealed class AvtpTransmitManager(int width, int height, Action<string> lo
     /// </summary>
     public async Task<bool> SendFrameAsync(byte[] frameData, CancellationToken ct)
     {
+        if (_avtpFaultEnabled)
+            return false;
+
         if (_tx == null)
         {
             if (Interlocked.Exchange(ref _txNoDevOnce, 1) == 0)
@@ -156,7 +182,8 @@ public sealed class AvtpTransmitManager(int width, int height, Action<string> lo
             {
                 try
                 {
-                    await _tx.SendFrame320x80Async(_blackFrame, ct);
+                    if (!_avtpFaultEnabled)
+                        await _tx.SendFrame320x80Async(_blackFrame, ct);
                     await Task.Delay(period, ct);
                 }
                 catch (OperationCanceledException) { break; }

@@ -13,7 +13,7 @@ variables
   //   1) Gateway's own output() creates self-echo packets on the same bus.
   //   2) Another AVTP source (Avtp_new.can generator) also sends on Eth2.
   //   Either way, multiple interleaved sources corrupt rxAssembly — some
-  //   lines from source A, some from source B → visible tearing/glitches.
+  //   lines from source A, some from source B ? visible tearing/glitches.
   //
   // Fix: Gateway uses a DISTINCT source MAC (last byte 0x1A, not 0x19).
   //   RX handler ONLY accepts packets from C# app's MAC (0x19).
@@ -23,7 +23,7 @@ variables
 
   ethernetPacket myStream;
 
-  byte rxImg[25600];       // Stable frame for TX (timer reads from here)
+  byte rxImg[25600];       // Latest complete frame copied for TX
   byte rxReady[25600];     // Snapshot: written by RX, consumed by timer
   byte rxAssembly[25600];  // Frame being assembled across multiple RX packets
 
@@ -220,7 +220,7 @@ on ethernetPacket msgChannel2.*
   }
 }
 
-// --- 10ms timer: consume new frame if available, ALWAYS send ---
+// --- 10ms timer: transmit only a newly received frame ---
 on timer txTimer
 {
   int i;
@@ -237,12 +237,10 @@ on timer txTimer
   else
   {
     txStaleCount = txStaleCount + 1;
+    return;
   }
 
-  if (rxHaveFrame == 1)
-    gatewayBurstTx(1);
-  else
-    gatewayBurstTx(0);
+  gatewayBurstTx(1);
 }
 
 on key 'g'

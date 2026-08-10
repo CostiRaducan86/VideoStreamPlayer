@@ -28,6 +28,8 @@ variables
   int btnimg3 = 0;
   int btnimg4 = 0;
   int btnimg5 = 0;
+  int btnOsramTestPic = 0;
+  int btnNichiaTestPic = 0;
   int btnimgNichia1 = 0;
   int btnimgNichia2 = 0;
   int btnimgNichia3 = 0;
@@ -35,6 +37,8 @@ variables
   byte defaultImage[25600];
   byte gray20pic[25600];
   byte gray20picNichia[16384];
+  byte testPictureOsram[25600];
+  byte testPictureNichia[16384];
   byte BUFFER_NR = 20;
   int j;
   
@@ -43,6 +47,8 @@ variables
   int CHIP_TYPE = 0; //0 - OSRAM, 1-NICHIA
   int LIGHT_VAL = 0x64;
   int grayValue = 0;
+  int testPictureID = 0;
+  int singlePixelFlag = 0;
   byte Nichia1[16384] = {
   0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xfe, 0xfe, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xfe, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xfe, 0xff, 0xff, 0xff, 0xff, 0xfe, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xfe, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xff, 0xff, 0xff, 0xff, 0xfe, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xfe, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 
   0xff, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 
@@ -456,38 +462,55 @@ int AvtpNew_IsEnabled()
 
 on sysvar_change sysvar::Canoe_Automation::grayValueOsram
   {
-    if ((@PANELS::gray20 == 1)  && (@PANELS::ChangeLSMmode == 1) && (@PANELS::LsmDeviceType == 0)){
-     if (@Canoe_Automation::grayValueOsram == 0) {
-       $CHLC_Container_01_ST3_DLS_HDR_Tunnel_Information_ST3::DLS_HDR_LgtDist_Dest_ST3 = 0;
-     }
-     else {
-       $CHLC_Container_01_ST3_DLS_HDR_Tunnel_Information_ST3::DLS_HDR_LgtDist_Dest_ST3 = 1;
-     }
-    }
-    
-    grayValue = sysGetVariableInt(sysvar::Canoe_Automation::grayValueOsram);
-    for (i=0; i < 25600; i++)
-    {
-      gray20pic[i] = grayValue;  
-    }
-  }
+    if ((@PANELS::gray20 == 1) && (@PANELS::ChangeLSMmode == 1) && (@PANELS::LsmDeviceType == 0)){
+      if (@Canoe_Automation::grayValueOsram == 0) {
+        $CHLC_Container_01_ST3_DLS_HDR_Tunnel_Information_ST3::DLS_HDR_LgtDist_Dest_ST3 = 0;
+      }
+      else {
+        $CHLC_Container_01_ST3_DLS_HDR_Tunnel_Information_ST3::DLS_HDR_LgtDist_Dest_ST3 = 1;
+      }
+      grayValue = sysGetVariableInt(sysvar::Canoe_Automation::grayValueOsram);
+      for (i=0; i < 25600; i++) {
+        gray20pic[i] = grayValue;  
+      }
+   }
+   
+   if ((@PANELS::btnOsramTestPicture == 1) && (@PANELS::ChangeLSMmode == 1) && (@PANELS::LsmDeviceType == 0)){
+      if (@Canoe_Automation::grayValueOsram == 0) {
+        $CHLC_Container_01_ST3_DLS_HDR_Tunnel_Information_ST3::DLS_HDR_LgtDist_Dest_ST3 = 0;
+      }
+      else {
+        $CHLC_Container_01_ST3_DLS_HDR_Tunnel_Information_ST3::DLS_HDR_LgtDist_Dest_ST3 = 1;
+      }
+      prepareTestPicture();
+   }
+}
   
   
 on sysvar_change sysvar::Canoe_Automation::grayValueNichia
   {
     if ((@PANELS::gray20Nichia == 1) && (@PANELS::ChangeLSMmode == 1) && (@PANELS::LsmDeviceType == 1)){
-     if (@Canoe_Automation::grayValueNichia == 0){
-       $CHLC_Container_01_ST3_DLS_HDR_Tunnel_Information_ST3::DLS_HDR_LgtDist_Dest_ST3 = 0;
-     }
-     else {
-       $CHLC_Container_01_ST3_DLS_HDR_Tunnel_Information_ST3::DLS_HDR_LgtDist_Dest_ST3 = 1;
-     }
+      if (@Canoe_Automation::grayValueNichia == 0){
+        $CHLC_Container_01_ST3_DLS_HDR_Tunnel_Information_ST3::DLS_HDR_LgtDist_Dest_ST3 = 0;
+      }
+      else {
+        $CHLC_Container_01_ST3_DLS_HDR_Tunnel_Information_ST3::DLS_HDR_LgtDist_Dest_ST3 = 1;
+      }
+      grayValue = sysGetVariableInt(sysvar::Canoe_Automation::grayValueNichia);
+      for (i=0; i < 16384; i++){
+        gray20picNichia[i] = grayValue;  
+      }
     }
-   grayValue = sysGetVariableInt(sysvar::Canoe_Automation::grayValueNichia);
-   for (i=0; i < 16384; i++)
-   {
-     gray20picNichia[i] = grayValue;  
-   }
+    
+    if ((@PANELS::btnNichiaTestPicture == 1) && (@PANELS::ChangeLSMmode == 1) && (@PANELS::LsmDeviceType == 1)){
+      if (@Canoe_Automation::grayValueNichia == 0){
+        $CHLC_Container_01_ST3_DLS_HDR_Tunnel_Information_ST3::DLS_HDR_LgtDist_Dest_ST3 = 0;
+      }
+      else {
+        $CHLC_Container_01_ST3_DLS_HDR_Tunnel_Information_ST3::DLS_HDR_LgtDist_Dest_ST3 = 1;
+      }
+      prepareTestPicture();
+    }
 }
   
 on start
@@ -497,6 +520,8 @@ on start
   @PANELS::Image1 = 0;
   @PANELS::Image2 = 0;
   @PANELS::Image3 = 0;
+  @PANELS::btnNichiaTestPicture = 0;
+  @PANELS::btnOsramTestPicture = 0;
   @PANELS::OsramTest = 0;
   @PANELS::gray20 = 0;
   @PANELS::gray20Nichia = 0;
@@ -504,9 +529,14 @@ on start
   @PANELS::ImageNichia2 = 0;
   @PANELS::ChangeLSMmode = 0;
   @PANELS::StartSteaming = 0;
-  @Canoe_Automation::grayValueOsram = 20;
-  @Canoe_Automation::grayValueNichia = 20;
-  
+  @PANELS::LsmDeviceType = 0;
+  @PANELS::singlePixelOsram = 0;
+  @PANELS::singlePixelNichia = 0;
+  @Canoe_Automation::testPictureIdOsram = 0;
+  @Canoe_Automation::testPictureIdNichia = 0;
+  @Canoe_Automation::grayValueOsram = 100;
+  @Canoe_Automation::grayValueNichia = 100;
+
   //setTimer(temptime,500);
   setTimerCyclic(myTimer,0,10);
   myStream.source = EthGetMacAddressAsNumber( "3C:CE:15:00:00:19" );
@@ -551,6 +581,7 @@ on start
   myStream.byte(21) = 0x08;
   
 }
+
 on key 't'
       {
        diagSendRequest(PresentDiag);
@@ -635,7 +666,7 @@ on timer myTimer
     if(CHIP_TYPE == 0)
     {
       // no btn pressed and only btn pressed is changeLSM set default image
-      if(btnimg1 == 0 && btnimg2 == 0 && btnimg3 == 0 && btnimg4 == 0 && btnimg5 == 0)
+      if(btnimg1 == 0 && btnimg2 == 0 && btnimg3 == 0 && btnimg4 == 0 && btnimg5 == 0 && btnOsramTestPic == 0)
       {
         for (j = 0; j < 25600; j++)
         {
@@ -680,14 +711,28 @@ on timer myTimer
           defaultImage[j] = Osramtestpic[j];
         }
       }
-     }
-    else 
-    {
-      if(btnimgNichia1 == 0 && btnimgNichia2 == 0 && btnimgNichia3 == 0)
+      else if(btnOsramTestPic == 1)
       {
         for (j = 0; j < 25600; j++)
         {
-          defaultImage[j] = 0x33;
+          defaultImage[j] = testPictureOsram[j];
+        }
+      }
+     }
+    else 
+    {
+      if(btnimgNichia1 == 0 && btnimgNichia2 == 0 && btnimgNichia3 == 0 && btnNichiaTestPic == 0)
+      {
+        for (j = 0; j < 25600; j++)
+        {
+          if(j < 16384)
+          {
+            defaultImage[j] = 0x33;
+          }
+          else
+          {
+            defaultImage[j] = 0x00;
+          }
         }
       }
       else if(btnimgNichia1 == 1)
@@ -733,7 +778,20 @@ on timer myTimer
           }
         }
       }
-      
+      else if(btnNichiaTestPic == 1)
+      {
+        for (j = 0; j < 25600; j++)
+        {
+          if(j < 16384)
+          {
+            defaultImage[j] = testPictureNichia[j];
+          }
+          else
+          {
+            defaultImage[j] = 0x00;
+          }
+        }
+      }
     }
  /*   else
     {
@@ -832,8 +890,7 @@ on timer myTimer
     myStream.byte(32+i) = streamData;
     }
     //streamData++;
-  }
-
+    }
   }
   output(myStream);
   pack_nr++;
@@ -860,7 +917,11 @@ on sysvar_change sysvar::PANELS::StartSteaming
     btnimgNichia1 = 0;
     btnimgNichia2 = 0;
     btnimgNichia3 = 0;
+    btnOsramTestPic = 0;
+    btnNichiaTestPic = 0;
     displayoff = 1;
+    @PANELS::btnNichiaTestPicture = 0;
+    @PANELS::btnOsramTestPicture = 0;
     @PANELS::Image1 = 0;
     @PANELS::Image2 = 0;
     @PANELS::Image3 = 0;
@@ -882,7 +943,6 @@ on sysvar_change sysvar::PANELS::StartSteaming
     }
       //setTimer(myTimer, 0);
   }
-
 }
 
 on sysvar_change sysvar::PANELS::ChangeLSMmode
@@ -895,7 +955,7 @@ on sysvar_change sysvar::PANELS::ChangeLSMmode
     headerCounter = 1;
     counter = 1;
     framesentcnt = 0;
-    if (((@PANELS::gray20 == 1) && (@Canoe_Automation::grayValueOsram == 0)) || ((@PANELS::gray20Nichia == 1) && (@Canoe_Automation::grayValueNichia == 0)))
+    if ((((@PANELS::gray20 == 1) || (@PANELS::btnOsramTestPicture == 1)) && (@Canoe_Automation::grayValueOsram == 0)) || (((@PANELS::gray20Nichia == 1) || (@PANELS::btnNichiaTestPicture == 1)) && (@Canoe_Automation::grayValueNichia == 0)))
     {
       if (@PANELS::hdrAutoMode == 1){
       $CHLC_Container_01_ST3_DLS_HDR_Tunnel_Information_ST3::DLS_HDR_LgtDist_Dest_ST3 = 0;
@@ -919,7 +979,6 @@ on sysvar_change sysvar::PANELS::ChangeLSMmode
       }
     }
   }
-
 }
 
 on sysvar_change sysvar::PANELS::Image1
@@ -933,7 +992,11 @@ on sysvar_change sysvar::PANELS::Image1
     btnimgNichia1 = 0;
     btnimgNichia2 = 0;
     btnimgNichia3 = 0;
+    btnOsramTestPic = 0;
+    btnNichiaTestPic = 0;
     btnimg1 = 1;
+    @PANELS::btnNichiaTestPicture = 0;
+    @PANELS::btnOsramTestPicture = 0;
     @PANELS::Image2 = 0;
     @PANELS::Image3 = 0;
     @PANELS::gray20 = 0;
@@ -946,7 +1009,6 @@ on sysvar_change sysvar::PANELS::Image1
   {
     btnimg1=0;
   }
-
 }
 
 on sysvar_change sysvar::PANELS::Image2
@@ -960,7 +1022,11 @@ on sysvar_change sysvar::PANELS::Image2
     btnimgNichia1 = 0;
     btnimgNichia2 = 0;
     btnimgNichia3 = 0;
+    btnOsramTestPic = 0;
+    btnNichiaTestPic = 0;
     btnimg2 = 1;
+    @PANELS::btnNichiaTestPicture = 0;
+    @PANELS::btnOsramTestPicture = 0;
     @PANELS::Image1 = 0;
     @PANELS::Image3 = 0;
     @PANELS::gray20 = 0;
@@ -973,8 +1039,8 @@ on sysvar_change sysvar::PANELS::Image2
   {
     btnimg2=0;
   }
-
 }
+
 on sysvar_change sysvar::PANELS::Image3
 {
   if ((@PANELS::Image3 == 1) && (@PANELS::LsmDeviceType == 0)) {
@@ -986,7 +1052,11 @@ on sysvar_change sysvar::PANELS::Image3
     btnimgNichia1 = 0;
     btnimgNichia2 = 0;
     btnimgNichia3 = 0;
+    btnOsramTestPic = 0;
+    btnNichiaTestPic = 0;
     btnimg3 = 1;
+    @PANELS::btnNichiaTestPicture = 0;
+    @PANELS::btnOsramTestPicture = 0;
     @PANELS::Image1 = 0;
     @PANELS::Image2 = 0;
     @PANELS::gray20 = 0;
@@ -999,22 +1069,21 @@ on sysvar_change sysvar::PANELS::Image3
   {
     btnimg3=0;
   }
-
 }
+
 on sysvar_change sysvar::PANELS::gray20
-{
-    if ((@PANELS::gray20 == 1)  && (@PANELS::ChangeLSMmode == 1) && (@PANELS::LsmDeviceType == 0)){
-     if (@Canoe_Automation::grayValueOsram == 0) {
-       if (@PANELS::hdrAutoMode == 1){
-       $CHLC_Container_01_ST3_DLS_HDR_Tunnel_Information_ST3::DLS_HDR_LgtDist_Dest_ST3 = 0;
-       }
-     }
-     else {
-       if (@PANELS::hdrAutoMode == 1){
-       $CHLC_Container_01_ST3_DLS_HDR_Tunnel_Information_ST3::DLS_HDR_LgtDist_Dest_ST3 = 1;
-       }
-     }
-    
+{  
+    if ((@PANELS::gray20 == 1) && (@PANELS::ChangeLSMmode == 1) && (@PANELS::LsmDeviceType == 0)){
+      if (@Canoe_Automation::grayValueOsram == 0) {
+        $CHLC_Container_01_ST3_DLS_HDR_Tunnel_Information_ST3::DLS_HDR_LgtDist_Dest_ST3 = 0;
+      }
+      else {
+        $CHLC_Container_01_ST3_DLS_HDR_Tunnel_Information_ST3::DLS_HDR_LgtDist_Dest_ST3 = 1;
+      }
+      grayValue = sysGetVariableInt(sysvar::Canoe_Automation::grayValueOsram);
+      for (i=0; i < 25600; i++) {
+        gray20pic[i] = grayValue;  
+      }  
     btnimg1 = 0;
     btnimg2 = 0;
     btnimg3 = 0;
@@ -1022,7 +1091,11 @@ on sysvar_change sysvar::PANELS::gray20
     btnimgNichia1 = 0;
     btnimgNichia2 = 0;
     btnimgNichia3 = 0;
+    btnOsramTestPic = 0;
+    btnNichiaTestPic = 0;
     btnimg4 = 1;
+    @PANELS::btnNichiaTestPicture = 0;
+    @PANELS::btnOsramTestPicture = 0;
     @PANELS::Image1 = 0;
     @PANELS::Image2 = 0;
     @PANELS::Image3 = 0;
@@ -1045,7 +1118,6 @@ on sysvar_change sysvar::PANELS::gray20
       }
     }
   }
-
 }
 
 
@@ -1060,7 +1132,11 @@ on sysvar_change sysvar::PANELS::OsramTest
     btnimgNichia1 = 0;
     btnimgNichia2 = 0;
     btnimgNichia3 = 0;
+    btnOsramTestPic = 0;
+    btnNichiaTestPic = 0;
     btnimg5 = 1;
+    @PANELS::btnNichiaTestPicture = 0;
+    @PANELS::btnOsramTestPicture = 0;
     @PANELS::Image1 = 0;
     @PANELS::Image2 = 0;
     @PANELS::Image3 = 0;
@@ -1073,8 +1149,8 @@ on sysvar_change sysvar::PANELS::OsramTest
   {
     btnimg5=0;
   }
-
 }
+
 on sysvar_change sysvar::PANELS::ImageNichia1
 {
   if ((@PANELS::ImageNichia1 == 1) && (@PANELS::LsmDeviceType == 1)) {
@@ -1086,7 +1162,11 @@ on sysvar_change sysvar::PANELS::ImageNichia1
     btnimg5 = 0;
     btnimgNichia2 = 0;
     btnimgNichia3 = 0;
+    btnOsramTestPic = 0;
+    btnNichiaTestPic = 0;
     btnimgNichia1 = 1;
+    @PANELS::btnNichiaTestPicture = 0;
+    @PANELS::btnOsramTestPicture = 0;
     @PANELS::Image1 = 0;
     @PANELS::Image2 = 0;
     @PANELS::Image3 = 0;
@@ -1100,7 +1180,6 @@ on sysvar_change sysvar::PANELS::ImageNichia1
   {
     btnimgNichia1 = 0;
   }
-
 }
 
 on sysvar_change sysvar::PANELS::ImageNichia2
@@ -1114,7 +1193,11 @@ on sysvar_change sysvar::PANELS::ImageNichia2
     btnimg5 = 0;
     btnimgNichia1 = 0;
     btnimgNichia3 = 0;
+    btnOsramTestPic = 0;
+    btnNichiaTestPic = 0;
     btnimgNichia2 = 1;
+    @PANELS::btnNichiaTestPicture = 0;
+    @PANELS::btnOsramTestPicture = 0;
     @PANELS::Image1 = 0;
     @PANELS::Image2 = 0;
     @PANELS::Image3 = 0;
@@ -1127,23 +1210,21 @@ on sysvar_change sysvar::PANELS::ImageNichia2
   {
     btnimgNichia2 = 0;
   }
-
 }
 
 on sysvar_change sysvar::PANELS::gray20Nichia
 {
-  if ((@PANELS::gray20Nichia == 1) && (@PANELS::ChangeLSMmode == 1) && (@PANELS::LsmDeviceType == 1)){
-    if (@Canoe_Automation::grayValueNichia == 0){
-      if (@PANELS::hdrAutoMode == 1){
-       $CHLC_Container_01_ST3_DLS_HDR_Tunnel_Information_ST3::DLS_HDR_LgtDist_Dest_ST3 = 0;
+    if ((@PANELS::gray20Nichia == 1) && (@PANELS::ChangeLSMmode == 1) && (@PANELS::LsmDeviceType == 1)){
+      if (@Canoe_Automation::grayValueNichia == 0){
+        $CHLC_Container_01_ST3_DLS_HDR_Tunnel_Information_ST3::DLS_HDR_LgtDist_Dest_ST3 = 0;
       }
-     }
-     else {
-       if (@PANELS::hdrAutoMode == 1){
-       $CHLC_Container_01_ST3_DLS_HDR_Tunnel_Information_ST3::DLS_HDR_LgtDist_Dest_ST3 = 1;
-       }
-     }
-    
+      else {
+        $CHLC_Container_01_ST3_DLS_HDR_Tunnel_Information_ST3::DLS_HDR_LgtDist_Dest_ST3 = 1;
+      }
+      grayValue = sysGetVariableInt(sysvar::Canoe_Automation::grayValueNichia);
+      for (i=0; i < 16384; i++){
+        gray20picNichia[i] = grayValue;  
+    }
     btnimg1 = 0;
     btnimg2 = 0;
     btnimg3 = 0;
@@ -1151,7 +1232,11 @@ on sysvar_change sysvar::PANELS::gray20Nichia
     btnimg5 = 0;
     btnimgNichia1 = 0;
     btnimgNichia2 = 0;
+    btnOsramTestPic = 0;
+    btnNichiaTestPic = 0;
     btnimgNichia3 = 1;
+    @PANELS::btnNichiaTestPicture = 0;
+    @PANELS::btnOsramTestPicture = 0;
     @PANELS::Image1 = 0;
     @PANELS::Image2 = 0;
     @PANELS::Image3 = 0;
@@ -1174,7 +1259,6 @@ on sysvar_change sysvar::PANELS::gray20Nichia
       }
     }
   }
-
 }
 
 on sysvar_change sysvar::PANELS::BtnAvtpStreamIdSelect
@@ -1187,7 +1271,6 @@ on sysvar_change sysvar::PANELS::BtnAvtpStreamIdSelect
   {
     btnAvtpStreamID = 0;
   }
-
 }
 
 on sysvar_change sysvar::PANELS::LsmDeviceType
@@ -1204,5 +1287,291 @@ on sysvar_change sysvar::PANELS::LsmDeviceType
     ROW_NO = 80;
     COL_NO = 320;
   }
+}
 
+on sysvar_change sysvar::PANELS::btnOsramTestPicture
+{
+    if ((@PANELS::btnOsramTestPicture == 1)  && (@PANELS::ChangeLSMmode == 1) && (@PANELS::LsmDeviceType == 0)){
+     if (@Canoe_Automation::grayValueOsram == 0) {
+       if (@PANELS::hdrAutoMode == 1){
+       $CHLC_Container_01_ST3_DLS_HDR_Tunnel_Information_ST3::DLS_HDR_LgtDist_Dest_ST3 = 0;
+       }
+     }
+     else {
+       if (@PANELS::hdrAutoMode == 1){
+       $CHLC_Container_01_ST3_DLS_HDR_Tunnel_Information_ST3::DLS_HDR_LgtDist_Dest_ST3 = 1;
+       }
+     }
+     
+    prepareTestPicture();
+     
+    btnimg1 = 0;
+    btnimg2 = 0;
+    btnimg3 = 0;
+    btnimg4 = 0;
+    btnimg5 = 0; 
+    btnimgNichia1 = 0;
+    btnimgNichia2 = 0;
+    btnimgNichia3 = 0;   
+    btnNichiaTestPic = 0;
+    btnOsramTestPic = 1;
+    @PANELS::btnNichiaTestPicture = 0;
+    @PANELS::Image1 = 0;
+    @PANELS::Image2 = 0;
+    @PANELS::Image3 = 0;
+    @PANELS::gray20 = 0;
+    @PANELS::OsramTest = 0;
+    @PANELS::ImageNichia1 = 0;
+    @PANELS::ImageNichia2 = 0;
+    @PANELS::gray20Nichia = 0;
+  } 
+  else 
+  {
+    btnOsramTestPic=0;
+    if ((@PANELS::ChangeLSMmode == 0) && (@PANELS::StartSteaming == 0)){
+      if (@PANELS::hdrAutoMode == 1){
+      $CHLC_Container_01_ST3_DLS_HDR_Tunnel_Information_ST3::DLS_HDR_LgtDist_Dest_ST3 = 0;
+      }
+    }
+    else{
+      if (@PANELS::hdrAutoMode == 1){
+    $CHLC_Container_01_ST3_DLS_HDR_Tunnel_Information_ST3::DLS_HDR_LgtDist_Dest_ST3 = 1;
+      }
+    }
+  }
+}
+
+
+
+on sysvar_change sysvar::PANELS::btnNichiaTestPicture
+{
+  if ((@PANELS::btnNichiaTestPicture == 1) && (@PANELS::ChangeLSMmode == 1) && (@PANELS::LsmDeviceType == 1)){
+    if (@Canoe_Automation::grayValueNichia == 0){
+      if (@PANELS::hdrAutoMode == 1){
+       $CHLC_Container_01_ST3_DLS_HDR_Tunnel_Information_ST3::DLS_HDR_LgtDist_Dest_ST3 = 0;
+      }
+     }
+     else {
+       if (@PANELS::hdrAutoMode == 1){
+       $CHLC_Container_01_ST3_DLS_HDR_Tunnel_Information_ST3::DLS_HDR_LgtDist_Dest_ST3 = 1;
+       }
+     }
+     
+    prepareTestPicture();  
+     
+    btnimg1 = 0;
+    btnimg2 = 0;
+    btnimg3 = 0;
+    btnimg4 = 0;
+    btnimg5 = 0;
+    btnimgNichia1 = 0;
+    btnimgNichia2 = 0;
+    btnimgNichia3 = 0;
+    btnOsramTestPic = 0;
+    btnNichiaTestPic = 1;
+    @PANELS::btnOsramTestPicture = 0;
+    @PANELS::Image1 = 0;
+    @PANELS::Image2 = 0;
+    @PANELS::Image3 = 0;
+    @PANELS::OsramTest = 0;
+    @PANELS::gray20 = 0;
+    @PANELS::ImageNichia1 = 0;
+    @PANELS::ImageNichia2 = 0;
+     @PANELS::gray20Nichia = 0;
+  } 
+  else 
+  {
+    btnNichiaTestPic = 0;
+    if ((@PANELS::ChangeLSMmode == 0) && (@PANELS::StartSteaming == 0)){
+      if (@PANELS::hdrAutoMode == 1){
+      $CHLC_Container_01_ST3_DLS_HDR_Tunnel_Information_ST3::DLS_HDR_LgtDist_Dest_ST3 = 0;
+      }
+    }
+    else{
+      if (@PANELS::hdrAutoMode == 1){
+      $CHLC_Container_01_ST3_DLS_HDR_Tunnel_Information_ST3::DLS_HDR_LgtDist_Dest_ST3 = 1;
+      }
+    }
+  }
+}
+
+on sysvar_change sysvar::Canoe_Automation::testPictureIdOsram
+  {
+    if (@PANELS::btnOsramTestPicture == 1) { 
+      prepareTestPicture();  
+    }
+  }
+  
+  
+on sysvar_change sysvar::Canoe_Automation::testPictureIdNichia
+  {
+    if (@PANELS::btnNichiaTestPicture == 1) { 
+      prepareTestPicture();  
+    } 
+}
+
+on sysvar_change sysvar::PANELS::singlePixelOsram
+  {
+    if (@PANELS::btnOsramTestPicture == 1) { 
+      prepareTestPicture();  
+    }
+  }
+  
+on sysvar_change sysvar::PANELS::singlePixelNichia
+  {
+    if (@PANELS::btnNichiaTestPicture == 1) { 
+      prepareTestPicture();  
+    } 
+}
+
+void prepareTestPicture()
+{
+  byte matrixOsram[80][320];
+  byte matrixNichia[64][256];
+  byte smallMatrix[4][4];
+  int row = 0;
+  int col = 0;
+  int pixel_row = 0;
+  int pixel_col = 0;
+  int index = 0;
+  int i = 0;
+  int j = 0;
+  int x = 0;
+  int y = 0;
+
+  //define matrix size, pixel iluminance and pixel ID based on LsmDeviceType
+  if (@PANELS::LsmDeviceType == 0) {
+    row = 80;
+    col = 320;
+    grayValue = sysGetVariableInt(sysvar::Canoe_Automation::grayValueOsram);
+    testPictureID = sysGetVariableInt(sysvar::Canoe_Automation::testPictureIdOsram);
+    singlePixelFlag = sysGetVariableInt(sysvar::PANELS::singlePixelOsram);
+  }
+  else {
+    row = 64;
+    col = 256; 
+    grayValue = sysGetVariableInt(sysvar::Canoe_Automation::grayValueNichia);
+    testPictureID = sysGetVariableInt(sysvar::Canoe_Automation::testPictureIdNichia);
+    singlePixelFlag = sysGetVariableInt(sysvar::PANELS::singlePixelNichia);
+  } 
+  
+  // Initialize the big matrix with zeros
+  for (i = 0; i < row; i++) {
+    for (j = 0; j < col; j++) {
+      if (@PANELS::LsmDeviceType == 0) {
+        matrixOsram[i][j] = 0;
+        testPictureOsram[index] = 0;
+      }
+      else {
+        matrixNichia[i][j] = 0; 
+        testPictureNichia[index] = 0;
+      }  
+      index++;
+    }
+  }
+  
+  index = 0;
+
+  if ((testPictureID >= 1) && (testPictureID <= 16) && singlePixelFlag == 0) {
+    // Split the big matrix into 16x16 small matrices and activate one pixel based on ID
+    for (x = 0; x < row; x += 4) {
+      for (y = 0; y < col; y += 4) {
+        // Clear the small matrix
+        for (i = 0; i < 4; i++) {
+          for (j = 0; j < 4; j++) {
+            smallMatrix[i][j] = 0;
+          }
+        }
+        // Activate one pixel based on ID and iluminance
+        pixel_row = (testPictureID - 1) / 4;
+        pixel_col = (testPictureID - 1) % 4;
+        smallMatrix[pixel_row][pixel_col] = grayValue;
+
+        // Copy the small matrix back to the big matrix
+        for (i = 0; i < 4; i++) {
+          for (j = 0; j < 4; j++) {
+            if (@PANELS::LsmDeviceType == 0) {
+              matrixOsram[x + i][y + j] = smallMatrix[i][j];
+            }
+            else {
+              matrixNichia[x + i][y + j] = smallMatrix[i][j];
+            }                
+          }
+        }
+      }
+    }
+    // Expand the big matrix into a one-dimensional array
+    for (i = 0; i < row; i++) {
+      for (j = 0; j < col; j++) {
+        if (@PANELS::LsmDeviceType == 0) {
+          testPictureOsram[index] = matrixOsram[i][j];
+        }
+        else {
+          testPictureNichia[index] = matrixNichia[i][j];
+        }
+        index++; 
+      }
+    }   
+  }
+  else if (singlePixelFlag == 1) {
+    if (@PANELS::LsmDeviceType == 0) {
+      if (testPictureID >= 12800) {
+        // Activate the first 320 pixels to ensure the minimum current consumption
+        for (i = 0; i < 320; i++) {
+          testPictureOsram[i] = 200;
+        }
+        // Activate only one pixel based on ID and iluminance
+        for (i = 320; i < 25600; i++) {
+          if (i == testPictureID) {
+            testPictureOsram[i] = 200;
+          }
+          else {
+            testPictureOsram[i] = 0;
+          }
+        }
+      }
+      else {
+        // Activate the last 320 pixels to ensure the minimum current consumption
+        for (i = 25280; i < 25600; i++) {
+          testPictureOsram[i] = 200;
+        }
+        // Activate only one pixel based on ID and iluminance
+        for (i = 0; i < 25280; i++) {
+          if (i == testPictureID) {
+            testPictureOsram[i] = 200;
+          }
+          else {
+            testPictureOsram[i] = 0;
+          }
+        }
+      }
+    }
+    else {
+      for (i = 0; i < 16384; i++) {
+        if (i == testPictureID) {
+          testPictureNichia[i] = grayValue;
+        }
+        else {
+          testPictureNichia[i] = 0;
+        }
+      }
+    }
+  }
+  else {
+    // Initialize the big matrix with zeros
+    for (i = 0; i < row; i++) {
+      for (j = 0; j < col; j++) {
+        if (@PANELS::LsmDeviceType == 0) {
+          matrixOsram[i][j] = 0;
+          testPictureOsram[index] = 0;
+        }
+        else {
+          matrixNichia[i][j] = 0; 
+          testPictureNichia[index] = 0;
+        }  
+        index++;
+      }
+    }
+  }
+  index = 0; 
 }

@@ -163,6 +163,8 @@ namespace VilsSharpX
         private readonly LsmCanDiagStore _canDiagStore = new(32768);
         private OsramDefectStore? _osramDefectStore;
         private OsramDefectControlWindow? _osramDefectControlWindow;
+        private CommunicationFaultControlWindow? _communicationFaultControlWindow;
+        private readonly CommunicationFaultState _communicationFaultState = new();
         private NichiaDefectStore? _nichiaDefectStore;
         private NichiaDefectControlWindow? _nichiaDefectControlWindow;
         private readonly ObservableCollection<CanDiagRowView> _canDiagRows = [];
@@ -407,6 +409,7 @@ namespace VilsSharpX
             _snapshotSaver = new FrameSnapshotSaver(w, h);
             _settingsManager = new UiSettingsManager(w, h);
             _txManager = new AvtpTransmitManager(w, h, AppendDiagLog);
+            ApplyCommunicationFaultState();
         }
 
         /// <summary>
@@ -1187,6 +1190,8 @@ namespace VilsSharpX
 
             UpdateLiveUiEnabledState();
 
+            UpdateCommunicationFaultAvailability();
+
             // Mode switch is a big behavior change; reset run state and AVTP buffers.
             StopAll();
             _liveCapture.Reassembler.ResetAll();
@@ -1480,9 +1485,11 @@ namespace VilsSharpX
             // While paused or stopped, keep the frozen frame — don't update pane C.
             if (_playback.IsPaused || _playback.Cts == null) return;
 
-            // If LVDS signal is lost (ECU off), any camera frame is a spurious trigger
-            // from noise on the trigger line — discard it.
-            if (_lvdsSignalLost) return;
+            // In normal operation, discard camera frames after LVDS timeout because
+            // they may be spurious trigger-line noise. During AVTP fault injection,
+            // the camera view is intentionally kept alive so the remaining LSM light
+            // output can be observed even after the last LVDS Ethernet frame arrived.
+            if (_lvdsSignalLost && !_communicationFaultState.AvtpFaultEnabled) return;
 
             _lastBaslerFrameUtc = DateTime.UtcNow;
             _baslerSignalLost = false;
@@ -2958,6 +2965,7 @@ namespace VilsSharpX
             try { _canDiagWatchdogTimer?.Stop(); } catch { /* ignore */ }
             try { _osramDefectControlWindow?.Close(); } catch { /* ignore */ }
             try { _nichiaDefectControlWindow?.Close(); } catch { /* ignore */ }
+            try { _communicationFaultControlWindow?.Close(); } catch { /* ignore */ }
             try { StopCanDiagCapture(); } catch { /* ignore */ }
             try { StopNichiaEthCapture(); } catch { /* ignore */ }
             try { StopOsramEthCapture(); } catch { /* ignore */ }
@@ -3458,7 +3466,8 @@ namespace VilsSharpX
             // -------------------------------------------------
             // TX init (ONLY in Generator/Player mode)
             // -------------------------------------------------
-            if (_modeOfOperation == ModeOfOperation.PlayerFromFiles)
+            if (_modeOfOperation == ModeOfOperation.PlayerFromFiles
+                && !_communicationFaultState.AvtpFaultEnabled)
             {
                 ushort ethType = ParseHexUshort(_avtpEtherType, 0x22F0);
                 byte stIdByte = ParseHexByte(_streamIdLastByte, 0x50);
@@ -3475,7 +3484,9 @@ namespace VilsSharpX
                 _ = Task.Run(() => GeneratorLoopAsync(fps, ct));
                 _ = Task.Run(() => UiRefreshLoop(ct));
 
-                LblStatus.Text = StatusFormatter.FormatPlayerRunning(fps, avtpEnabled: true);
+                LblStatus.Text = _communicationFaultState.AvtpFaultEnabled
+                    ? "AVTP Fault Injection: Signal not available."
+                    : StatusFormatter.FormatPlayerRunning(fps, avtpEnabled: true);
                 _playback.RunningStatusText = LblStatus.Text;
             }
             else
@@ -3519,6 +3530,8 @@ namespace VilsSharpX
             }
 
             // Pane B real LVDS over Ethernet (SmartVisio Box GETH), managed by Start/Stop.
+            // Keep this receiver active during an AVTP fault so the UI can observe
+            // the ECU's delayed LVDS shutdown naturally.
             if (_currentDeviceType == LsmDeviceType.Nichia)
             {
                 StartNichiaEthCapture();
@@ -3538,6 +3551,15 @@ namespace VilsSharpX
             StartBaslerCapture();
             _lastBaslerFrameUtc = DateTime.UtcNow;
             _baslerSignalLost = false;
+
+            if (_communicationFaultState.AvtpFaultEnabled)
+            {
+                lock (_frameLock)
+                {
+                    _latestC = null;
+                }
+                if (NoSignalC != null) NoSignalC.Visibility = Visibility.Visible;
+            }
 
 
         }
@@ -4064,7 +4086,8 @@ namespace VilsSharpX
             // LVDS Ethernet: if ECU powers off, LVDS frames stop arriving.
             // Detect timeout and reset pane B + D to "Signal not available".
             if (_playback.IsRunning
-                && _modeOfOperation == ModeOfOperation.AvtpLiveMonitor
+                && (_modeOfOperation == ModeOfOperation.AvtpLiveMonitor
+                    || _communicationFaultState.AvtpFaultEnabled)
                 && !_playback.IsPaused
                 && !_lvdsSignalLost
                 && _lastLvdsFrameUtc != DateTime.MinValue
@@ -4166,7 +4189,8 @@ namespace VilsSharpX
             // so the comparison reflects actual ECU processing differences, not animation timing.
             byte[] diffARef = (hasRealEthB && matchedA != null) ? matchedA.Data : a.Data;
 
-            BitmapUtils.Blit(_wbA, a.Data, a.Stride);
+            if (!_communicationFaultState.AvtpFaultEnabled)
+                BitmapUtils.Blit(_wbA, a.Data, a.Stride);
             BitmapUtils.Blit(_wbB, b.Data, b.Stride);
 
             // Select comparison operands based on _comparisonMode:
@@ -4228,7 +4252,17 @@ namespace VilsSharpX
             // Per-pane no-signal visibility.
             // When AVTP is lost: show "Signal not available" on A, B, D (comparison meaningless without reference).
             // When LVDS is lost: show "Signal not available" on B, D (no ECU output to compare).
-            if (_modeOfOperation == ModeOfOperation.AvtpLiveMonitor && !_liveCapture.HasAvtpFrame)
+            if (_communicationFaultState.AvtpFaultEnabled)
+            {
+                if (NoSignalA != null) NoSignalA.Visibility = Visibility.Visible;
+                if (NoSignalB != null)
+                    NoSignalB.Visibility = _lvdsSignalLost ? Visibility.Visible : Visibility.Collapsed;
+                if (NoSignalD != null)
+                    NoSignalD.Visibility = _lvdsSignalLost || _comparisonMode != 1
+                        ? Visibility.Visible
+                        : Visibility.Collapsed;
+            }
+            else if (_modeOfOperation == ModeOfOperation.AvtpLiveMonitor && !_liveCapture.HasAvtpFrame)
             {
                 if (NoSignalA != null) NoSignalA.Visibility = Visibility.Visible;
                 if (NoSignalB != null) NoSignalB.Visibility = Visibility.Visible;
@@ -4277,6 +4311,7 @@ namespace VilsSharpX
             }
 
             bool noSignal = ShouldShowNoSignalWhileRunning();
+            bool avtpNoSignal = noSignal || _communicationFaultState.AvtpFaultEnabled;
             bool isRunning = _playback.Cts != null;
             bool isPaused = _playback.IsPaused;
 
@@ -4285,9 +4320,16 @@ namespace VilsSharpX
             {
                 if (allowUiRefreshA || !isRunning || isPaused)
                 {
-                    double shownFps = noSignal ? 0.0 : GetShownFps(_playback.AvtpInFpsEma);
-                    bool isAviZero = _lastLoaded == LoadedSource.Avi && shownFps <= 0.0;
-                    LblRunInfoA.Text = StatusFormatter.FormatRunInfoA(isRunning, isPaused, shownFps, isAviZero);
+                    if (avtpNoSignal)
+                    {
+                        LblRunInfoA.Text = "";
+                    }
+                    else
+                    {
+                        double shownFps = GetShownFps(_playback.AvtpInFpsEma);
+                        bool isAviZero = _lastLoaded == LoadedSource.Avi && shownFps <= 0.0;
+                        LblRunInfoA.Text = StatusFormatter.FormatRunInfoA(isRunning, isPaused, shownFps, isAviZero);
+                    }
                 }
             }
 
@@ -4963,6 +5005,133 @@ namespace VilsSharpX
 
             _nichiaDefectControlWindow.Show();
             _nichiaDefectControlWindow.Activate();
+        }
+
+        private void MenuCommunicationFaultControl_Click(object sender, RoutedEventArgs e)
+        {
+            if (_communicationFaultControlWindow is { IsVisible: true })
+            {
+                _communicationFaultControlWindow.Activate();
+                return;
+            }
+
+            _communicationFaultControlWindow ??= new CommunicationFaultControlWindow(_communicationFaultState)
+            {
+                Owner = this
+            };
+            _communicationFaultControlWindow.FaultStateChanged -= ApplyCommunicationFaultState;
+            _communicationFaultControlWindow.FaultStateChanged += ApplyCommunicationFaultState;
+            UpdateCommunicationFaultAvailability();
+            _communicationFaultControlWindow.Closed += (_, _) => _communicationFaultControlWindow = null;
+            _communicationFaultControlWindow.Show();
+            _communicationFaultControlWindow.Activate();
+        }
+
+        private void ApplyCommunicationFaultState()
+        {
+            var txManager = _txManager;
+            if (txManager != null)
+                txManager.AvtpFaultEnabled = _communicationFaultState.AvtpFaultEnabled;
+
+            if (_communicationFaultState.AvtpFaultEnabled)
+            {
+                RenderAll();
+                if (_playback.Cts != null)
+                {
+                    LblStatus.Text = "AVTP Fault Injection: Signal not available.";
+                    _playback.RunningStatusText = LblStatus.Text;
+                }
+            }
+            else if (_playback.Cts != null)
+            {
+                if (_modeOfOperation == ModeOfOperation.PlayerFromFiles
+                    && txManager != null && !txManager.IsReady)
+                {
+                    ushort ethType = ParseHexUshort(_avtpEtherType, 0x22F0);
+                    byte stIdByte = ParseHexByte(_streamIdLastByte, 0x50);
+                    string? deviceHint = LiveNicSelector.GetSelectedDeviceName(CmbLiveNic) ?? _avtpLiveDeviceHint;
+                    txManager.Initialize(deviceHint, _srcMac, _dstMac,
+                        _vlanId, _vlanPriority, ethType, stIdByte);
+                }
+
+                // Fault recovery must clear the same signal-loss latches that
+                // Stop -> Start clears, without stopping the playback loop.
+                lock (_frameLock)
+                {
+                    _latestB = null;
+                    _matchedAForDiff = null;
+                    _latestC = null;
+                }
+                // Keep LVDS latched as unavailable until the ECU sends a new
+                // frame after POR or sleep-wakeup. The next LVDS callback clears
+                // this latch when real traffic resumes.
+                _lvdsSignalLost = true;
+                _baslerSignalLost = false;
+                _lastLvdsFrameUtc = DateTime.MinValue;
+                _lastBaslerFrameUtc = DateTime.UtcNow;
+                _baslerDispWindowFrames = 0;
+                _baslerDispFps = 0;
+                _baslerDispWindowStartTicks = _baslerDispFpsSw.ElapsedTicks;
+
+                // Keep an already active LVDS receiver alive. Recreating it here
+                // resets its reassembly state and FPS EMA, which causes a visible
+                // 0 -> nominal-FPS restart and can disrupt the next fault cycle.
+                bool lvdsCaptureActive = _currentDeviceType == LsmDeviceType.Nichia
+                    ? _nichiaEthCapture?.IsCapturing == true
+                    : _osramEthCapture?.IsCapturing == true;
+                if (!lvdsCaptureActive)
+                {
+                    if (_currentDeviceType == LsmDeviceType.Nichia)
+                        StartNichiaEthCapture();
+                    else
+                        StartOsramEthCapture();
+                }
+                if (_baslerCapture == null || !_baslerCapture.IsCapturing)
+                    StartBaslerCapture();
+
+                RenderAll();
+                RestoreAvtpInfoAfterFault();
+            }
+        }
+
+        private void UpdateCommunicationFaultAvailability()
+        {
+            if (_communicationFaultControlWindow == null)
+                return;
+
+            _communicationFaultControlWindow.IsAvtpFaultAvailable =
+                _modeOfOperation == ModeOfOperation.PlayerFromFiles;
+        }
+
+        private void RestoreAvtpInfoAfterFault()
+        {
+            if (_communicationFaultState.AvtpFaultEnabled)
+                return;
+
+            if (_playback.Cts == null)
+            {
+                LblStatus.Text = _modeOfOperation == ModeOfOperation.AvtpLiveMonitor
+                    ? "Mode: AVTP Monitoring. Press Start to listen/capture live stream."
+                    : "Mode: AVTP Generator. Load a file and press Start.";
+                return;
+            }
+
+            if (_modeOfOperation == ModeOfOperation.PlayerFromFiles)
+            {
+                int fps = int.TryParse(TxtFps?.Text, out int parsedFps) && parsedFps > 0 ? parsedFps : 100;
+                LblStatus.Text = StatusFormatter.FormatPlayerRunning(fps, avtpEnabled: true);
+                _playback.RunningStatusText = LblStatus.Text;
+            }
+            else if (_liveCapture.HasAvtpFrame)
+            {
+                LblStatus.Text = "Running AVTP Monitoring.";
+                _playback.RunningStatusText = LblStatus.Text;
+            }
+            else
+            {
+                LblStatus.Text = StatusFormatter.FormatWaitingForSignal(GetDiagLogPath());
+                _playback.RunningStatusText = LblStatus.Text;
+            }
         }
     }
 
