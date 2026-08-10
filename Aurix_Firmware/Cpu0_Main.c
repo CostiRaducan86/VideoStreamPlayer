@@ -98,6 +98,7 @@ static uint64 s_lvdsLastProgressTick;
 static uint64 s_lvdsLastRecoveryTick;
 static uint32 s_lvdsLastProgress;
 static FrameEthDevice s_lvdsLastDevice = FE_DEVICE_NICHIA;
+static boolean s_cameraTriggerFallback;
 
 
 static void fps_init(void)
@@ -138,6 +139,7 @@ static void lvds_recovery_init(void)
     s_lvdsLastProgress     = lvds_progress_counter(s_lvdsLastDevice);
     s_lvdsLastProgressTick = stm_now64();
     s_lvdsLastRecoveryTick = 0u;
+    s_cameraTriggerFallback = FALSE;
 }
 
 static void lvds_recover_rx_path(FrameEthDevice device)
@@ -174,6 +176,12 @@ static void lvds_recovery_tick(void)
         s_lvdsLastProgress     = progress;
         s_lvdsLastProgressTick = now;
         s_lvdsLastRecoveryTick = 0u;
+        if (s_cameraTriggerFallback)
+        {
+            camera_trigger_set_mode(CAM_TRIG_SYNC);
+            camera_trigger_start();
+            s_cameraTriggerFallback = FALSE;
+        }
         return;
     }
 
@@ -181,11 +189,27 @@ static void lvds_recovery_tick(void)
     {
         s_lvdsLastProgress     = progress;
         s_lvdsLastProgressTick = now;
+        if (s_cameraTriggerFallback)
+        {
+            /* Resume frame-synchronised acquisition as soon as LVDS returns. */
+            camera_trigger_set_mode(CAM_TRIG_SYNC);
+            camera_trigger_start();
+            s_cameraTriggerFallback = FALSE;
+        }
         return;
     }
 
     if ((now - s_lvdsLastProgressTick) < s_lvdsRecoveryTimeoutTicks)
         return;
+
+    if (!s_cameraTriggerFallback)
+    {
+        /* No LVDS frame for the watchdog interval: keep the camera alive at
+         * the configured 50 fps trigger rate until LVDS resumes. */
+        camera_trigger_set_mode(CAM_TRIG_FREERUN);
+        camera_trigger_start();
+        s_cameraTriggerFallback = TRUE;
+    }
 
     if ((s_lvdsLastRecoveryTick != 0u) &&
         ((now - s_lvdsLastRecoveryTick) < s_lvdsRecoveryCooldownTicks))

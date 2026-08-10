@@ -80,7 +80,7 @@ public sealed class BaslerCameraCapture : IDisposable
         // Set pixel format to Mono8 (Gray8) if available
         _camera.Parameters[PLCamera.PixelFormat].TrySetValue(PLCamera.PixelFormat.Mono8);
 
-        // Configure hardware trigger from Aurix P23.1 (Line3, rising edge)
+        // Configure hardware trigger from Aurix P02.3 (Line3, rising edge)
         _camera.Parameters[PLCamera.TriggerSelector].TrySetValue(PLCamera.TriggerSelector.FrameStart);
         if (_camera.Parameters[PLCamera.TriggerMode].TrySetValue(PLCamera.TriggerMode.On))
         {

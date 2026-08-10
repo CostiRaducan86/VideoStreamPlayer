@@ -1485,12 +1485,9 @@ namespace VilsSharpX
             // While paused or stopped, keep the frozen frame — don't update pane C.
             if (_playback.IsPaused || _playback.Cts == null) return;
 
-            // In normal operation, discard camera frames after LVDS timeout because
-            // they may be spurious trigger-line noise. During AVTP fault injection,
-            // the camera view is intentionally kept alive so the remaining LSM light
-            // output can be observed even after the last LVDS Ethernet frame arrived.
-            if (_lvdsSignalLost && !_communicationFaultState.AvtpFaultEnabled) return;
-
+            // Basler may continue receiving valid hardware-triggered frames from
+            // the Aurix fallback timer after LVDS has stopped. LVDS loss affects
+            // pane B/D only; pane C remains an independent camera signal.
             _lastBaslerFrameUtc = DateTime.UtcNow;
             _baslerSignalLost = false;
 
@@ -4312,15 +4309,22 @@ namespace VilsSharpX
 
             bool noSignal = ShouldShowNoSignalWhileRunning();
             bool avtpNoSignal = noSignal || _communicationFaultState.AvtpFaultEnabled;
+            // RenderAll shows A/B as unavailable when AVTP Live has no frame,
+            // even when LVDS Ethernet already delivered frames. Keep the run
+            // info labels driven by that same source-of-truth state.
+            bool avtpLiveNoFrame = _modeOfOperation == ModeOfOperation.AvtpLiveMonitor
+                && !_liveCapture.HasAvtpFrame;
+            bool paneANoSignal = avtpNoSignal || avtpLiveNoFrame;
+            bool paneBNoSignal = avtpNoSignal || avtpLiveNoFrame || _lvdsSignalLost;
             bool isRunning = _playback.Cts != null;
             bool isPaused = _playback.IsPaused;
 
 
             if (LblRunInfoA != null)
             {
-                if (allowUiRefreshA || !isRunning || isPaused)
+                if (allowUiRefreshA || paneANoSignal || !isRunning || isPaused)
                 {
-                    if (avtpNoSignal)
+                    if (paneANoSignal)
                     {
                         LblRunInfoA.Text = "";
                     }
@@ -4336,8 +4340,7 @@ namespace VilsSharpX
             if (LblRunInfoB != null)
             {
                 double paneBFps = 0.0;
-                bool bNoSignal = noSignal || _lvdsSignalLost;
-                if (!bNoSignal)
+                if (!paneBNoSignal)
                 {
                     if (_nichiaEthCapture != null && _nichiaEthCapture.IsCapturing && _nichiaEthCapture.FpsEma > 0.0)
                         paneBFps = _nichiaEthCapture.FpsEma;
@@ -4347,7 +4350,7 @@ namespace VilsSharpX
                         paneBFps = _playback.BFpsEma;
                 }
 
-                LblRunInfoB.Text = StatusFormatter.FormatRunInfoB(isRunning, isPaused, bNoSignal, paneBFps);
+                LblRunInfoB.Text = StatusFormatter.FormatRunInfoB(isRunning, isPaused, paneBNoSignal, paneBFps);
             }
 
             // Pane C: Basler camera FPS

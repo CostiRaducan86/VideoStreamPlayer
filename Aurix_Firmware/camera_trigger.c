@@ -141,6 +141,12 @@ void camera_trigger_isr(void)
 {
     if (g_camTrigPinHigh == FALSE)
     {
+        /* A stale periodic compare can remain pending after FREERUN is
+         * stopped. Ignore it in SYNC mode; the next LVDS frame owns the
+         * trigger edge. */
+        if (g_camTrigMode == CAM_TRIG_SYNC)
+            return;
+
         /* Rising edge (free-run mode only) */
         IfxPort_setPinHigh(CAM_TRIG_PORT, CAM_TRIG_PIN);
         g_camTrigPinHigh = TRUE;
