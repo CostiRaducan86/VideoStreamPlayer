@@ -3538,11 +3538,11 @@ namespace VilsSharpX
                 StartOsramEthCapture();
             }
 
-            // Arm LVDS timeout: if no LVDS frame arrives within LiveSignalLostTimeoutSec,
-            // _lvdsSignalLost will be set to true by the RenderAll timeout check.
-            // Without this, _lastLvdsFrameUtc stays MinValue after Stop→Start and the
-            // timeout never fires (the guard requires != MinValue).
+            // Arm LVDS timeout for every session. Pane B must remain unavailable
+            // until a real LVDS frame arrives; the generator must not fabricate
+            // B from A while the ECU is already in failsafe before Start.
             _lastLvdsFrameUtc = DateTime.UtcNow;
+            _lvdsSignalLost = true;
 
             // Pane C: Basler USB3 camera live capture
             StartBaslerCapture();
@@ -3916,12 +3916,14 @@ namespace VilsSharpX
                 if (isNewPcapFrame)
                     PushSyncFrame(a);
         
-                // B: prefer real Ethernet LVDS when available; otherwise simulated LVDS (A + delta)
+                // B: prefer real Ethernet LVDS when available. Do not fabricate
+                // B from A while the LVDS signal is unavailable.
                 Frame b;
                 bool useRealEthB = false;
                 Frame? genMatchedA = null;
-                if ((_nichiaEthCapture != null && _nichiaEthCapture.IsCapturing && _nichiaEthCapture.FramesCompleted > 0)
-                    || (_osramEthCapture != null && _osramEthCapture.IsCapturing && _osramEthCapture.FramesCompleted > 0))
+                bool hasEthLvds = (_nichiaEthCapture != null && _nichiaEthCapture.IsCapturing && _nichiaEthCapture.FramesCompleted > 0)
+                    || (_osramEthCapture != null && _osramEthCapture.IsCapturing && _osramEthCapture.FramesCompleted > 0);
+                if (hasEthLvds)
                 {
                     lock (_frameLock)
                     {
@@ -3935,10 +3937,16 @@ namespace VilsSharpX
                         }
                         else
                         {
-                            var bBytesFallback = ApplyValueDelta(a.Data, _bValueDelta);
-                            b = new Frame(_currentWidth, _currentHeight, bBytesFallback, DateTime.UtcNow);
+                            b = _lvdsSignalLost || _communicationFaultState.AvtpFaultEnabled
+                                ? new Frame(_currentWidth, _currentHeight, _noSignalGrayFrame, DateTime.UtcNow)
+                                : new Frame(_currentWidth, _currentHeight,
+                                    ApplyValueDelta(a.Data, _bValueDelta), DateTime.UtcNow);
                         }
                     }
+                }
+                else if (_lvdsSignalLost || _communicationFaultState.AvtpFaultEnabled)
+                {
+                    b = new Frame(_currentWidth, _currentHeight, _noSignalGrayFrame, DateTime.UtcNow);
                 }
                 else
                 {
@@ -4161,19 +4169,15 @@ namespace VilsSharpX
             var matchedA = _playback.IsPaused ? _pausedMatchedA : _matchedAForDiff;
             bool hasRealEthB = (_nichiaEthCapture != null && _nichiaEthCapture.IsCapturing && _nichiaEthCapture.FramesCompleted > 0)
                             || (_osramEthCapture != null && _osramEthCapture.IsCapturing && _osramEthCapture.FramesCompleted > 0);
+            bool liveLvdsNoSignal = _modeOfOperation == ModeOfOperation.AvtpLiveMonitor
+                && !_playback.IsPaused
+                && !hasRealEthB;
 
-            if (_modeOfOperation == ModeOfOperation.AvtpLiveMonitor && !_playback.IsPaused && !_lvdsSignalLost)
+            if (_modeOfOperation == ModeOfOperation.AvtpLiveMonitor && !_playback.IsPaused
+                && !_lvdsSignalLost && !liveLvdsNoSignal)
             {
-                if (hasRealEthB)
-                {
-                    // B already comes from HandleLvdsFrameReady() via _latestB.
-                    // Keep current b from frame cache (do not overwrite with mock data).
-                }
-                else
-                {
-                    // Fallback: mock LVDS (A + delta)
-                    b = new Frame(_currentWidth, _currentHeight, ApplyValueDelta(a.Data, _bValueDelta), a.TimestampUtc);
-                }
+                // B already comes from HandleLvdsFrameReady() via _latestB.
+                // Keep current b from the real LVDS capture.
             }
 
             // B post-processing (forced dead pixel + optional compensation)
@@ -4253,9 +4257,9 @@ namespace VilsSharpX
             {
                 if (NoSignalA != null) NoSignalA.Visibility = Visibility.Visible;
                 if (NoSignalB != null)
-                    NoSignalB.Visibility = _lvdsSignalLost ? Visibility.Visible : Visibility.Collapsed;
+                    NoSignalB.Visibility = (_lvdsSignalLost || liveLvdsNoSignal) ? Visibility.Visible : Visibility.Collapsed;
                 if (NoSignalD != null)
-                    NoSignalD.Visibility = _lvdsSignalLost || _comparisonMode != 1
+                    NoSignalD.Visibility = _lvdsSignalLost || liveLvdsNoSignal || _comparisonMode != 1
                         ? Visibility.Visible
                         : Visibility.Collapsed;
             }
@@ -4265,7 +4269,7 @@ namespace VilsSharpX
                 if (NoSignalB != null) NoSignalB.Visibility = Visibility.Visible;
                 if (NoSignalD != null) NoSignalD.Visibility = Visibility.Visible;
             }
-            else if (_lvdsSignalLost)
+            else if (_lvdsSignalLost || liveLvdsNoSignal)
             {
                 if (NoSignalA != null) NoSignalA.Visibility = Visibility.Collapsed;
                 if (NoSignalB != null) NoSignalB.Visibility = Visibility.Visible;
