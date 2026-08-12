@@ -13,6 +13,7 @@
 #include "asclin1_dma.h"
 #include "can_diag.h"
 #include "can_uart_bridge.h"
+#include "can_uart_fault_inject.h"
 #include "rxmon.h"
 #include "osram_frame.h"
 
@@ -49,6 +50,7 @@ void device_mode_init(FrameEthDevice device)
     /* Initialise GETH + PHY for Ethernet TX */
     frame_eth_init(device);
     can_diag_init();
+    can_uart_fault_init();
 
     /* Adapter_V2: initialise the active CAN-UART forwarding bridge
      * (ASCLIN5 ECU side + ASCLIN4 LSM side).  Forwarding stays OFF and

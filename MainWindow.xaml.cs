@@ -1302,6 +1302,7 @@ namespace VilsSharpX
             _canUartMode = CmbCanUartMode?.SelectedIndex ?? 0;
             SaveUiSettings();
             SendAdapterModeCommand();
+            UpdateCommunicationFaultAvailability();
         }
 
         private void ApplyDeviceTypeConstraints()
@@ -2809,6 +2810,7 @@ namespace VilsSharpX
             if (_settingsManager.IsLoading) return;
             _avtpLiveDeviceHint = LiveNicSelector.GetSelectedDeviceName(CmbLiveNic);
             SaveUiSettings();
+            UpdateCommunicationFaultAvailability();
 
             // Re-sync selected device type to SmartVisio Box when NIC selection changes.
             _ = TrySyncDeviceModeToAurixAsync("nic-change");
@@ -5040,6 +5042,8 @@ namespace VilsSharpX
             };
             _communicationFaultControlWindow.FaultStateChanged -= ApplyCommunicationFaultState;
             _communicationFaultControlWindow.FaultStateChanged += ApplyCommunicationFaultState;
+            _communicationFaultControlWindow.CanUartFaultStateChanged -= ApplyCanUartFaultState;
+            _communicationFaultControlWindow.CanUartFaultStateChanged += ApplyCanUartFaultState;
             UpdateCommunicationFaultAvailability();
             _communicationFaultControlWindow.Closed += (_, _) => _communicationFaultControlWindow = null;
             _communicationFaultControlWindow.Show();
@@ -5113,6 +5117,32 @@ namespace VilsSharpX
             }
         }
 
+        private void ApplyCanUartFaultState()
+        {
+            string? txDev = GetTxPcapDeviceNameOrNull();
+            if (string.IsNullOrWhiteSpace(txDev))
+            {
+                AppendDiagLog("[cmd] No NIC selected - CAN-UART fault command not sent");
+                return;
+            }
+
+            try
+            {
+                CanUartFaultCommand.Send(
+                    txDev,
+                    _communicationFaultState.CanUartFaultMode,
+                    _communicationFaultState.CanUartFaultDirection,
+                    _communicationFaultState.CanUartFaultDurationMilliseconds,
+                    _communicationFaultState.CanUartMode,
+                    _communicationFaultState.CanUartFaultEnabled,
+                    AppendDiagLog);
+            }
+            catch (Exception ex)
+            {
+                AppendDiagLog($"[cmd] CAN-UART fault command error: {ex.Message}");
+            }
+        }
+
         private void UpdateCommunicationFaultAvailability()
         {
             if (_communicationFaultControlWindow == null)
@@ -5120,6 +5150,9 @@ namespace VilsSharpX
 
             _communicationFaultControlWindow.IsAvtpFaultAvailable =
                 _modeOfOperation == ModeOfOperation.PlayerFromFiles;
+            _communicationFaultControlWindow.IsCanUartFaultAvailable =
+                !string.IsNullOrWhiteSpace(GetTxPcapDeviceNameOrNull());
+            _communicationFaultControlWindow.CanUartMode = _canUartMode;
         }
 
         private void RestoreAvtpInfoAfterFault()

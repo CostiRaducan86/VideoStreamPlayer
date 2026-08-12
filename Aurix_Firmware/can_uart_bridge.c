@@ -34,6 +34,7 @@
 #include "can_diag.h"        /* can_diag_bridge_uart_frame(), CAN_DIAG_RAW_MAX */
 #include "can_hw.h"          /* DiagUartFrame */
 #include "adapter_ctrl.h"    /* adapter_ctrl_set_can_bridge() */
+#include "can_uart_fault_inject.h"
 #include "defect_inject.h"   /* in-flight ELEDERP/ELEDERS injection (LSM->ECU) */
 #include "nichia_defect_inject.h" /* in-flight PIXEL_ID/counter/flag injection (Nichia) */
 
@@ -350,7 +351,10 @@ static void bridge_relay_pump(void)
                     /* Capture first 4 bytes of request for HCTRL/HADR extraction. */
                     if (s_reqLen < 4u)
                         s_reqBuf[s_reqLen++] = b;
-                    bridge_forward(&s_ecuDir, lsm, b, stm);
+                    if (can_uart_fault_should_drop(CAN_UART_FAULT_DIR_ECU_TO_LSM))
+                        bridge_mon_capture(b, stm);
+                    else
+                        bridge_forward(&s_ecuDir, lsm, b, stm);
                 }
             }
         }
@@ -419,7 +423,10 @@ static void bridge_relay_pump(void)
                     b = (s_injDev == 2u)
                       ? nichia_defect_inject_filter_byte(b)
                       : defect_inject_filter_byte(b);
-                    bridge_forward(&s_lsmDir, ecu, b, stm);
+                                        if (can_uart_fault_should_drop(CAN_UART_FAULT_DIR_LSM_TO_ECU))
+                                                bridge_mon_capture(b, stm);
+                                        else
+                                                bridge_forward(&s_lsmDir, ecu, b, stm);
                 }
             }
         }
@@ -555,6 +562,8 @@ void can_uart_bridge_init(uint8 deviceId)
 
     s_deviceId = (deviceId == BRIDGE_DEVICE_NICHIA) ? BRIDGE_DEVICE_NICHIA
                                                     : BRIDGE_DEVICE_OSRAM;
+
+    can_uart_fault_clear();
 
     /* Keep forwarding OFF while we (re)configure the UART hardware. */
     s_bridgeActive = 0u;
@@ -1014,6 +1023,8 @@ void can_uart_bridge_tick(void)
 {
     if (g_canUartBridgeStats.initOk == 0u)
         return;
+
+    can_uart_fault_tick();
 
     /* Service a pending enable request from CPU0 (cross-core handshake).  This
      * runs on CPU2 so the RX-FIFO drain + relay reset happen on the same core as

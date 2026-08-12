@@ -1317,6 +1317,7 @@ boolean frame_eth_send_can_diag_pending(void)
 #include "adapter_ctrl.h"  /* adapter_ctrl_set_mode/can_uart/apply() */
 #include "can_uart_bridge.h" /* can_uart_bridge_set_active() */
 #include "can_hw.h"        /* g_diagSniffEnabled */
+#include "can_uart_fault_inject.h"
 #include "defect_inject.h" /* defect_inject_set_list() */
 #include "nichia_defect_inject.h" /* nichia_defect_inject_set_list() */
 
@@ -1412,8 +1413,46 @@ void frame_eth_poll_rx(void)
                      * External modes it must not drive the bus, so forwarding
                      * stays OFF and the bus is a hardware passthrough. */
                     adapter_ctrl_apply(ctrlEnum, canEnum);
+                    can_uart_fault_clear();
                     can_uart_bridge_set_active(
                         (canEnum == CAN_UART_ECU_SMARTVISIO_LSM) ? TRUE : FALSE);
+                }
+                else if (cmdId == FE_CMD_CAN_UART_FAULT)
+                {
+                    /* Payload: [17] = mode, [18] = direction,
+                     * [19..20] = duration in 100 ms units, [21] = action.
+                     * action 0 clears the current fault; action 1 starts the
+                     * requested DROP or RELAY_BYPASS fault. */
+                    uint8 mode = cmdPayload;
+                    uint8 direction = pRxBuf[18];
+                    uint16 duration = (uint16)(((uint16)pRxBuf[19] << 8u) | pRxBuf[20]);
+                    uint8 canUartMode = pRxBuf[22];
+
+                    if (pRxBuf[21] == 0u)
+                    {
+                        boolean ownsCanSel = can_uart_fault_owns_can_sel();
+                        can_uart_fault_clear();
+                        if (ownsCanSel)
+                            adapter_ctrl_set_can_bridge(FALSE);
+                        else if (mode == (uint8)CAN_UART_FAULT_RELAY_BYPASS)
+                            can_uart_bridge_set_active(TRUE);
+                    }
+                    else
+                    {
+                        if (can_uart_fault_set((CanUartFaultMode)mode,
+                                               (CanUartFaultDirection)direction,
+                                               duration,
+                                               canUartMode) &&
+                            mode == (uint8)CAN_UART_FAULT_RELAY_BYPASS)
+                        {
+                            /* Stop forwarding before selecting the AURIX-side
+                             * relay path, so no new byte is driven into a
+                             * transition between the two hardware routes. */
+                            can_uart_bridge_set_active(FALSE);
+                            if (canUartMode == 0u)
+                                adapter_ctrl_set_can_bridge(TRUE);
+                        }
+                    }
                 }
                 else if (cmdId == FE_CMD_SET_DEFECT_LIST)
                 {
@@ -1446,6 +1485,16 @@ void frame_eth_poll_rx(void)
 
         /* Always free — even for unrecognised frames */
         IfxGeth_Eth_freeReceiveBuffer(&s_geth, IfxGeth_RxDmaChannel_0);
+    }
+
+    /* A RELAY_BYPASS timeout is detected by CPU2, but CAN_SEL is restored by
+     * CPU0, which owns the Ethernet command path and adapter state changes. */
+    if (can_uart_fault_take_bypass_expired())
+    {
+        if (can_uart_fault_take_can_sel_expired())
+            adapter_ctrl_set_can_bridge(FALSE);
+        else
+            can_uart_bridge_set_active(TRUE);
     }
 
     /* ---- RX freeze watchdog (DMA hardware evidenced, traffic-independent) ----

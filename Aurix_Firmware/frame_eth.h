@@ -49,6 +49,7 @@
 #define FE_CMD_SET_ADAPTER        0x03u       /* Command: set adapter mode (control + CAN UART) */
 #define FE_CMD_SET_DEFECT_LIST    0x04u       /* Command: set OSRAM defect injection list */
 #define FE_CMD_SET_DEFECT_LIST_NICHIA 0x05u   /* Command: set Nichia defect injection list */
+#define FE_CMD_CAN_UART_FAULT     0x06u       /* Command: CAN-UART DROP fault */
 #define FE_HDR_LEN                18u
 #define FE_DIAG_HDR_LEN           8u
 /* v2 payload: 22 fixed bytes + 72 raw UART bytes = 94 bytes
