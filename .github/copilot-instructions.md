@@ -245,6 +245,7 @@ If unsure about an API, SDK call, register, pin name, protocol rule or hardware 
 
 * Do not commit or push after every small change.
 * Wait for the user to explicitly request commit/push when the changes have sufficient maturity.
+* When the user requests commit + push, include all files shown as M (modified) and U (untracked), commit them, and push to both GitHub and GitLab remotes.
 * The commit messages should be in English, clear, concise, and descriptive.
 * Do not introduce secrets, tokens, credentials, customer data or proprietary documentation into generated code.
 
