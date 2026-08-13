@@ -6,12 +6,14 @@ using System.Diagnostics;
 using System.Globalization;
 using System.IO;
 using System.Linq;
+using System.Runtime.InteropServices;
 using SharpPcap;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
+using System.Windows.Interop;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Windows.Shapes;
@@ -21,6 +23,16 @@ namespace VilsSharpX
 {
     public partial class MainWindow : Window
     {
+        private const int WmNcHitTest = 0x0084;
+        private const int HtLeft = 10;
+        private const int HtRight = 11;
+        private const int HtTop = 12;
+        private const int HtTopLeft = 13;
+        private const int HtTopRight = 14;
+        private const int HtBottom = 15;
+        private const int HtBottomLeft = 16;
+        private const int HtBottomRight = 17;
+
         private const double FpsEstimationWindowSec = 0.25;
         private const double FpsEmaAlpha = 0.30; // 0..1, higher = more responsive, lower = smoother
         private const double LiveSignalLostTimeoutSec = 0.625; // ~5 frames at 8fps
@@ -308,6 +320,7 @@ namespace VilsSharpX
         private bool _overlayPendingD;
 
         private bool _isUpdatingDiffThresholdText;
+        private CancellationTokenSource? _recordingFeedbackCts;
 
         // ─── Fullscreen pane toggle ────────────────────────────────────────
         private Pane? _fullscreenPane;
@@ -943,6 +956,36 @@ namespace VilsSharpX
             // Keep SmartVisio Box aligned even after board reset/run while WPF stays open.
             _deviceModeSyncTimer.Start();
         }
+
+        private void Window_SourceInitialized(object? sender, EventArgs e)
+        {
+            if (PresentationSource.FromVisual(this) is HwndSource source)
+                source.AddHook(MainWindowWndProc);
+        }
+
+        private static IntPtr MainWindowWndProc(
+            IntPtr hwnd,
+            int message,
+            IntPtr wParam,
+            IntPtr lParam,
+            ref bool handled)
+        {
+            if (message == WmNcHitTest)
+            {
+                int hitTest = DefWindowProc(hwnd, message, wParam, lParam).ToInt32();
+                if (hitTest is HtLeft or HtRight or HtTop or HtTopLeft or HtTopRight
+                    or HtBottom or HtBottomLeft or HtBottomRight)
+                {
+                    handled = true;
+                    return new IntPtr(1); // HTCLIENT: keep the native Maximize button, block border resizing.
+                }
+            }
+
+            return IntPtr.Zero;
+        }
+
+        [LibraryImport("user32.dll", EntryPoint = "DefWindowProcW")]
+        private static partial IntPtr DefWindowProc(IntPtr hWnd, int message, IntPtr wParam, IntPtr lParam);
 
         /// <summary>
         /// Tries to sync the current WPF device type to SmartVisio Box with short retries.
@@ -3214,6 +3257,12 @@ namespace VilsSharpX
 
         private void StopRecording()
         {
+            try { _recordingFeedbackCts?.Cancel(); } catch { }
+            try { _recordingFeedbackCts?.Dispose(); } catch { }
+            _recordingFeedbackCts = new CancellationTokenSource();
+            CancellationToken feedbackToken = _recordingFeedbackCts.Token;
+            ShowSaveFeedback("Saving recorded video...", Brushes.DimGray);
+
             LblStatus.Text = _recordingManager.StopRecording();
             if (BtnRecord != null)
             {
@@ -3225,6 +3274,28 @@ namespace VilsSharpX
             if (BtnStart != null) BtnStart.IsEnabled = true;
             if (BtnStop != null) BtnStop.IsEnabled = true;
             if (BtnSave != null) BtnSave.IsEnabled = true;
+
+            _ = ShowRecordedVideoSavedFeedbackAsync(feedbackToken);
+        }
+
+        private async Task ShowRecordedVideoSavedFeedbackAsync(CancellationToken cancellationToken)
+        {
+            try
+            {
+                await Task.Delay(1200, cancellationToken);
+                if (cancellationToken.IsCancellationRequested)
+                    return;
+
+                ShowSaveFeedback("Recorded video saved!", Brushes.ForestGreen);
+
+                await Task.Delay(2500, cancellationToken);
+                if (!cancellationToken.IsCancellationRequested)
+                    HideSaveFeedback();
+            }
+            catch (OperationCanceledException)
+            {
+                // A newer recording or application shutdown replaced this feedback operation.
+            }
         }
 
         private void Pause()
@@ -4950,7 +5021,7 @@ namespace VilsSharpX
         private void MenuHardwareConfig_Click(object sender, RoutedEventArgs e)
         {
             if (_hwConfigWindow != null && _hwConfigWindow.IsVisible) { _hwConfigWindow.Activate(); return; }
-            HiddenConfigPanel.Children.Remove(GrpHardwareConfig);
+            HardwareOptionsPanel.Children.Remove(GrpHardwareConfig);
             var (wrapper, okBtn) = WrapWithOkButton(GrpHardwareConfig);
             _hwConfigWindow = new Window
             {
@@ -4962,7 +5033,7 @@ namespace VilsSharpX
                 ResizeMode = ResizeMode.NoResize,
             };
             okBtn.Click += (_, _) => _hwConfigWindow.Close();
-            _hwConfigWindow.Closed += (s, a) => { ((DockPanel)_hwConfigWindow.Content).Children.Clear(); HiddenConfigPanel.Children.Add(GrpHardwareConfig); _hwConfigWindow = null; };
+            _hwConfigWindow.Closed += (s, a) => { ((DockPanel)_hwConfigWindow.Content).Children.Clear(); HardwareOptionsPanel.Children.Add(GrpHardwareConfig); _hwConfigWindow = null; };
             _hwConfigWindow.Show();
         }
 
