@@ -4998,7 +4998,6 @@ namespace VilsSharpX
 
         private void MenuExit_Click(object sender, RoutedEventArgs e) => Close();
 
-        private Window? _hwConfigWindow;
         private Window? _appSettingsWindow;
         private Window? _ethConfigWindow;
         private CameraConfigWindow? _cameraConfigWindow;
@@ -5016,25 +5015,6 @@ namespace VilsSharpX
             panel.Children.Add(okBtn);
             panel.Children.Add(content);
             return (panel, okBtn);
-        }
-
-        private void MenuHardwareConfig_Click(object sender, RoutedEventArgs e)
-        {
-            if (_hwConfigWindow != null && _hwConfigWindow.IsVisible) { _hwConfigWindow.Activate(); return; }
-            HardwareOptionsPanel.Children.Remove(GrpHardwareConfig);
-            var (wrapper, okBtn) = WrapWithOkButton(GrpHardwareConfig);
-            _hwConfigWindow = new Window
-            {
-                Title = "Hardware Configuration",
-                Owner = this,
-                Width = 380, Height = 360,
-                WindowStartupLocation = WindowStartupLocation.CenterOwner,
-                Content = wrapper,
-                ResizeMode = ResizeMode.NoResize,
-            };
-            okBtn.Click += (_, _) => _hwConfigWindow.Close();
-            _hwConfigWindow.Closed += (s, a) => { ((DockPanel)_hwConfigWindow.Content).Children.Clear(); HardwareOptionsPanel.Children.Add(GrpHardwareConfig); _hwConfigWindow = null; };
-            _hwConfigWindow.Show();
         }
 
         private void MenuAppSettings_Click(object sender, RoutedEventArgs e)

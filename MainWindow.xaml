@@ -14,7 +14,6 @@
                 <MenuItem Header="Exit" Click="MenuExit_Click"/>
             </MenuItem>
             <MenuItem Header="_Configuration">
-                <MenuItem Header="Hardware Configuration" Click="MenuHardwareConfig_Click"/>
                 <MenuItem Header="Application Settings" Click="MenuAppSettings_Click"/>
                 <MenuItem Header="Ethernet Configuration" Click="MenuEthernetConfig_Click"/>
                 <MenuItem Header="Camera Configuration" Click="MenuCameraConfig_Click"/>
@@ -389,8 +388,8 @@
                         </StackPanel>
 
                         <!-- Middle column: ECU Variant / Control Mode / CAN UART Mode -->
-                        <StackPanel x:Name="HardwareOptionsPanel" Grid.Column="2" Orientation="Vertical" Margin="4,0,4,0">
-                            <StackPanel x:Name="GrpHardwareConfig" Orientation="Vertical">
+                        <StackPanel Grid.Column="2" Orientation="Vertical" Margin="4,0,4,0">
+                            <StackPanel Orientation="Vertical">
                                 <StackPanel Orientation="Horizontal" HorizontalAlignment="Left" Margin="0,0,0,6">
                                     <TextBlock Text="ECU Variant:" VerticalAlignment="Center" Width="90" FontSize="11" Margin="0,0,4,0"/>
                                     <ComboBox x:Name="CmbEcuVariant" Width="142" FontSize="11" SelectedIndex="0" SelectionChanged="CmbEcuVariant_SelectionChanged">
