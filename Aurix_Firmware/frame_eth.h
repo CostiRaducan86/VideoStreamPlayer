@@ -164,6 +164,7 @@ typedef struct
     volatile uint32 cmdSetDeviceApplied;   /* SET_DEVICE successfully applied */
     volatile uint32 cmdSetDeviceIgnoredDuringLvds;
     volatile uint32 cmdSetAdapterIgnoredDuringLvds;
+    volatile uint32 cmdSetAdapterIgnoredDuringCanUart;
     volatile uint32 cmdLvdsFaultReceived;  /* LVDS fault packets received */
     volatile uint32 cmdLvdsFaultApplied;   /* LVDS START packets accepted */
     volatile uint32 cmdLvdsFaultRejected;  /* LVDS START packets rejected */

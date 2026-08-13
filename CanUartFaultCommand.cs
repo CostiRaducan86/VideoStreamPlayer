@@ -17,7 +17,7 @@ public static class CanUartFaultCommand
     private const byte DropMode = 0x01;
     private const byte RelayBypassMode = 0x02;
 
-    public static void Send(
+    public static bool Send(
         string pcapDeviceName,
         int mode,
         int direction,
@@ -65,22 +65,31 @@ public static class CanUartFaultCommand
         if (device == null)
         {
             log?.Invoke($"[cmd] NIC not found for CAN-UART fault command: {pcapDeviceName}");
-            return;
+            return false;
         }
 
         var txDevice = new LibPcapLiveDevice(device.Interface);
-        txDevice.Open(DeviceModes.Promiscuous, read_timeout: 1);
+        bool opened = false;
         try
         {
+            txDevice.Open(DeviceModes.Promiscuous, read_timeout: 1);
+            opened = true;
             for (int i = 0; i < 3; i++)
                 txDevice.SendPacket(packet);
 
             string action = start ? "START" : "CLEAR";
             log?.Invoke($"[cmd] Sent CAN-UART fault {action} -> mode={modeByte}, direction={directionByte}, duration={durationUnits * 100} ms");
+            return true;
+        }
+        catch (Exception ex)
+        {
+            log?.Invoke($"[cmd] CAN-UART fault send error: {ex.GetType().Name}: {ex.Message}");
+            return false;
         }
         finally
         {
-            txDevice.Close();
+            if (opened)
+                txDevice.Close();
         }
     }
 }

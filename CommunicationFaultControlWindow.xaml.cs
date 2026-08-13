@@ -197,11 +197,14 @@ public partial class CommunicationFaultControlWindow : Window
         _state.CanUartFaultDirection = Math.Clamp(CanUartFaultDirectionComboBox.SelectedIndex, 0, 2);
         _state.CanUartFaultDurationMilliseconds = durationMilliseconds;
         _state.CanUartFaultEnabled = true;
+        RefreshUi();
+        CanUartFaultStateChanged?.Invoke();
+        if (!_state.CanUartFaultEnabled)
+            return;
+
         _canUartFaultStopwatch.Restart();
         if (durationMilliseconds > 0)
             _canUartFaultTimer.Start();
-        RefreshUi();
-        CanUartFaultStateChanged?.Invoke();
     }
 
     private void LvdsInjectButton_Click(object sender, RoutedEventArgs e)
@@ -294,6 +297,11 @@ public partial class CommunicationFaultControlWindow : Window
     public void ClearLvdsFaultForExternalChange(bool notify = true)
     {
         StopLvdsFault(notify);
+    }
+
+    public void ClearCanUartFaultForExternalChange(bool notify = true)
+    {
+        StopCanUartFault(notify);
     }
 
     private void SetLvdsInfo(string message, bool isError)

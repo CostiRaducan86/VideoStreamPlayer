@@ -13,6 +13,11 @@ The implementation is intentionally local to the WPF application:
 - it does not send a firmware command to the AURIX controller;
 - it allows the ECU response, including delayed LVDS shutdown or failsafe behavior, to be observed by the application.
 
+The AVTP fault does not use the AURIX STM timer or a firmware fault command. Its
+duration is measured locally by the WPF `DispatcherTimer`/`Stopwatch`, while the
+actual communication fault is the `AvtpTransmitManager` TX-blocking flag. The
+STM timeout review therefore does not apply to AVTP.
+
 The feature is currently implemented for **AVTP Generator / PlayerFromFiles mode**. LVDS and CAN-UART fault controls are displayed as reserved firmware features and remain disabled.
 
 ## 2. User Interface

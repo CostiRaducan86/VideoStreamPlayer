@@ -38,6 +38,7 @@ typedef struct
     volatile uint32 bytesDropped;
     volatile uint32 ecuToLsmDropped;
     volatile uint32 lsmToEcuDropped;
+    volatile uint32 duplicateStartCount;
     volatile uint32 timeoutCount;
     volatile uint32 lastRejectReason;
 } CanUartFaultStats;

@@ -1003,6 +1003,9 @@ namespace VilsSharpX
                     if (_communicationFaultState.LvdsFaultEnabled)
                         return;
 
+                    if (_communicationFaultState.CanUartFaultEnabled)
+                        return;
+
                     string? txDev = GetTxPcapDeviceNameOrNull();
                     if (!string.IsNullOrWhiteSpace(txDev))
                     {
@@ -1037,6 +1040,9 @@ namespace VilsSharpX
                 try
                 {
                     if (_communicationFaultState.LvdsFaultEnabled)
+                        return;
+
+                    if (_communicationFaultState.CanUartFaultEnabled)
                         return;
 
                     string? txDev = GetTxPcapDeviceNameOrNull();
@@ -1319,6 +1325,7 @@ namespace VilsSharpX
                     ApplyLvdsFaultState();
                 }
             }
+            ClearActiveCanUartFaultForExternalChange();
 
             _currentDeviceType = newDeviceType;
             ApplyDeviceTypeConstraints();
@@ -1388,6 +1395,7 @@ namespace VilsSharpX
             if (_settingsManager.IsLoading || !IsLoaded) return;
             _controlMode = CmbControlMode?.SelectedIndex ?? 0;
             ClearActiveLvdsFaultForExternalChange();
+            ClearActiveCanUartFaultForExternalChange();
             ApplyModeConstraints();
             SaveUiSettings();
             SendAdapterModeCommand();
@@ -1401,6 +1409,7 @@ namespace VilsSharpX
             if (_canUartMode == 0 && _canDiagRecording)
                 StopCanUartRecordingInternal();
             ClearActiveLvdsFaultForExternalChange();
+            ClearActiveCanUartFaultForExternalChange();
             SaveUiSettings();
             SendAdapterModeCommand();
             UpdateCanDiagRecordingButtons();
@@ -1428,6 +1437,20 @@ namespace VilsSharpX
             {
                 _communicationFaultState.LvdsFaultEnabled = false;
                 ApplyLvdsFaultState();
+            }
+        }
+
+        private void ClearActiveCanUartFaultForExternalChange()
+        {
+            if (!_communicationFaultState.CanUartFaultEnabled)
+                return;
+
+            if (_communicationFaultControlWindow != null)
+                _communicationFaultControlWindow.ClearCanUartFaultForExternalChange();
+            else
+            {
+                _communicationFaultState.CanUartFaultEnabled = false;
+                ApplyCanUartFaultState();
             }
         }
 
@@ -1478,9 +1501,10 @@ namespace VilsSharpX
                 string? txDev = GetTxPcapDeviceNameOrNull();
                 if (!string.IsNullOrWhiteSpace(txDev))
                 {
-                    if (_communicationFaultState.LvdsFaultEnabled)
+                    if (_communicationFaultState.LvdsFaultEnabled ||
+                        _communicationFaultState.CanUartFaultEnabled)
                     {
-                        AppendDiagLog("[cmd] Adapter-mode sync skipped while LVDS fault is active");
+                        AppendDiagLog("[cmd] Adapter-mode sync skipped while a firmware communication fault is active");
                         return;
                     }
 
@@ -3629,7 +3653,9 @@ namespace VilsSharpX
             try
             {
                 string? txDev = GetTxPcapDeviceNameOrNull();
-                if (!string.IsNullOrWhiteSpace(txDev) && !_communicationFaultState.LvdsFaultEnabled)
+                if (!string.IsNullOrWhiteSpace(txDev) &&
+                    !_communicationFaultState.LvdsFaultEnabled &&
+                    !_communicationFaultState.CanUartFaultEnabled)
                     DeviceModeCommand.SendDeviceMode(txDev, _currentDeviceType, AppendDiagLog);
             }
             catch (Exception ex) { AppendDiagLog($"[cmd] Start device-mode: {ex.Message}"); }
@@ -5262,12 +5288,17 @@ namespace VilsSharpX
             if (string.IsNullOrWhiteSpace(txDev))
             {
                 AppendDiagLog("[cmd] No NIC selected - CAN-UART fault command not sent");
+                if (_communicationFaultState.CanUartFaultEnabled)
+                {
+                    _communicationFaultState.CanUartFaultEnabled = false;
+                    _communicationFaultControlWindow?.ClearCanUartFaultForExternalChange(notify: false);
+                }
                 return;
             }
 
             try
             {
-                CanUartFaultCommand.Send(
+                bool sent = CanUartFaultCommand.Send(
                     txDev,
                     _communicationFaultState.CanUartFaultMode,
                     _communicationFaultState.CanUartFaultDirection,
@@ -5275,10 +5306,20 @@ namespace VilsSharpX
                     _communicationFaultState.CanUartMode,
                     _communicationFaultState.CanUartFaultEnabled,
                     AppendDiagLog);
+                if (!sent && _communicationFaultState.CanUartFaultEnabled)
+                {
+                    _communicationFaultState.CanUartFaultEnabled = false;
+                    _communicationFaultControlWindow?.ClearCanUartFaultForExternalChange(notify: false);
+                }
             }
             catch (Exception ex)
             {
                 AppendDiagLog($"[cmd] CAN-UART fault command error: {ex.Message}");
+                if (_communicationFaultState.CanUartFaultEnabled)
+                {
+                    _communicationFaultState.CanUartFaultEnabled = false;
+                    _communicationFaultControlWindow?.ClearCanUartFaultForExternalChange(notify: false);
+                }
             }
         }
 

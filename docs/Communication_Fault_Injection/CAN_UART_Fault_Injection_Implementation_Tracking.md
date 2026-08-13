@@ -46,6 +46,10 @@ Common requirements:
 | CRC corruption | Pending | Requires protocol-aware response handling. |
 | Telemetry and command acknowledgment | Optional / Pending | Current command protocol has no ACK. |
 | Transaction-count limit | Deferred | Duration remains the current stop condition. |
+| Timer robustness review | Implemented | Replaced absolute 32-bit STM expiry with a wrap-safe 100 ms countdown. |
+| Duplicate START handling | Implemented | Three repeated START packets are idempotent and do not extend the fault. |
+| Same-route synchronization | Implemented | Redundant `SET_ADAPTER_MODE` does not clear an active CAN-UART fault. |
+| PC transport result handling | Implemented | UI revokes active state when NIC open/send fails. |
 
 ## 4. Implementation Phases
 
@@ -244,6 +248,11 @@ expires.
 - Disconnect or change the selected TX NIC while the UI is open.
 - Confirm intentional drops do not increment physical TX FIFO drop counters.
 - Confirm the bridge recovers after RX FIFO overflow and parser resynchronization.
+- Test 2 s, 20 s and 60 s durations; verify `timeoutCount` occurs once and only after the requested duration.
+- Test across a 32-bit STM lower-counter wrap if the test setup permits it.
+- Send repeated START copies and verify `duplicateStartCount` increases without extending the expiry.
+- Repeat adapter-mode synchronization while a CAN-UART fault is active; same-route packets must be ignored.
+- Verify a real control/routing change clears the fault and restores the intended route.
 
 ### CRC mode, after implementation
 

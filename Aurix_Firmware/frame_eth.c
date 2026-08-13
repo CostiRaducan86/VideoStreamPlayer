@@ -1416,18 +1416,24 @@ void frame_eth_poll_rx(void)
                     adapter_control_mode_t ctrlEnum = (ctrlMode != 0u)
                         ? ADAPTER_MODE_DIRECT : ADAPTER_MODE_ECU;
                     adapter_can_uart_mode_t canEnum = CAN_UART_ECU_LSM;
+                    boolean physicalFaultActive;
                     if (canMode == 1u) canEnum = CAN_UART_ECU_SMARTVISIO_LSM;
                     else if (canMode == 2u) canEnum = CAN_UART_SMARTVISIO_LSM;
 
                     sameAdapterMode =
                         (ctrlEnum == adapter_ctrl_get_mode()) &&
                         (canEnum == adapter_ctrl_get_can_uart());
+                    physicalFaultActive = lvds_fault_is_active() ||
+                                          can_uart_fault_is_active();
 
                     /* A delayed/redundant SET_ADAPTER_MODE matching the
                      * current routing must not cancel a physical LVDS fault. */
-                    if (lvds_fault_is_active() && sameAdapterMode)
+                    if (physicalFaultActive && sameAdapterMode)
                     {
-                        g_feStats.cmdSetAdapterIgnoredDuringLvds++;
+                        if (lvds_fault_is_active())
+                            g_feStats.cmdSetAdapterIgnoredDuringLvds++;
+                        if (can_uart_fault_is_active())
+                            g_feStats.cmdSetAdapterIgnoredDuringCanUart++;
                     }
                     else
                     {
