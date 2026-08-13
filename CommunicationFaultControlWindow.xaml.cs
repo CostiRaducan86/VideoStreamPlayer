@@ -87,8 +87,10 @@ public partial class CommunicationFaultControlWindow : Window
             ApplyCanUartControlConstraints();
             RefreshUi();
         };
-        _avtpFaultTimer = new DispatcherTimer();
-        _avtpFaultTimer.Interval = TimeSpan.FromMilliseconds(50);
+        _avtpFaultTimer = new DispatcherTimer
+        {
+            Interval = TimeSpan.FromMilliseconds(50)
+        };
         _avtpFaultTimer.Tick += AvtpFaultTimer_Tick;
         _canUartFaultTimer = new DispatcherTimer
         {

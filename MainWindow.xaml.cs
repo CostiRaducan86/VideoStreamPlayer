@@ -938,6 +938,7 @@ namespace VilsSharpX
             // Send device-mode command to ECU at app startup so the firmware
             // immediately matches the persisted device type from settings.
             _ = TrySyncDeviceModeToAurixAsync("startup");
+            _ = TrySyncAdapterModeToAurixAsync("startup");
 
             // Keep SmartVisio Box aligned even after board reset/run while WPF stays open.
             _deviceModeSyncTimer.Start();
@@ -974,6 +975,39 @@ namespace VilsSharpX
             }
 
             AppendDiagLog($"[cmd] Device-mode sync ({reason}) not sent: no usable NIC");
+        }
+
+        /// <summary>
+        /// Tries to sync the current WPF control and CAN-UART modes to SmartVisio Box.
+        /// Startup can race NIC enumeration, so retry for a brief window.
+        /// </summary>
+        private async Task TrySyncAdapterModeToAurixAsync(string reason)
+        {
+            const int maxAttempts = 5;
+            const int delayMs = 250;
+
+            for (int attempt = 1; attempt <= maxAttempts; attempt++)
+            {
+                try
+                {
+                    string? txDev = GetTxPcapDeviceNameOrNull();
+                    if (!string.IsNullOrWhiteSpace(txDev))
+                    {
+                        AdapterModeCommand.SendAdapterMode(txDev, _controlMode, _canUartMode, AppendDiagLog);
+                        AppendDiagLog($"[cmd] Adapter-mode sync ({reason}) done on attempt {attempt}/{maxAttempts}");
+                        return;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    AppendDiagLog($"[cmd] Adapter-mode sync ({reason}) failed on attempt {attempt}/{maxAttempts}: {ex.Message}");
+                }
+
+                if (attempt < maxAttempts)
+                    await Task.Delay(delayMs);
+            }
+
+            AppendDiagLog($"[cmd] Adapter-mode sync ({reason}) not sent: no usable NIC");
         }
 
         private void HandleLiveFrameReady(byte[] frame, FrameMeta meta)
@@ -1126,7 +1160,9 @@ namespace VilsSharpX
                     CmbControlMode.SelectedIndex = _controlMode;
                 }
 
-                _canUartMode = Math.Clamp(s.CanUartMode, 0, 2);
+                // Start every application session in the direct ECU <-> LSM mode.
+                // Do not restore a persisted mode that could leave the ECU in failsafe.
+                _canUartMode = 0;
                 if (CmbCanUartMode != null)
                 {
                     CmbCanUartMode.SelectedIndex = _canUartMode;
@@ -1300,8 +1336,11 @@ namespace VilsSharpX
         {
             if (_settingsManager.IsLoading || !IsLoaded) return;
             _canUartMode = CmbCanUartMode?.SelectedIndex ?? 0;
+            if (_canUartMode == 0 && _canDiagRecording)
+                StopCanUartRecordingInternal();
             SaveUiSettings();
             SendAdapterModeCommand();
+            UpdateCanDiagRecordingButtons();
             UpdateCommunicationFaultAvailability();
         }
 
@@ -1877,11 +1916,12 @@ namespace VilsSharpX
             if (LblCanPageInfo != null)
                 LblCanPageInfo.Text = $"Page: {_canDiagCurrentPage} / {_canDiagTotalPages}";
 
+            bool hasMessages = pageSource.Count > 0;
             if (BtnCanPrevPage != null)
-                BtnCanPrevPage.IsEnabled = _canDiagCurrentPage > 1;
+                BtnCanPrevPage.IsEnabled = hasMessages && _canDiagCurrentPage > 1;
 
             if (BtnCanNextPage != null)
-                BtnCanNextPage.IsEnabled = _canDiagCurrentPage < _canDiagTotalPages;
+                BtnCanNextPage.IsEnabled = hasMessages && _canDiagCurrentPage < _canDiagTotalPages;
 
             UpdateCanDiagStatusText();
         }
@@ -2219,7 +2259,8 @@ namespace VilsSharpX
         {
             if (BtnCanRecord != null)
             {
-                BtnCanRecord.IsEnabled = !_canDiagTraceLoaded;
+                bool canRecordInCurrentMode = _canUartMode != 0;
+                BtnCanRecord.IsEnabled = canRecordInCurrentMode;
                 BtnCanRecord.Content = _canDiagRecording ? "⏹ Stop" : "⏺ Record";
                 BtnCanRecord.Background = _canDiagRecording
                     ? new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(0xCC, 0x33, 0x33))
@@ -2227,6 +2268,9 @@ namespace VilsSharpX
                 BtnCanRecord.Foreground = _canDiagRecording
                     ? System.Windows.Media.Brushes.White
                     : new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(0x44, 0x44, 0x44));
+                BtnCanRecord.ToolTip = canRecordInCurrentMode
+                    ? null
+                    : "CAN-UART recording is available only in ECU↔SmartVisio↔LSM or SmartVisio↔LSM mode.";
             }
 
             if (BtnCanReplay != null)
