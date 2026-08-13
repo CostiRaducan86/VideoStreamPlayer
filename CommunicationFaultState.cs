@@ -2,12 +2,13 @@ namespace VilsSharpX;
 
 /// <summary>
 /// Local state for communication fault injection.
-/// Firmware-backed faults are reserved for a later implementation step.
+/// Firmware-backed communication fault state used by the control window.
 /// </summary>
 public sealed class CommunicationFaultState
 {
     public bool AvtpFaultEnabled { get; set; }
     public bool LvdsFaultEnabled { get; set; }
+    public int LvdsFaultDurationMilliseconds { get; set; } = 2000;
     public bool CanUartFaultEnabled { get; set; }
     public int CanUartMode { get; set; }
     public int CanUartFaultMode { get; set; } = 1;

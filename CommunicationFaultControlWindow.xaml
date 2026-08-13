@@ -76,20 +76,23 @@
                         <TextBlock Text="▣" FontWeight="Bold" Foreground="DarkBlue" Margin="0,0,5,0"/>
                         <TextBlock FontWeight="Bold" Foreground="#222222" Text="LVDS / Video Link"/>
                     </StackPanel>
-                    <Border HorizontalAlignment="Right" Background="#FCE5CD" CornerRadius="8" Padding="8,3" ToolTip="Firmware support is pending.">
-                        <TextBlock FontWeight="Bold" Foreground="#B45F06" Text="● PENDING"/>
+                    <Border x:Name="LvdsStatusBadge" HorizontalAlignment="Right" Background="#D9EAD3" CornerRadius="8" Padding="8,3">
+                        <TextBlock x:Name="LvdsStatusText" FontWeight="Bold" Foreground="#2E6B2E" Text="● READY"/>
                     </Border>
                 </Grid>
             </GroupBox.Header>
             <Grid>
                 <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
                 <StackPanel>
-                    <TextBlock FontWeight="Bold" Foreground="Gray" Text="Interrupt LVDS frames between ECU and LSM"/>
+                    <Grid>
+                        <TextBlock FontWeight="Bold" Foreground="Gray" Text="Select local LVDS idle between ECU and LSM"/>
+                        <TextBlock x:Name="LvdsCountdownText" HorizontalAlignment="Right" FontWeight="Bold" Foreground="DarkRed" Visibility="Collapsed"/>
+                    </Grid>
                 </StackPanel>
-                <Grid Grid.Row="1" Margin="0,12,0,0" IsEnabled="False" Opacity="0.55">
+                <Grid Grid.Row="1" Margin="0,12,0,0">
                     <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="88"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="20"/><ColumnDefinition Width="96"/></Grid.ColumnDefinitions>
-                    <TextBlock VerticalAlignment="Center" Foreground="Gray" Text="Fault Duration:" Margin="0,0,8,0"/>
-                    <Border Grid.Column="1" Width="64" Height="20" HorizontalAlignment="Left" BorderBrush="#ABADB3" BorderThickness="1" Background="White" CornerRadius="2" IsEnabled="False">
+                    <TextBlock x:Name="LvdsDurationLabel" VerticalAlignment="Center" Foreground="Black" Text="Fault Duration:" Margin="0,0,8,0"/>
+                    <Border x:Name="LvdsDurationBorder" Grid.Column="1" Width="64" Height="20" HorizontalAlignment="Left" BorderBrush="#ABADB3" BorderThickness="1" Background="White" CornerRadius="2">
                         <Grid Width="62" Height="18" MinWidth="62" MaxWidth="62" MinHeight="18" MaxHeight="18" ClipToBounds="True">
                             <TextBox x:Name="LvdsDurationTextBox" Width="62" Height="18" MinWidth="62" MaxWidth="62" MinHeight="18" MaxHeight="18" Text="2000" BorderThickness="0" Background="Transparent" VerticalContentAlignment="Center" Padding="4,0,16,0"/>
                             <StackPanel Orientation="Vertical" HorizontalAlignment="Right" VerticalAlignment="Top" Width="16" Height="18" MinWidth="16" MaxWidth="16" MinHeight="18" MaxHeight="18" Panel.ZIndex="1">
@@ -98,8 +101,9 @@
                             </StackPanel>
                         </Grid>
                     </Border>
-                    <TextBlock Grid.Column="2" VerticalAlignment="Center" Margin="5,0,0,0" Foreground="Gray" Text="ms"/>
-                    <Button Grid.Column="4" Width="96" Height="28" Content="Inject Fault"/>
+                    <TextBlock x:Name="LvdsDurationUnit" Grid.Column="2" VerticalAlignment="Center" Margin="5,0,0,0" Foreground="Black" Text="ms"/>
+                    <Button x:Name="LvdsInjectButton" Grid.Column="4" Width="96" Height="28" Content="Inject Fault" Background="DodgerBlue" Foreground="White"/>
+                    <Button x:Name="LvdsStopButton" Grid.Column="4" Width="96" Height="28" Content="Stop" Background="#C62828" Foreground="White" Visibility="Collapsed"/>
                 </Grid>
             </Grid>
         </GroupBox>

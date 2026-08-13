@@ -48,6 +48,7 @@
 #include "frame_eth.h"
 #include "device_mode.h"
 #include "adapter_ctrl.h"
+#include "lvds_fault_inject.h"
 
 /* STM timing */
 #include "Stm/Std/IfxStm.h"
@@ -278,6 +279,7 @@ void core0_main(void)
          * Must run every iteration to drain all RX buffers and prevent
          * DMA descriptor ring exhaustion. */
         frame_eth_poll_rx();
+        lvds_fault_tick();
 
         /* Drain ALL completed DMA buffers before sending Ethernet.
          * This prevents data loss when frame_eth_send_pending() takes

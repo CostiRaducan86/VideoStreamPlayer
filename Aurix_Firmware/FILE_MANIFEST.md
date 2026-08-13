@@ -48,8 +48,10 @@ The diagnostic bus is routed through CAN transceivers used as a differential PHY
 
 | File | Role |
 | --- | --- |
-| `adapter_ctrl.h` | API: init, set_mode, set_can_uart, apply; enums for modes |
-| `adapter_ctrl.c` | GPIO pin configuration and relay control for ECU/direct switching |
+| `adapter_ctrl.h` | API: init, control mode, TTL source, CAN-UART source and adapter selectors |
+| `adapter_ctrl.c` | GPIO pin configuration, safe TTL source sequencing and relay control |
+| `lvds_fault_inject.h` | SELECT_LOCAL_IDLE policy API, profiles and telemetry |
+| `lvds_fault_inject.c` | Physical LVDS selector fault state, duration expiry and CLEAR |
 
 ### Device Mode / Orchestration
 
@@ -123,6 +125,11 @@ frame_eth.c
   -> DIAG_SNIFF command RX
   -> SET_ADAPTER_MODE command RX
   -> SET_DEVICE_MODE command RX
+  -> LVDS_FAULT command RX (SELECT_LOCAL_IDLE)
+
+lvds_fault_inject.c
+  -> adapter_ctrl.h (TTL_SEL and P02.2 local idle source)
+  -> STM0 timebase
 
 camera_trigger.c
   -> STM0 comparator

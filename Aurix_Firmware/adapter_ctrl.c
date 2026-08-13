@@ -14,11 +14,15 @@
 
 /* ─── Pin definitions ────────────────────────────────────────────── */
 #define PIN_TTL_SEL         &MODULE_P20, 0   /* X103-10 → LOCAL_J3-2  */
+#define PIN_TTL_FROM_LOCAL  &MODULE_P02, 2  /* X103-15 → LOCAL_J3-4  */
 #define PIN_LOGIC_5V_SEL    &MODULE_P21, 3   /* X103-6  → LOCAL_J3-5  */
 #define PIN_LOCAL_RL_DET    &MODULE_P14, 7   /* X103-8  → LOCAL_J3-6  */
 #define PIN_RL_DET_SEL      &MODULE_P21, 2   /* X103-5  → LOCAL_J3-7  */
 #define PIN_CAN_SEL         &MODULE_P14, 6   /* X103-9  → LOCAL_J3-12 */
 #define PIN_LED_POWER_SEL   &MODULE_P21, 4   /* X103-11 → LOCAL_J3-15 */
+
+static adapter_control_mode_t s_controlMode = ADAPTER_MODE_ECU;
+static adapter_can_uart_mode_t s_canUartMode = CAN_UART_ECU_LSM;
 
 /* ─── Helpers ─────────────────────────────────────────────────────── */
 static void pin_set(Ifx_P *port, uint8 pin, boolean level)
@@ -33,8 +37,13 @@ static void pin_set(Ifx_P *port, uint8 pin, boolean level)
 
 void adapter_ctrl_init(void)
 {
+    /* Establish safe output latches before enabling the selector pins. */
+    pin_set(PIN_TTL_FROM_LOCAL, TRUE);
+    pin_set(PIN_TTL_SEL, FALSE);
+
     /* Configure all SEL/EN pins as push-pull output, strong driver */
     IfxPort_setPinModeOutput(PIN_TTL_SEL,       IfxPort_OutputMode_pushPull, IfxPort_OutputIdx_general);
+    IfxPort_setPinModeOutput(PIN_TTL_FROM_LOCAL, IfxPort_OutputMode_pushPull, IfxPort_OutputIdx_general);
     IfxPort_setPinModeOutput(PIN_RL_DET_SEL,    IfxPort_OutputMode_pushPull, IfxPort_OutputIdx_general);
     IfxPort_setPinModeOutput(PIN_LOCAL_RL_DET,   IfxPort_OutputMode_pushPull, IfxPort_OutputIdx_general);
     IfxPort_setPinModeOutput(PIN_CAN_SEL,        IfxPort_OutputMode_pushPull, IfxPort_OutputIdx_general);
@@ -42,16 +51,19 @@ void adapter_ctrl_init(void)
     IfxPort_setPinModeOutput(PIN_LOGIC_5V_SEL,     IfxPort_OutputMode_pushPull, IfxPort_OutputIdx_general);
 
     /* Default after reset/run: ECU control mode + ECU↔SmartVisio↔LSM */
+    adapter_ctrl_prepare_ttl_local_idle();
     adapter_ctrl_set_mode(ADAPTER_MODE_ECU);
     adapter_ctrl_set_can_uart(CAN_UART_ECU_LSM);
 }
 
 void adapter_ctrl_set_mode(adapter_control_mode_t mode)
 {
+    s_controlMode = mode;
+
     if (mode == ADAPTER_MODE_ECU)
     {
         /* ECU in chain: ECU drives LVDS, ECU provides 5V logic */
-        pin_set(PIN_TTL_SEL,       FALSE);  /* ECU LVDS path */
+        adapter_ctrl_set_ttl_source(ADAPTER_TTL_ECU);
         pin_set(PIN_LOGIC_5V_SEL,  FALSE);  /* Enable ECU 5V */
         pin_set(PIN_LOCAL_RL_DET,  FALSE);  /* Local RL level irrelevant (ECU drives) */
         pin_set(PIN_RL_DET_SEL,    FALSE);  /* ECU RL detect path*/
@@ -60,7 +72,7 @@ void adapter_ctrl_set_mode(adapter_control_mode_t mode)
     else /* ADAPTER_MODE_DIRECT */
     {
         /* No ECU: SmartVisio drives LVDS via P02.2 (ASCLIN1 TX), Local 5V powers adapter */
-        pin_set(PIN_TTL_SEL,       TRUE);  /* Local (SmartVisio) LVDS path */
+        adapter_ctrl_set_ttl_source(ADAPTER_TTL_LOCAL);
         pin_set(PIN_LOGIC_5V_SEL,  TRUE);  /* Enable Local 5V */
         pin_set(PIN_LOCAL_RL_DET,  FALSE); /* Default LOW = GND = low resolution */
         pin_set(PIN_RL_DET_SEL,    TRUE);  /* Local RL detect path*/
@@ -68,8 +80,39 @@ void adapter_ctrl_set_mode(adapter_control_mode_t mode)
     }
 }
 
+adapter_control_mode_t adapter_ctrl_get_mode(void)
+{
+    return s_controlMode;
+}
+
+adapter_can_uart_mode_t adapter_ctrl_get_can_uart(void)
+{
+    return s_canUartMode;
+}
+
+void adapter_ctrl_prepare_ttl_local_idle(void)
+{
+    /* UART idle is HIGH. Keep the local source stable before selecting it. */
+    pin_set(PIN_TTL_FROM_LOCAL, TRUE);
+}
+
+void adapter_ctrl_set_ttl_source(adapter_ttl_source_t source)
+{
+    if (source == ADAPTER_TTL_LOCAL)
+    {
+        adapter_ctrl_prepare_ttl_local_idle();
+        pin_set(PIN_TTL_SEL, TRUE);
+    }
+    else
+    {
+        pin_set(PIN_TTL_SEL, FALSE);
+    }
+}
+
 void adapter_ctrl_set_can_uart(adapter_can_uart_mode_t mode)
 {
+    s_canUartMode = mode;
+
     switch (mode)
     {
         case CAN_UART_ECU_LSM:

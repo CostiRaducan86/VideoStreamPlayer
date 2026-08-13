@@ -1318,6 +1318,7 @@ boolean frame_eth_send_can_diag_pending(void)
 #include "can_uart_bridge.h" /* can_uart_bridge_set_active() */
 #include "can_hw.h"        /* g_diagSniffEnabled */
 #include "can_uart_fault_inject.h"
+#include "lvds_fault_inject.h"
 #include "defect_inject.h" /* defect_inject_set_list() */
 #include "nichia_defect_inject.h" /* nichia_defect_inject_set_list() */
 
@@ -1375,8 +1376,18 @@ void frame_eth_poll_rx(void)
                     FrameEthDevice newDev = (cmdPayload == (uint8)FE_DEVICE_OSRAM)
                                           ? FE_DEVICE_OSRAM
                                           : FE_DEVICE_NICHIA;
-                    device_mode_set(newDev);
-                    g_feStats.cmdSetDeviceApplied++;
+                    if (lvds_fault_is_active() && newDev == device_mode_get())
+                    {
+                        /* The application sends CLEAR before an intentional
+                         * device change. Ignore stale/in-flight mode packets
+                         * while the physical LVDS fault owns the selector. */
+                        g_feStats.cmdSetDeviceIgnoredDuringLvds++;
+                    }
+                    else
+                    {
+                        device_mode_set(newDev);
+                        g_feStats.cmdSetDeviceApplied++;
+                    }
                 }
                 else if (cmdId == FE_CMD_DIAG_SNIFF)
                 {
@@ -1401,21 +1412,35 @@ void frame_eth_poll_rx(void)
                      *          [18] = can_uart_mode (0=ECU, 1=Direct, 2=External) */
                     uint8 ctrlMode = cmdPayload;       /* byte [17] */
                     uint8 canMode  = pRxBuf[18];       /* byte [18] */
+                    boolean sameAdapterMode;
                     adapter_control_mode_t ctrlEnum = (ctrlMode != 0u)
                         ? ADAPTER_MODE_DIRECT : ADAPTER_MODE_ECU;
                     adapter_can_uart_mode_t canEnum = CAN_UART_ECU_LSM;
                     if (canMode == 1u) canEnum = CAN_UART_ECU_SMARTVISIO_LSM;
                     else if (canMode == 2u) canEnum = CAN_UART_SMARTVISIO_LSM;
 
-                    /* Route the bus FIRST (set CAN_SEL), then
-                     * start or stop the active forwarding bridge.  AURIX
-                     * forwards bytes only in ECU↔SmartVisio↔LSM mode; in ECU and
-                     * External modes it must not drive the bus, so forwarding
-                     * stays OFF and the bus is a hardware passthrough. */
-                    adapter_ctrl_apply(ctrlEnum, canEnum);
-                    can_uart_fault_clear();
-                    can_uart_bridge_set_active(
-                        (canEnum == CAN_UART_ECU_SMARTVISIO_LSM) ? TRUE : FALSE);
+                    sameAdapterMode =
+                        (ctrlEnum == adapter_ctrl_get_mode()) &&
+                        (canEnum == adapter_ctrl_get_can_uart());
+
+                    /* A delayed/redundant SET_ADAPTER_MODE matching the
+                     * current routing must not cancel a physical LVDS fault. */
+                    if (lvds_fault_is_active() && sameAdapterMode)
+                    {
+                        g_feStats.cmdSetAdapterIgnoredDuringLvds++;
+                    }
+                    else
+                    {
+                        if (lvds_fault_is_active())
+                            lvds_fault_clear();
+
+                        /* Route the bus FIRST (set CAN_SEL), then start or
+                         * stop the active forwarding bridge. */
+                        adapter_ctrl_apply(ctrlEnum, canEnum);
+                        can_uart_fault_clear();
+                        can_uart_bridge_set_active(
+                            (canEnum == CAN_UART_ECU_SMARTVISIO_LSM) ? TRUE : FALSE);
+                    }
                 }
                 else if (cmdId == FE_CMD_CAN_UART_FAULT)
                 {
@@ -1452,6 +1477,31 @@ void frame_eth_poll_rx(void)
                             if (canUartMode == 0u)
                                 adapter_ctrl_set_can_bridge(TRUE);
                         }
+                    }
+                }
+                else if (cmdId == FE_CMD_LVDS_FAULT)
+                {
+                    /* Payload: [17] = mode, [18] = profile,
+                     * [19..20] = duration in 100 ms units, [21] = action.
+                     * Phase 1 supports SELECT_LOCAL_IDLE only. */
+                    uint8 mode = cmdPayload;
+                    uint8 profile = pRxBuf[18];
+                    uint16 duration = (uint16)(((uint16)pRxBuf[19] << 8u) | pRxBuf[20]);
+                    g_feStats.cmdLvdsFaultReceived++;
+
+                    if (pRxBuf[21] == 0u)
+                    {
+                        g_feStats.cmdLvdsFaultCleared++;
+                        lvds_fault_clear();
+                    }
+                    else
+                    {
+                        if (lvds_fault_set((LvdsFaultMode)mode,
+                                           duration,
+                                           profile))
+                            g_feStats.cmdLvdsFaultApplied++;
+                        else
+                            g_feStats.cmdLvdsFaultRejected++;
                     }
                 }
                 else if (cmdId == FE_CMD_SET_DEFECT_LIST)

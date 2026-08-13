@@ -50,6 +50,7 @@
 #define FE_CMD_SET_DEFECT_LIST    0x04u       /* Command: set OSRAM defect injection list */
 #define FE_CMD_SET_DEFECT_LIST_NICHIA 0x05u   /* Command: set Nichia defect injection list */
 #define FE_CMD_CAN_UART_FAULT     0x06u       /* Command: CAN-UART DROP fault */
+#define FE_CMD_LVDS_FAULT         0x07u       /* Command: physical LVDS fault */
 #define FE_HDR_LEN                18u
 #define FE_DIAG_HDR_LEN           8u
 /* v2 payload: 22 fixed bytes + 72 raw UART bytes = 94 bytes
@@ -161,6 +162,12 @@ typedef struct
     volatile uint32 cmdPacketsReceived;    /* Total command packets (magic "CM") */
     volatile uint32 cmdSetDeviceReceived;  /* SET_DEVICE commands received */
     volatile uint32 cmdSetDeviceApplied;   /* SET_DEVICE successfully applied */
+    volatile uint32 cmdSetDeviceIgnoredDuringLvds;
+    volatile uint32 cmdSetAdapterIgnoredDuringLvds;
+    volatile uint32 cmdLvdsFaultReceived;  /* LVDS fault packets received */
+    volatile uint32 cmdLvdsFaultApplied;   /* LVDS START packets accepted */
+    volatile uint32 cmdLvdsFaultRejected;  /* LVDS START packets rejected */
+    volatile uint32 cmdLvdsFaultCleared;   /* LVDS CLEAR packets received */
 
     /* RX poll health (command path robustness) */
     volatile uint32 rxPollBudgetHits;      /* poll loop hit per-call budget */
@@ -238,7 +245,7 @@ void frame_eth_reset_frame_state(void);
  * Poll for incoming Ethernet command packets.
  * Drains ALL RX buffers to prevent DMA descriptor exhaustion.
  * Recognises magic "CM" (0x434D) on ethertype 0x88B5;
- * currently handles CMD_SET_DEVICE (0x01) → device_mode_set().
+ * handles device mode and physical LVDS fault commands.
  * Call from the main loop.
  */
 void frame_eth_poll_rx(void);

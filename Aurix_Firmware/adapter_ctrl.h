@@ -37,6 +37,7 @@
  *
  * Logic levels:
  *   TTL_SEL:       LOW/default = ECU passthrough, HIGH = local TTL injection through 5V-tolerant buffer U8
+ *   TTL_FROM_LOCAL: AURIX P02.2 is held HIGH while no local LVDS stream is generated (UART idle).
  *   RL_DET_SEL:    LOW/default = ECU_RL_DET to LSM_RL_DET, HIGH = LOCAL_RL_DET to LSM_RL_DET.
  *   LOCAL_RL_DET:  LOW/default = GND (low resolution) [default LOW], HIGH = 5.0V (high resolution)
  *   LOGIC_5V_SEL:  LOW/default = ECU_5V_LOGIC powers LSM_5V_LOGIC, HIGH = LOCAL_5V powers LSM_5V_LOGIC.
@@ -67,11 +68,27 @@ typedef enum {
 *                               (reserved for protocol compatibility with UI) */
 } adapter_can_uart_mode_t;
 
+/* LVDS source selected by the adapter TTL multiplexer. */
+typedef enum {
+    ADAPTER_TTL_ECU   = 0,    /* U2 receiver output: TTL_FROM_ECU_3V3 */
+    ADAPTER_TTL_LOCAL = 1     /* AURIX output: TTL_FROM_LOCAL on P02.2 */
+} adapter_ttl_source_t;
+
 /* Initialise all adapter GPIO pins as outputs with ECU-default state. */
 void adapter_ctrl_init(void);
 
 /* Apply the Control Mode (ECU vs Direct). */
 void adapter_ctrl_set_mode(adapter_control_mode_t mode);
+
+/* Return the currently selected adapter control mode. */
+adapter_control_mode_t adapter_ctrl_get_mode(void);
+
+/* Return the currently selected CAN-UART routing mode. */
+adapter_can_uart_mode_t adapter_ctrl_get_can_uart(void);
+
+/* Prepare the local LVDS source in UART idle and select the requested input. */
+void adapter_ctrl_prepare_ttl_local_idle(void);
+void adapter_ctrl_set_ttl_source(adapter_ttl_source_t source);
 
 /* Apply the CAN UART Mode (independent of control mode). */
 void adapter_ctrl_set_can_uart(adapter_can_uart_mode_t mode);

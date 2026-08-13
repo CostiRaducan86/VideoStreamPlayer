@@ -1000,6 +1000,9 @@ namespace VilsSharpX
             {
                 try
                 {
+                    if (_communicationFaultState.LvdsFaultEnabled)
+                        return;
+
                     string? txDev = GetTxPcapDeviceNameOrNull();
                     if (!string.IsNullOrWhiteSpace(txDev))
                     {
@@ -1033,6 +1036,9 @@ namespace VilsSharpX
             {
                 try
                 {
+                    if (_communicationFaultState.LvdsFaultEnabled)
+                        return;
+
                     string? txDev = GetTxPcapDeviceNameOrNull();
                     if (!string.IsNullOrWhiteSpace(txDev))
                     {
@@ -1303,6 +1309,17 @@ namespace VilsSharpX
 
             if (newDeviceType == _currentDeviceType) return;
 
+            if (_communicationFaultState.LvdsFaultEnabled)
+            {
+                if (_communicationFaultControlWindow != null)
+                    _communicationFaultControlWindow.ClearLvdsFaultForExternalChange();
+                else
+                {
+                    _communicationFaultState.LvdsFaultEnabled = false;
+                    ApplyLvdsFaultState();
+                }
+            }
+
             _currentDeviceType = newDeviceType;
             ApplyDeviceTypeConstraints();
             SaveUiSettings();
@@ -1370,9 +1387,11 @@ namespace VilsSharpX
         {
             if (_settingsManager.IsLoading || !IsLoaded) return;
             _controlMode = CmbControlMode?.SelectedIndex ?? 0;
+            ClearActiveLvdsFaultForExternalChange();
             ApplyModeConstraints();
             SaveUiSettings();
             SendAdapterModeCommand();
+            UpdateCommunicationFaultAvailability();
         }
 
         private void CmbCanUartMode_SelectionChanged(object sender, System.Windows.Controls.SelectionChangedEventArgs e)
@@ -1381,6 +1400,7 @@ namespace VilsSharpX
             _canUartMode = CmbCanUartMode?.SelectedIndex ?? 0;
             if (_canUartMode == 0 && _canDiagRecording)
                 StopCanUartRecordingInternal();
+            ClearActiveLvdsFaultForExternalChange();
             SaveUiSettings();
             SendAdapterModeCommand();
             UpdateCanDiagRecordingButtons();
@@ -1395,6 +1415,20 @@ namespace VilsSharpX
                 MenuOsramDefectControl.IsEnabled = !isNichia;
             if (MenuNichiaDefectControl != null)
                 MenuNichiaDefectControl.IsEnabled = isNichia;
+        }
+
+        private void ClearActiveLvdsFaultForExternalChange()
+        {
+            if (!_communicationFaultState.LvdsFaultEnabled)
+                return;
+
+            if (_communicationFaultControlWindow != null)
+                _communicationFaultControlWindow.ClearLvdsFaultForExternalChange();
+            else
+            {
+                _communicationFaultState.LvdsFaultEnabled = false;
+                ApplyLvdsFaultState();
+            }
         }
 
         /// <summary>
@@ -1443,7 +1477,15 @@ namespace VilsSharpX
             {
                 string? txDev = GetTxPcapDeviceNameOrNull();
                 if (!string.IsNullOrWhiteSpace(txDev))
+                {
+                    if (_communicationFaultState.LvdsFaultEnabled)
+                    {
+                        AppendDiagLog("[cmd] Adapter-mode sync skipped while LVDS fault is active");
+                        return;
+                    }
+
                     AdapterModeCommand.SendAdapterMode(txDev, _controlMode, _canUartMode, AppendDiagLog);
+                }
                 else
                     AppendDiagLog("[cmd] No NIC selected — adapter-mode command not sent");
             }
@@ -3587,7 +3629,7 @@ namespace VilsSharpX
             try
             {
                 string? txDev = GetTxPcapDeviceNameOrNull();
-                if (!string.IsNullOrWhiteSpace(txDev))
+                if (!string.IsNullOrWhiteSpace(txDev) && !_communicationFaultState.LvdsFaultEnabled)
                     DeviceModeCommand.SendDeviceMode(txDev, _currentDeviceType, AppendDiagLog);
             }
             catch (Exception ex) { AppendDiagLog($"[cmd] Start device-mode: {ex.Message}"); }
@@ -5137,6 +5179,8 @@ namespace VilsSharpX
             };
             _communicationFaultControlWindow.FaultStateChanged -= ApplyCommunicationFaultState;
             _communicationFaultControlWindow.FaultStateChanged += ApplyCommunicationFaultState;
+            _communicationFaultControlWindow.LvdsFaultStateChanged -= ApplyLvdsFaultState;
+            _communicationFaultControlWindow.LvdsFaultStateChanged += ApplyLvdsFaultState;
             _communicationFaultControlWindow.CanUartFaultStateChanged -= ApplyCanUartFaultState;
             _communicationFaultControlWindow.CanUartFaultStateChanged += ApplyCanUartFaultState;
             UpdateCommunicationFaultAvailability();
@@ -5238,6 +5282,45 @@ namespace VilsSharpX
             }
         }
 
+        private void ApplyLvdsFaultState()
+        {
+            string? txDev = GetTxPcapDeviceNameOrNull();
+            if (string.IsNullOrWhiteSpace(txDev))
+            {
+                AppendDiagLog("[cmd] No NIC selected - LVDS fault command not sent");
+                if (_communicationFaultState.LvdsFaultEnabled)
+                {
+                    _communicationFaultState.LvdsFaultEnabled = false;
+                    _communicationFaultControlWindow?.ClearLvdsFaultForExternalChange(notify: false);
+                }
+                return;
+            }
+
+            try
+            {
+                bool sent = LvdsFaultCommand.Send(
+                    txDev,
+                    _currentDeviceType,
+                    _communicationFaultState.LvdsFaultDurationMilliseconds,
+                    _communicationFaultState.LvdsFaultEnabled,
+                    AppendDiagLog);
+                if (!sent && _communicationFaultState.LvdsFaultEnabled)
+                {
+                    _communicationFaultState.LvdsFaultEnabled = false;
+                    _communicationFaultControlWindow?.ClearLvdsFaultForExternalChange(notify: false);
+                }
+            }
+            catch (Exception ex)
+            {
+                AppendDiagLog($"[cmd] LVDS fault command error: {ex.Message}");
+                if (_communicationFaultState.LvdsFaultEnabled)
+                {
+                    _communicationFaultState.LvdsFaultEnabled = false;
+                    _communicationFaultControlWindow?.ClearLvdsFaultForExternalChange(notify: false);
+                }
+            }
+        }
+
         private void UpdateCommunicationFaultAvailability()
         {
             if (_communicationFaultControlWindow == null)
@@ -5245,6 +5328,9 @@ namespace VilsSharpX
 
             _communicationFaultControlWindow.IsAvtpFaultAvailable =
                 _modeOfOperation == ModeOfOperation.PlayerFromFiles;
+            _communicationFaultControlWindow.IsLvdsFaultAvailable =
+                _controlMode == 0 &&
+                !string.IsNullOrWhiteSpace(GetTxPcapDeviceNameOrNull());
             _communicationFaultControlWindow.IsCanUartFaultAvailable =
                 !string.IsNullOrWhiteSpace(GetTxPcapDeviceNameOrNull());
             _communicationFaultControlWindow.CanUartMode = _canUartMode;

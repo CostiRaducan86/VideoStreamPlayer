@@ -14,6 +14,7 @@
 #include "can_diag.h"
 #include "can_uart_bridge.h"
 #include "can_uart_fault_inject.h"
+#include "lvds_fault_inject.h"
 #include "rxmon.h"
 #include "osram_frame.h"
 
@@ -51,6 +52,7 @@ void device_mode_init(FrameEthDevice device)
     frame_eth_init(device);
     can_diag_init();
     can_uart_fault_init();
+    lvds_fault_init();
 
     /* Adapter_V2: initialise the active CAN-UART forwarding bridge
      * (ASCLIN5 ECU side + ASCLIN4 LSM side).  Forwarding stays OFF and
@@ -60,8 +62,13 @@ void device_mode_init(FrameEthDevice device)
 
 void device_mode_set(FrameEthDevice device)
 {
+    /* The PC periodically repeats SET_DEVICE. Reapplying the current profile
+     * must not clear an active physical LVDS fault. */
     if (device == s_currentDevice)
         return;
+
+    if (lvds_fault_is_active())
+        lvds_fault_clear();
 
     /* 1. Drain any pending DMA buffer (ignore it) */
     g_asclin1_dma.pCompletedBuffer = NULL_PTR;
