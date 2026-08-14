@@ -122,6 +122,7 @@ public partial class CommunicationFaultControlWindow : Window
             ApplyCanUartControlConstraints();
             RefreshUi();
         };
+        CanUartFaultDirectionComboBox.SelectionChanged += (_, _) => RefreshUi();
         _avtpFaultTimer = new DispatcherTimer
         {
             Interval = TimeSpan.FromMilliseconds(50)
@@ -322,14 +323,17 @@ public partial class CommunicationFaultControlWindow : Window
         FaultInfoFaultText.Foreground = new SolidColorBrush(isError ? Colors.DarkRed : Colors.Gray);
         FaultInfoFaultText.Text = message;
         FaultInfoConstraintText.Text = "LVDS monitor Ethernet remains active and unmodified.";
+        FaultInfoCanUartText.Text = string.Empty;
     }
 
     private void SetCanUartInfo(string message, bool isError)
     {
         FaultInfoAvtpText.Text = string.Empty;
         FaultInfoFaultText.Foreground = new SolidColorBrush(isError ? Colors.DarkRed : Colors.Gray);
-        FaultInfoFaultText.Text = message;
+        FaultInfoFaultText.Text = string.Empty;
         FaultInfoConstraintText.Text = string.Empty;
+        FaultInfoCanUartText.Foreground = new SolidColorBrush(isError ? Colors.DarkRed : Colors.Gray);
+        FaultInfoCanUartText.Text = message;
     }
 
     private void RefreshUi()
@@ -432,7 +436,9 @@ public partial class CommunicationFaultControlWindow : Window
 
     private (string FaultMode, string Constraints) GetCanUartConstraintInfo()
     {
-        string faultMode = CanUartFaultModeComboBox.SelectedIndex == 1 ? "RELAY_BYPASS" : "DROP forwarding";
+        string faultMode = CanUartFaultModeComboBox.SelectedIndex == 1
+            ? "RELAY_BYPASS"
+            : $"DROP forwarding ({GetCanUartDirectionText()})";
         string constraints = _canUartMode switch
         {
             0 => "CAN-UART mode ECU <-> LSM: RELAY_BYPASS is the only supported fault; DROP forwarding is disabled.",
@@ -440,6 +446,16 @@ public partial class CommunicationFaultControlWindow : Window
             _ => "CAN-UART mode SmartVisio <-> LSM: DROP forwarding supports direction selection; RELAY_BYPASS pauses the bridge."
         };
         return ($"Selected fault: {faultMode}.", constraints);
+    }
+
+    private string GetCanUartDirectionText()
+    {
+        return CanUartFaultDirectionComboBox.SelectedIndex switch
+        {
+            1 => "ECU -> LSM",
+            2 => "LSM -> ECU",
+            _ => "Both directions"
+        };
     }
 
     private void SetFaultInfoLines(bool avtpAvailable, bool avtpActive,
@@ -475,9 +491,11 @@ public partial class CommunicationFaultControlWindow : Window
             FaultInfoAvtpText.Foreground = new SolidColorBrush(Colors.DarkRed);
             FaultInfoFaultText.Foreground = new SolidColorBrush(Colors.Gray);
             FaultInfoConstraintText.Foreground = new SolidColorBrush(Colors.Gray);
+            FaultInfoCanUartText.Foreground = new SolidColorBrush(Colors.Gray);
             FaultInfoAvtpText.Text = activeInfo;
             FaultInfoFaultText.Text = " ";
             FaultInfoConstraintText.Text = " ";
+            FaultInfoCanUartText.Text = " ";
             return;
         }
 
@@ -489,40 +507,34 @@ public partial class CommunicationFaultControlWindow : Window
                 ? "AVTP: ready for fault injection."
                 : "AVTP: unavailable outside AVTP Generator mode.";
 
-        string faultInfo;
-        if (lvdsAvailable)
-        {
-            faultInfo = "LVDS: SELECT_LOCAL_IDLE is ready; C# monitoring remains active.";
-        }
-        else if (canActive)
-        {
-            faultInfo = _state.CanUartFaultMode == 2
+        string faultInfo = lvdsAvailable
+            ? "LVDS: SELECT_LOCAL_IDLE is ready; C# monitoring remains active."
+            : "LVDS: fault injection unavailable.";
+
+        string canUartInfo = canActive
+            ? _state.CanUartFaultMode == 2
                 ? _state.CanUartFaultDurationMilliseconds == 0
                     ? "CAN-UART: RELAY_BYPASS active permanently."
                     : $"CAN-UART: RELAY_BYPASS active for {_state.CanUartFaultDurationMilliseconds} ms."
                 : _state.CanUartFaultDurationMilliseconds == 0
-                    ? "CAN-UART: DROP forwarding active permanently."
-                    : $"CAN-UART: DROP forwarding active for {_state.CanUartFaultDurationMilliseconds} ms.";
-        }
-        else
-        {
-            faultInfo = canAvailable
-                ? GetCanUartConstraintInfo().FaultMode
-                : "CAN-UART: fault injection unavailable.";
-        }
-
-        string constraintInfo = lvdsAvailable
-            ? "LVDS fault acts through TTL_SEL; the AURIX-to-C# LVDS monitor path is not interrupted."
+                    ? $"CAN-UART: DROP forwarding ({GetCanUartDirectionText()}) active permanently."
+                    : $"CAN-UART: DROP forwarding ({GetCanUartDirectionText()}) active for {_state.CanUartFaultDurationMilliseconds} ms."
             : canAvailable
-                ? GetCanUartConstraintInfo().Constraints
-                : "CAN-UART controls are unavailable.";
+                ? $"CAN-UART: {GetCanUartConstraintInfo().FaultMode}"
+                : "CAN-UART: fault injection unavailable.";
+
+        string canUartConstraintInfo = canAvailable
+            ? GetCanUartConstraintInfo().Constraints
+            : "CAN-UART controls are unavailable.";
 
         Brush infoBrush = avtpActive || lvdsActive || canActive ? new SolidColorBrush(Colors.DarkRed) : new SolidColorBrush(Colors.Gray);
         FaultInfoAvtpText.Foreground = infoBrush;
         FaultInfoFaultText.Foreground = infoBrush;
         FaultInfoConstraintText.Foreground = new SolidColorBrush(Colors.Gray);
+        FaultInfoCanUartText.Foreground = canActive ? new SolidColorBrush(Colors.DarkRed) : new SolidColorBrush(Colors.Gray);
         FaultInfoAvtpText.Text = avtpInfo;
         FaultInfoFaultText.Text = faultInfo;
-        FaultInfoConstraintText.Text = constraintInfo;
+        FaultInfoConstraintText.Text = canUartInfo;
+        FaultInfoCanUartText.Text = canUartConstraintInfo;
     }
 }

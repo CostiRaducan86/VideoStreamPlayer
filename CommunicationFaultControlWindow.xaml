@@ -150,11 +150,12 @@
             </Grid>
         </GroupBox>
 
-        <GroupBox Grid.Row="5" Header="Info" Padding="10" Height="120">
+        <GroupBox Grid.Row="5" Header="Info" Padding="10" Height="145">
             <StackPanel>
                 <TextBlock x:Name="FaultInfoAvtpText" Foreground="Gray" TextWrapping="Wrap"/>
                 <TextBlock x:Name="FaultInfoFaultText" Foreground="Gray" TextWrapping="Wrap" Margin="0,3,0,0"/>
                 <TextBlock x:Name="FaultInfoConstraintText" Foreground="Gray" TextWrapping="Wrap" Margin="0,3,0,0"/>
+                <TextBlock x:Name="FaultInfoCanUartText" Foreground="Gray" TextWrapping="Wrap" Margin="0,3,0,0"/>
             </StackPanel>
         </GroupBox>
     </Grid>
