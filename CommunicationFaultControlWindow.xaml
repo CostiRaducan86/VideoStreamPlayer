@@ -20,8 +20,11 @@
                    Text="Communication Fault Injection"
                    FontSize="16" FontWeight="Bold"
                    Foreground="DarkBlue" Margin="0,0,0,6"/>
-        <TextBlock Grid.Row="1" TextWrapping="Wrap" Margin="0,0,0,10" Foreground="#444444"
-                   Text="Inject controlled communication interruptions between ECU, LSM and SmartVisio."/>
+        <StackPanel Grid.Row="1" Orientation="Horizontal" Margin="0,0,0,10">
+            <TextBlock Text="ECU State:" Foreground="#0f0f0f" VerticalAlignment="Center" Margin="0,0,6,0"/>
+            <Ellipse x:Name="EcuStateLed" Width="12" Height="12" Fill="#C62828" Stroke="#8E0000" StrokeThickness="1" VerticalAlignment="Center"/>
+            <TextBlock x:Name="EcuStateText" Text="Stop/Failsafe" Foreground="#777777" VerticalAlignment="Center" Margin="6,0,0,0"/>
+        </StackPanel>
 
         <GroupBox Grid.Row="2" Padding="10" Margin="0,0,0,8">
             <GroupBox.Header>

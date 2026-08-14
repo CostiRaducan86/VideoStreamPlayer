@@ -481,6 +481,11 @@
                         <TextBlock x:Name="LblLvdsFrameCount" Text="Frames: 0" Foreground="DimGray" FontSize="11"/>
                         <TextBlock x:Name="LblLvdsSyncLoss" Text="Sync_error: 0  CRC_error: 0  Parity_error: 0" Foreground="DimGray" Margin="0,2,0,0" FontSize="11"/>
                         <TextBlock x:Name="LblLvdsFps" Text="FPS: --" Foreground="DimGray" Margin="0,2,0,0" FontSize="11"/>
+                        <StackPanel Orientation="Horizontal" Margin="0,2,0,0">
+                            <TextBlock Text="ECU State:" Foreground="DimGray" FontSize="11"/>
+                            <Ellipse x:Name="MainEcuStateLed" Width="9" Height="9" Fill="#C62828" Stroke="#8E0000" StrokeThickness="1" Margin="5,0,0,0" VerticalAlignment="Center"/>
+                            <TextBlock x:Name="MainEcuStateText" Text="Stop/Failsafe" Foreground="DimGray" FontSize="11" Margin="5,0,0,0"/>
+                        </StackPanel>
                     </StackPanel>
                 </Grid>
             </GroupBox>

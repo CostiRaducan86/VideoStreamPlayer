@@ -98,6 +98,18 @@ public partial class CommunicationFaultControlWindow : Window
         }
     }
 
+    public void UpdateEcuState(double lvdsFps)
+    {
+        bool running = lvdsFps > 0.0;
+        EcuStateLed.Fill = new SolidColorBrush(running
+            ? Color.FromRgb(46, 125, 50)
+            : Color.FromRgb(198, 40, 40));
+        EcuStateLed.Stroke = new SolidColorBrush(running
+            ? Color.FromRgb(27, 94, 32)
+            : Color.FromRgb(142, 0, 0));
+        EcuStateText.Text = running ? "Running" : "Stop/Failsafe";
+    }
+
     public CommunicationFaultControlWindow(CommunicationFaultState state)
     {
         InitializeComponent();
@@ -143,6 +155,7 @@ public partial class CommunicationFaultControlWindow : Window
         Closed += (_, _) => StopCanUartFault(notify: true);
 
         RefreshUi();
+        UpdateEcuState(0.0);
     }
 
     private void AvtpInjectButton_Click(object sender, RoutedEventArgs e)

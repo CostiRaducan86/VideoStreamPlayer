@@ -2871,6 +2871,8 @@ namespace VilsSharpX
             // FPS from Ethernet capture
             double fps = _nichiaEthCapture?.FpsEma ?? _osramEthCapture?.FpsEma ?? 0;
             LblLvdsFps.Text = $"FPS: {fps:F1}";
+            UpdateMainEcuState(fps);
+            _communicationFaultControlWindow?.UpdateEcuState(fps);
 
             // Status text is now shown only in Frame Statistics, no need to duplicate here
 
@@ -2903,6 +2905,21 @@ namespace VilsSharpX
             {
                 RenderLvdsOnly(frame);
             }
+        }
+
+        private void UpdateMainEcuState(double lvdsFps)
+        {
+            if (MainEcuStateLed == null || MainEcuStateText == null)
+                return;
+
+            bool running = lvdsFps > 0.0;
+            MainEcuStateLed.Fill = new SolidColorBrush(running
+                ? Color.FromRgb(46, 125, 50)
+                : Color.FromRgb(198, 40, 40));
+            MainEcuStateLed.Stroke = new SolidColorBrush(running
+                ? Color.FromRgb(27, 94, 32)
+                : Color.FromRgb(142, 0, 0));
+            MainEcuStateText.Text = running ? "Running" : "Stop/Failsafe";
         }
 
         private void RenderLvdsOnly(byte[] frame)
@@ -4299,6 +4316,8 @@ namespace VilsSharpX
                     _matchedAForDiff = null;
                 }
                 if (LblLvdsFps != null) LblLvdsFps.Text = "FPS: 0.0";
+                UpdateMainEcuState(0.0);
+                _communicationFaultControlWindow?.UpdateEcuState(0.0);
             }
 
             // Basler camera: if ECU powers off, no LVDS → no trigger → no camera frames.
@@ -5093,9 +5112,8 @@ namespace VilsSharpX
             _appSettingsWindow = new Window
             {
                 Title = "Application Settings",
-                Owner = this,
                 Width = 380, Height = 390,
-                WindowStartupLocation = WindowStartupLocation.CenterOwner,
+                WindowStartupLocation = WindowStartupLocation.CenterScreen,
                 Content = wrapper,
                 ResizeMode = ResizeMode.NoResize,
             };
@@ -5112,9 +5130,8 @@ namespace VilsSharpX
             _ethConfigWindow = new Window
             {
                 Title = "Ethernet Configuration",
-                Owner = this,
                 Width = 500, Height = 410,
-                WindowStartupLocation = WindowStartupLocation.CenterOwner,
+                WindowStartupLocation = WindowStartupLocation.CenterScreen,
                 Content = wrapper,
                 ResizeMode = ResizeMode.NoResize,
             };
@@ -5126,7 +5143,7 @@ namespace VilsSharpX
         private void MenuCameraConfig_Click(object sender, RoutedEventArgs e)
         {
             if (_cameraConfigWindow is { IsVisible: true }) { _cameraConfigWindow.Activate(); return; }
-            _cameraConfigWindow = new CameraConfigWindow(AppendDiagLog, _baslerCapture) { Owner = this };
+            _cameraConfigWindow = new CameraConfigWindow(AppendDiagLog, _baslerCapture);
             _cameraConfigWindow.Closed += (_, _) => _cameraConfigWindow = null;
             _cameraConfigWindow.Show();
         }
@@ -5136,7 +5153,6 @@ namespace VilsSharpX
             if (_apiConfigWindow is { IsVisible: true }) { _apiConfigWindow.Activate(); return; }
             _apiConfigWindow = new()
             {
-                Owner = this,
                 OnSettingsSaved = (allowRemote, enableHttps, bindAddress, port, apiKey, cidrs) =>
                 {
                     _apiAllowRemote = allowRemote;
@@ -5165,8 +5181,6 @@ namespace VilsSharpX
                 return;
             }
 
-            _osramDefectControlWindow.Owner ??= this;
-
             _osramDefectControlWindow.Show();
             _osramDefectControlWindow.Activate();
         }
@@ -5185,8 +5199,6 @@ namespace VilsSharpX
                 return;
             }
 
-            _nichiaDefectControlWindow.Owner ??= this;
-
             _nichiaDefectControlWindow.Show();
             _nichiaDefectControlWindow.Activate();
         }
@@ -5199,10 +5211,7 @@ namespace VilsSharpX
                 return;
             }
 
-            _communicationFaultControlWindow ??= new CommunicationFaultControlWindow(_communicationFaultState)
-            {
-                Owner = this
-            };
+            _communicationFaultControlWindow ??= new CommunicationFaultControlWindow(_communicationFaultState);
             _communicationFaultControlWindow.FaultStateChanged -= ApplyCommunicationFaultState;
             _communicationFaultControlWindow.FaultStateChanged += ApplyCommunicationFaultState;
             _communicationFaultControlWindow.LvdsFaultStateChanged -= ApplyLvdsFaultState;
@@ -5210,6 +5219,10 @@ namespace VilsSharpX
             _communicationFaultControlWindow.CanUartFaultStateChanged -= ApplyCanUartFaultState;
             _communicationFaultControlWindow.CanUartFaultStateChanged += ApplyCanUartFaultState;
             UpdateCommunicationFaultAvailability();
+            double currentLvdsFps = _currentDeviceType == LsmDeviceType.Nichia
+                ? _nichiaEthCapture?.FpsEma ?? 0.0
+                : _osramEthCapture?.FpsEma ?? 0.0;
+            _communicationFaultControlWindow.UpdateEcuState(currentLvdsFps);
             _communicationFaultControlWindow.Closed += (_, _) => _communicationFaultControlWindow = null;
             _communicationFaultControlWindow.Show();
             _communicationFaultControlWindow.Activate();
