@@ -1451,7 +1451,7 @@ void frame_eth_poll_rx(void)
                 else if (cmdId == FE_CMD_CAN_UART_FAULT)
                 {
                     /* Payload: [17] = mode, [18] = direction,
-                     * [19..20] = duration in 100 ms units, [21] = action.
+                     * [19..20] = duration in milliseconds, [21] = action.
                      * action 0 clears the current fault; action 1 starts the
                      * requested DROP or RELAY_BYPASS fault. */
                     uint8 mode = cmdPayload;

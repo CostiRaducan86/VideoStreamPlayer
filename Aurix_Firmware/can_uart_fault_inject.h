@@ -45,13 +45,13 @@ typedef struct
 
 extern CanUartFaultStats g_canUartFaultStats;
 
-/* Initialise the fault state and derive the STM duration conversion. */
+/* Initialise the fault state and derive the STM millisecond conversion. */
 void can_uart_fault_init(void);
 
-/* Start a DROP fault. Duration is expressed in 100 ms units. */
+/* Start a DROP or RELAY_BYPASS fault. Duration is expressed in milliseconds. */
 boolean can_uart_fault_set(CanUartFaultMode mode,
                            CanUartFaultDirection direction,
-                           uint16 durationUnits100Ms,
+                           uint16 durationMs,
                            uint8 canUartMode);
 
 /* Disable the active fault. Safe to call repeatedly. */

@@ -26,9 +26,7 @@ public static class CanUartFaultCommand
         bool start,
         Action<string>? log = null)
     {
-        int durationUnits = durationMilliseconds == 0
-            ? 0
-            : Math.Clamp((durationMilliseconds + 99) / 100, 1, 600);
+        int durationMs = Math.Clamp(durationMilliseconds, 0, 60000);
         byte modeByte = (byte)Math.Clamp(mode, 0, 255);
         if (modeByte != DropMode && modeByte != RelayBypassMode)
             throw new ArgumentOutOfRangeException(nameof(mode));
@@ -52,8 +50,8 @@ public static class CanUartFaultCommand
         packet[16] = CommandId;
         packet[17] = modeByte;
         packet[18] = directionByte;
-        packet[19] = (byte)(durationUnits >> 8);
-        packet[20] = (byte)durationUnits;
+        packet[19] = (byte)(durationMs >> 8);
+        packet[20] = (byte)durationMs;
         packet[21] = start ? (byte)1 : (byte)0;
         packet[22] = (byte)Math.Clamp(canUartMode, 0, 2);
 
@@ -74,11 +72,12 @@ public static class CanUartFaultCommand
         {
             txDevice.Open(DeviceModes.Promiscuous, read_timeout: 1);
             opened = true;
-            for (int i = 0; i < 3; i++)
-                txDevice.SendPacket(packet);
+            // A short bypass can expire before a redundant copy arrives.
+            // Sending one command prevents CAN_SEL from being retriggered.
+            txDevice.SendPacket(packet);
 
             string action = start ? "START" : "CLEAR";
-            log?.Invoke($"[cmd] Sent CAN-UART fault {action} -> mode={modeByte}, direction={directionByte}, duration={durationUnits * 100} ms");
+            log?.Invoke($"[cmd] Sent CAN-UART fault {action} -> mode={modeByte}, direction={directionByte}, duration={durationMs} ms");
             return true;
         }
         catch (Exception ex)

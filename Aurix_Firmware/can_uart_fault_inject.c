@@ -14,8 +14,7 @@
 
 #include "Stm/Std/IfxStm.h"
 
-#define CAN_UART_FAULT_MAX_DURATION_UNITS 600u
-/* The command duration is limited to 600 x 100 ms = 60 seconds. */
+#define CAN_UART_FAULT_MAX_DURATION_MS 60000u
 
 CanUartFaultStats g_canUartFaultStats;
 
@@ -23,28 +22,28 @@ static volatile uint8 s_active;
 static volatile CanUartFaultMode s_mode;
 static volatile CanUartFaultDirection s_direction;
 static volatile uint8 s_canUartMode;
-static volatile uint16 s_remainingUnits;
-static volatile uint16 s_durationUnits;
+static volatile uint16 s_remainingMilliseconds;
+static volatile uint16 s_durationMilliseconds;
 static volatile uint32 s_lastTickStm;
 static volatile uint32 s_partialTicks;
 static volatile uint8 s_bypassExpired;
 static volatile uint8 s_canSelExpired;
-static uint32 s_ticksPer100Ms; /* STM0 ticks represented by one 100 ms unit. */
+static uint32 s_ticksPerMillisecond; /* STM0 ticks represented by one millisecond. */
 
 void can_uart_fault_init(void)
 {
     uint32 frequency = (uint32)IfxStm_getFrequency(&MODULE_STM0);
 
     /* Use STM0 as the common timebase for command expiry on CPU2. */
-    s_ticksPer100Ms = frequency / 10u;
-    if (s_ticksPer100Ms == 0u)
-        s_ticksPer100Ms = 1u;
+    s_ticksPerMillisecond = frequency / 1000u;
+    if (s_ticksPerMillisecond == 0u)
+        s_ticksPerMillisecond = 1u;
 
     s_active = 0u;
     s_mode = CAN_UART_FAULT_OFF;
     s_direction = CAN_UART_FAULT_DIR_BOTH;
-    s_remainingUnits = 0u;
-    s_durationUnits = 0u;
+    s_remainingMilliseconds = 0u;
+    s_durationMilliseconds = 0u;
     s_lastTickStm = IfxStm_getLower(&MODULE_STM0);
     s_partialTicks = 0u;
     s_bypassExpired = 0u;
@@ -58,7 +57,7 @@ void can_uart_fault_init(void)
 
 boolean can_uart_fault_set(CanUartFaultMode mode,
                            CanUartFaultDirection direction,
-                           uint16 durationUnits100Ms,
+                           uint16 durationMs,
                            uint8 canUartMode)
 {
     uint32 now;
@@ -66,24 +65,23 @@ boolean can_uart_fault_set(CanUartFaultMode mode,
     /* Duration zero means a permanent fault until an explicit clear. */
     if ((mode != CAN_UART_FAULT_DROP && mode != CAN_UART_FAULT_RELAY_BYPASS) ||
         direction > CAN_UART_FAULT_DIR_LSM_TO_ECU ||
-        durationUnits100Ms > CAN_UART_FAULT_MAX_DURATION_UNITS ||
+        durationMs > CAN_UART_FAULT_MAX_DURATION_MS ||
         canUartMode > 2u)
     {
         g_canUartFaultStats.commandRejected++;
         g_canUartFaultStats.lastRejectReason =
-            ((uint32)mode << 16u) | ((uint32)direction << 8u) | durationUnits100Ms;
+            ((uint32)mode << 16u) | ((uint32)direction << 8u) | durationMs;
         return FALSE;
     }
 
     now = IfxStm_getLower(&MODULE_STM0);
 
-    /* The PC sends three identical START packets. Treat an identical START
-     * received while active as a duplicate: do not extend the fault. */
+    /* Treat an identical START received while active as a duplicate. */
     if (s_active != 0u &&
         s_mode == mode &&
         s_direction == direction &&
         s_canUartMode == canUartMode &&
-        s_durationUnits == durationUnits100Ms)
+        s_durationMilliseconds == durationMs)
     {
         g_canUartFaultStats.commandApplied++;
         g_canUartFaultStats.duplicateStartCount++;
@@ -96,8 +94,8 @@ boolean can_uart_fault_set(CanUartFaultMode mode,
     s_mode = mode;
     s_direction = direction;
     s_canUartMode = canUartMode;
-    s_durationUnits = durationUnits100Ms;
-    s_remainingUnits = durationUnits100Ms;
+    s_durationMilliseconds = durationMs;
+    s_remainingMilliseconds = durationMs;
     s_lastTickStm = now;
     s_partialTicks = 0u;
     s_bypassExpired = 0u;
@@ -108,7 +106,7 @@ boolean can_uart_fault_set(CanUartFaultMode mode,
     g_canUartFaultStats.active = 1u;
     g_canUartFaultStats.mode = mode;
     g_canUartFaultStats.direction = direction;
-    g_canUartFaultStats.durationMs = (uint32)durationUnits100Ms * 100u;
+    g_canUartFaultStats.durationMs = durationMs;
     return TRUE;
 }
 
@@ -119,8 +117,8 @@ void can_uart_fault_clear(void)
     s_mode = CAN_UART_FAULT_OFF;
     s_direction = CAN_UART_FAULT_DIR_BOTH;
     s_canUartMode = 0u;
-    s_remainingUnits = 0u;
-    s_durationUnits = 0u;
+    s_remainingMilliseconds = 0u;
+    s_durationMilliseconds = 0u;
     s_lastTickStm = IfxStm_getLower(&MODULE_STM0);
     s_partialTicks = 0u;
 
@@ -135,7 +133,7 @@ void can_uart_fault_tick(void)
 {
     uint32 now;
     uint32 deltaTicks;
-    uint32 elapsedUnits;
+    uint32 elapsedMilliseconds;
     CanUartFaultMode expiredMode;
     uint8 expiredCanUartMode;
 
@@ -145,31 +143,30 @@ void can_uart_fault_tick(void)
     if (g_canUartFaultStats.durationMs == 0u)
         return;
 
-    if (s_ticksPer100Ms == 0u)
+    if (s_ticksPerMillisecond == 0u)
         return;
 
     now = IfxStm_getLower(&MODULE_STM0);
     /* CPU2 services this loop continuously, so the elapsed delta is always
-     * below one 32-bit STM wrap. Accumulate only one 100 ms quantum at a time
-     * and therefore support arbitrary total durations without timestamp
-     * overflow. */
+     * below one 32-bit STM wrap. Accumulate millisecond quanta without
+     * requiring a long-lived absolute timestamp. */
     deltaTicks = now - s_lastTickStm;
     s_lastTickStm = now;
-    elapsedUnits = deltaTicks / s_ticksPer100Ms;
-    s_partialTicks += deltaTicks % s_ticksPer100Ms;
-    if (s_partialTicks >= s_ticksPer100Ms)
+    elapsedMilliseconds = deltaTicks / s_ticksPerMillisecond;
+    s_partialTicks += deltaTicks % s_ticksPerMillisecond;
+    if (s_partialTicks >= s_ticksPerMillisecond)
     {
-        elapsedUnits++;
-        s_partialTicks -= s_ticksPer100Ms;
+        elapsedMilliseconds++;
+        s_partialTicks -= s_ticksPerMillisecond;
     }
 
-    while (elapsedUnits > 0u && s_remainingUnits > 0u)
+    while (elapsedMilliseconds > 0u && s_remainingMilliseconds > 0u)
     {
-        s_remainingUnits--;
-        elapsedUnits--;
+        s_remainingMilliseconds--;
+        elapsedMilliseconds--;
     }
 
-    if (s_remainingUnits == 0u)
+    if (s_remainingMilliseconds == 0u)
     {
         expiredMode = s_mode;
         expiredCanUartMode = s_canUartMode;

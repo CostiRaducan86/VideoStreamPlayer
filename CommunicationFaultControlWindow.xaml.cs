@@ -125,7 +125,7 @@ public partial class CommunicationFaultControlWindow : Window
         CanUartFaultDirectionComboBox.SelectionChanged += (_, _) => RefreshUi();
         _avtpFaultTimer = new DispatcherTimer
         {
-            Interval = TimeSpan.FromMilliseconds(50)
+            Interval = TimeSpan.FromMilliseconds(1)
         };
         _avtpFaultTimer.Tick += AvtpFaultTimer_Tick;
         _lvdsFaultTimer = new DispatcherTimer
