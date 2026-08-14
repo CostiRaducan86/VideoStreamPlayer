@@ -11,7 +11,7 @@
 #include "adapter_ctrl.h"
 #include "Stm/Std/IfxStm.h"
 
-#define LVDS_FAULT_MAX_DURATION_UNITS 600u
+#define LVDS_FAULT_MAX_DURATION_MS 60000u
 
 LvdsFaultStats g_lvdsFaultStats;
 
@@ -19,7 +19,7 @@ static volatile uint8 s_active;
 static volatile LvdsFaultMode s_mode;
 static volatile uint8 s_profile;
 static volatile uint64 s_expiryStm;
-static uint64 s_ticksPer100Ms;
+static uint64 s_ticksPerMillisecond;
 static uint32 s_stmLowerPrevious;
 static uint64 s_stmUpper;
 
@@ -38,9 +38,9 @@ void lvds_fault_init(void)
 {
     uint32 frequency = (uint32)IfxStm_getFrequency(&MODULE_STM0);
 
-    s_ticksPer100Ms = (uint64)frequency / 10u;
-    if (s_ticksPer100Ms == 0u)
-        s_ticksPer100Ms = 1u;
+    s_ticksPerMillisecond = (uint64)frequency / 1000u;
+    if (s_ticksPerMillisecond == 0u)
+        s_ticksPerMillisecond = 1u;
 
     s_active = 0u;
     s_mode = LVDS_FAULT_OFF;
@@ -56,19 +56,19 @@ void lvds_fault_init(void)
 }
 
 boolean lvds_fault_set(LvdsFaultMode mode,
-                       uint16 durationUnits100Ms,
+                       uint16 durationMs,
                        uint8 profile)
 {
     uint64 now;
 
     if (mode != LVDS_FAULT_SELECT_LOCAL_IDLE ||
-        durationUnits100Ms > LVDS_FAULT_MAX_DURATION_UNITS ||
+        durationMs > LVDS_FAULT_MAX_DURATION_MS ||
         profile > LVDS_FAULT_PROFILE_OSRAM ||
         adapter_ctrl_get_mode() != ADAPTER_MODE_ECU)
     {
         g_lvdsFaultStats.commandRejected++;
         g_lvdsFaultStats.lastRejectReason =
-            ((uint32)mode << 16u) | ((uint32)profile << 8u) | durationUnits100Ms;
+            ((uint32)mode << 16u) | ((uint32)profile << 8u) | durationMs;
         return FALSE;
     }
 
@@ -87,16 +87,16 @@ boolean lvds_fault_set(LvdsFaultMode mode,
     now = lvds_fault_stm_now();
     s_mode = mode;
     s_profile = profile;
-    s_expiryStm = (durationUnits100Ms == 0u)
+    s_expiryStm = (durationMs == 0u)
         ? 0u
-        : now + ((uint64)durationUnits100Ms * s_ticksPer100Ms);
+        : now + ((uint64)durationMs * s_ticksPerMillisecond);
     s_active = 1u;
 
     g_lvdsFaultStats.commandApplied++;
     g_lvdsFaultStats.active = 1u;
     g_lvdsFaultStats.mode = mode;
     g_lvdsFaultStats.profile = profile;
-    g_lvdsFaultStats.durationMs = (uint32)durationUnits100Ms * 100u;
+    g_lvdsFaultStats.durationMs = durationMs;
     g_lvdsFaultStats.selectorTransitions++;
     return TRUE;
 }

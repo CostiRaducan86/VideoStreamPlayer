@@ -41,12 +41,12 @@ typedef struct
 
 extern LvdsFaultStats g_lvdsFaultStats;
 
-/* Initialise the STM duration conversion and publish the inactive state. */
+/* Initialise the STM millisecond conversion and publish the inactive state. */
 void lvds_fault_init(void);
 
-/* Start SELECT_LOCAL_IDLE. Duration is expressed in 100 ms units. */
+/* Start SELECT_LOCAL_IDLE. Duration is expressed in milliseconds. */
 boolean lvds_fault_set(LvdsFaultMode mode,
-                       uint16 durationUnits100Ms,
+                       uint16 durationMs,
                        uint8 profile);
 
 /* Restore the ECU LVDS source. Safe to call repeatedly. */

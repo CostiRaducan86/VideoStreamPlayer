@@ -1488,7 +1488,7 @@ void frame_eth_poll_rx(void)
                 else if (cmdId == FE_CMD_LVDS_FAULT)
                 {
                     /* Payload: [17] = mode, [18] = profile,
-                     * [19..20] = duration in 100 ms units, [21] = action.
+                     * [19..20] = duration in milliseconds, [21] = action.
                      * Phase 1 supports SELECT_LOCAL_IDLE only. */
                     uint8 mode = cmdPayload;
                     uint8 profile = pRxBuf[18];

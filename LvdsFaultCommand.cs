@@ -26,9 +26,7 @@ public static class LvdsFaultCommand
         bool start,
         Action<string>? log = null)
     {
-        int durationUnits = durationMilliseconds == 0
-            ? 0
-            : Math.Clamp((durationMilliseconds + 99) / 100, 1, 600);
+        int durationMs = Math.Clamp(durationMilliseconds, 0, 60000);
         byte profile = deviceType switch
         {
             LsmDeviceType.Nichia => ProfileNichia,
@@ -53,8 +51,8 @@ public static class LvdsFaultCommand
         packet[16] = CommandId;
         packet[17] = SelectLocalIdleMode;
         packet[18] = profile;
-        packet[19] = (byte)(durationUnits >> 8);
-        packet[20] = (byte)durationUnits;
+        packet[19] = (byte)(durationMs >> 8);
+        packet[20] = (byte)durationMs;
         packet[21] = start ? (byte)1 : (byte)0;
 
         var device = CaptureDeviceList.Instance
@@ -74,11 +72,12 @@ public static class LvdsFaultCommand
         {
             txDevice.Open(DeviceModes.Promiscuous, read_timeout: 1);
             opened = true;
-            for (int i = 0; i < 3; i++)
-                txDevice.SendPacket(packet);
+            // A short LVDS fault can expire before a redundant copy arrives.
+            // Sending one command prevents 1-3 ms faults from being retriggered.
+            txDevice.SendPacket(packet);
 
             string action = start ? "START" : "CLEAR";
-            log?.Invoke($"[cmd] Sent LVDS SELECT_LOCAL_IDLE {action} -> profile={profile}, duration={durationUnits * 100} ms");
+            log?.Invoke($"[cmd] Sent LVDS SELECT_LOCAL_IDLE {action} -> profile={profile}, duration={durationMs} ms");
             return true;
         }
         catch (Exception ex)
