@@ -2954,6 +2954,7 @@ namespace VilsSharpX
 
             lock (_frameLock)
             {
+                _cameraDisplaySyncEnabled = true;
                 _lvdsCameraDisplayCredits = Math.Min(_lvdsCameraDisplayCredits + 1, 2);
                 _lvdsFramesSinceSyncReset++;
                 _lvdsComparisonReady = _lvdsFramesSinceSyncReset >= LvdsComparisonWarmupFrames;
@@ -4420,6 +4421,7 @@ namespace VilsSharpX
                     _matchedAForDiff = null;
                 }
                 ResetCameraDisplaySync();
+                _cameraDisplaySyncEnabled = false;
                 if (LblLvdsFps != null) LblLvdsFps.Text = "FPS: 0.0";
                 UpdateMainEcuState(0.0);
                 _communicationFaultControlWindow?.UpdateEcuState(0.0);
