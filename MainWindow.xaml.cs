@@ -4299,11 +4299,10 @@ namespace VilsSharpX
                 EnterWaitingForSignalState();
             }
 
-            // LVDS Ethernet: if ECU powers off, LVDS frames stop arriving.
-            // Detect timeout and reset pane B + D to "Signal not available".
+            // LVDS Ethernet: if ECU powers off or enters failsafe, LVDS frames
+            // stop arriving. Detect timeout in every running mode, including
+            // AVTP Generator, and reset pane B + D to "Signal not available".
             if (_playback.IsRunning
-                && (_modeOfOperation == ModeOfOperation.AvtpLiveMonitor
-                    || _communicationFaultState.AvtpFaultEnabled)
                 && !_playback.IsPaused
                 && !_lvdsSignalLost
                 && _lastLvdsFrameUtc != DateTime.MinValue
