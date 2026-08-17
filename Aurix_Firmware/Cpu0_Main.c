@@ -275,6 +275,11 @@ void core0_main(void)
 
     while (1)
     {
+        /* CPU0 owns ASCLIN1, DMA, GETH and the frame parsers.  A TFT touch
+         * request is only a mailbox notification; apply it here so no other
+         * core reconfigures these peripherals concurrently with this loop. */
+        device_mode_process_request();
+
         /* Poll for incoming command packets (device mode switch from PC).
          * Must run every iteration to drain all RX buffers and prevent
          * DMA descriptor ring exhaustion. */

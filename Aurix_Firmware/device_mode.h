@@ -53,6 +53,12 @@ void device_mode_init(FrameEthDevice device);
  */
 void device_mode_set(FrameEthDevice device);
 
+/* Queue a device change from a non-owner core. CPU0 applies it safely. */
+void device_mode_request(FrameEthDevice device);
+
+/* Apply one pending device change from the CPU0 main loop. */
+void device_mode_process_request(void);
+
 /**
  * Query the current device mode.
  */

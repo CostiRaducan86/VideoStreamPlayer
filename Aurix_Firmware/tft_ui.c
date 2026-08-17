@@ -988,7 +988,7 @@ static uint8 handle_config_option_touch(uint16 px, uint16 py)
         {
             if (dev != FE_DEVICE_OSRAM)
             {
-                device_mode_set(FE_DEVICE_OSRAM);
+                device_mode_request(FE_DEVICE_OSRAM);
                 s_lastStatusDevice = 0xFFu;
                 s_lastDisplaySeq = 0xFFFFFFFFu;
                 s_prevDrawnValid = 0u;
@@ -1010,7 +1010,7 @@ static uint8 handle_config_option_touch(uint16 px, uint16 py)
         {
             if (dev != FE_DEVICE_NICHIA)
             {
-                device_mode_set(FE_DEVICE_NICHIA);
+                device_mode_request(FE_DEVICE_NICHIA);
                 s_lastStatusDevice = 0xFFu;
                 s_lastDisplaySeq = 0xFFFFFFFFu;
                 s_prevDrawnValid = 0u;

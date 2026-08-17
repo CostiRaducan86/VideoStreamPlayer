@@ -21,6 +21,8 @@
 /* ==================== Internal state ==================== */
 
 static FrameEthDevice s_currentDevice = FE_DEVICE_NICHIA;
+static volatile uint8 s_requestedDevice = (uint8)FE_DEVICE_NICHIA;
+static volatile uint8 s_deviceRequestPending = 0u;
 
 /* ==================== Implementation ==================== */
 
@@ -107,6 +109,29 @@ void device_mode_set(FrameEthDevice device)
     }
 
     s_currentDevice = device;
+}
+
+void device_mode_request(FrameEthDevice device)
+{
+    if ((device != FE_DEVICE_OSRAM) && (device != FE_DEVICE_NICHIA))
+        return;
+
+    s_requestedDevice = (uint8)device;
+    s_deviceRequestPending = 1u;
+}
+
+void device_mode_process_request(void)
+{
+    FrameEthDevice requested;
+
+    if (s_deviceRequestPending == 0u)
+        return;
+
+    requested = (FrameEthDevice)s_requestedDevice;
+    s_deviceRequestPending = 0u;
+
+    if (requested != s_currentDevice)
+        device_mode_set(requested);
 }
 
 FrameEthDevice device_mode_get(void)
