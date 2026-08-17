@@ -2897,6 +2897,7 @@ namespace VilsSharpX
                 _lastLvdsFrameUtc = DateTime.UtcNow;
                 _lvdsSignalLost = false;
             }
+            _baslerCapture?.UseHardwareTrigger();
 
             // When the main playback loop is NOT running (user didn't press Start),
             // render LVDS frame directly on pane B (standalone LVDS capture mode).
@@ -4309,6 +4310,7 @@ namespace VilsSharpX
                 && (DateTime.UtcNow - _lastLvdsFrameUtc) > TimeSpan.FromSeconds(LiveSignalLostTimeoutSec))
             {
                 _lvdsSignalLost = true;
+                _baslerCapture?.UseFreeRunFallback();
                 lock (_frameLock)
                 {
                     _latestB = null;
@@ -4329,6 +4331,10 @@ namespace VilsSharpX
                 && (DateTime.UtcNow - _lastBaslerFrameUtc) > TimeSpan.FromSeconds(LiveSignalLostTimeoutSec))
             {
                 _baslerSignalLost = true;
+                lock (_frameLock)
+                {
+                    _latestC = null;
+                }
                 _baslerDispWindowFrames = 0;
                 _baslerDispFps = 0;
                 _baslerDispWindowStartTicks = _baslerDispFpsSw.ElapsedTicks;
@@ -4503,6 +4509,9 @@ namespace VilsSharpX
             {
                 if (NoSignalC != null) NoSignalC.Visibility = Visibility.Visible;
             }
+
+            if (_comparisonMode > 0 && _baslerSignalLost && NoSignalD != null)
+                NoSignalD.Visibility = Visibility.Visible;
             else if (_baslerCapture != null && _baslerCapture.IsCapturing)
             {
                 if (NoSignalC != null) NoSignalC.Visibility = Visibility.Collapsed;
@@ -5239,7 +5248,7 @@ namespace VilsSharpX
             if (txManager != null)
                 txManager.AvtpFaultEnabled = _communicationFaultState.AvtpFaultEnabled;
 
-            if (_communicationFaultState.AvtpFaultEnabled)
+                if (_communicationFaultState.AvtpFaultEnabled)
             {
                 RenderAll();
                 if (_playback.Cts != null)
@@ -5347,11 +5356,6 @@ namespace VilsSharpX
             if (string.IsNullOrWhiteSpace(txDev))
             {
                 AppendDiagLog("[cmd] No NIC selected - LVDS fault command not sent");
-                if (_communicationFaultState.LvdsFaultEnabled)
-                {
-                    _communicationFaultState.LvdsFaultEnabled = false;
-                    _communicationFaultControlWindow?.ClearLvdsFaultForExternalChange(notify: false);
-                }
                 return;
             }
 

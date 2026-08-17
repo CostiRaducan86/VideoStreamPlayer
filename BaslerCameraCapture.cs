@@ -22,6 +22,7 @@ public sealed class BaslerCameraCapture : IDisposable
     public double FpsEma { get; private set; }
     public long FramesCompleted { get; private set; }
     public bool IsCapturing { get; private set; }
+    public bool IsFreeRunFallback { get; private set; }
 
     public int FrameWidth { get; private set; }
     public int FrameHeight { get; private set; }
@@ -80,18 +81,7 @@ public sealed class BaslerCameraCapture : IDisposable
         // Set pixel format to Mono8 (Gray8) if available
         _camera.Parameters[PLCamera.PixelFormat].TrySetValue(PLCamera.PixelFormat.Mono8);
 
-        // Configure hardware trigger from Aurix P02.3 (Line3, rising edge)
-        _camera.Parameters[PLCamera.TriggerSelector].TrySetValue(PLCamera.TriggerSelector.FrameStart);
-        if (_camera.Parameters[PLCamera.TriggerMode].TrySetValue(PLCamera.TriggerMode.On))
-        {
-            _camera.Parameters[PLCamera.TriggerSource].TrySetValue(PLCamera.TriggerSource.Line3);
-            _camera.Parameters[PLCamera.TriggerActivation].TrySetValue(PLCamera.TriggerActivation.RisingEdge);
-            _log("[basler] Hardware trigger: Line3, RisingEdge");
-        }
-        else
-        {
-            _log("[basler] Hardware trigger not available, using free-run");
-        }
+        ConfigureHardwareTrigger();
 
         // Read actual dimensions
         FrameWidth = (int)_camera.Parameters[PLCamera.Width].GetValue();
@@ -108,6 +98,77 @@ public sealed class BaslerCameraCapture : IDisposable
         _fpsFrameCount = 0;
         FpsEma = 0;
         _log("[basler] Grab started (LatestImages, ProvidedByStreamGrabber)");
+    }
+
+    public void UseHardwareTrigger()
+    {
+        if (_disposed || !IsFreeRunFallback) return;
+
+        try
+        {
+            if (_camera.StreamGrabber.IsGrabbing)
+                _camera.StreamGrabber.Stop();
+
+            ConfigureHardwareTrigger();
+
+            _camera.StreamGrabber.Start(GrabStrategy.LatestImages, GrabLoop.ProvidedByStreamGrabber);
+            IsCapturing = true;
+            _fpsSw.Restart();
+            _fpsFrameCount = 0;
+            FpsEma = 0;
+        }
+        catch (Exception ex)
+        {
+            _log($"[basler] Hardware trigger switch failed: {ex.Message}");
+        }
+    }
+
+    public void UseFreeRunFallback(double framesPerSecond = 50.0)
+    {
+        if (_disposed || IsFreeRunFallback) return;
+
+        try
+        {
+            if (_camera.StreamGrabber.IsGrabbing)
+                _camera.StreamGrabber.Stop();
+
+            _camera.Parameters[PLCamera.TriggerSelector].TrySetValue(PLCamera.TriggerSelector.FrameStart);
+            _camera.Parameters[PLCamera.TriggerMode].TrySetValue(PLCamera.TriggerMode.Off);
+            _camera.Parameters[PLCamera.AcquisitionMode].TrySetValue(PLCamera.AcquisitionMode.Continuous);
+            _camera.Parameters[PLCamera.AcquisitionFrameRateEnable].TrySetValue(true);
+            _camera.Parameters[PLCamera.AcquisitionFrameRate].TrySetValue(framesPerSecond);
+
+            _camera.StreamGrabber.Start(GrabStrategy.LatestImages, GrabLoop.ProvidedByStreamGrabber);
+            IsCapturing = true;
+            IsFreeRunFallback = true;
+            _fpsSw.Restart();
+            _fpsFrameCount = 0;
+            FpsEma = 0;
+            _log($"[basler] Free-run fallback enabled at {framesPerSecond:F0} FPS");
+        }
+        catch (Exception ex)
+        {
+            _log($"[basler] Free-run fallback failed: {ex.Message}");
+        }
+    }
+
+    private void ConfigureHardwareTrigger()
+    {
+        if (_camera.Parameters[PLCamera.TriggerMode].TrySetValue(PLCamera.TriggerMode.Off))
+        {
+            _camera.Parameters[PLCamera.TriggerSelector].TrySetValue(PLCamera.TriggerSelector.FrameStart);
+            _camera.Parameters[PLCamera.TriggerSource].TrySetValue(PLCamera.TriggerSource.Line3);
+            _camera.Parameters[PLCamera.TriggerActivation].TrySetValue(PLCamera.TriggerActivation.RisingEdge);
+            _camera.Parameters[PLCamera.TriggerMode].TrySetValue(PLCamera.TriggerMode.On);
+            _camera.Parameters[PLCamera.AcquisitionFrameRateEnable].TrySetValue(false);
+            IsFreeRunFallback = false;
+            _log("[basler] Hardware trigger: Line3, RisingEdge");
+        }
+        else
+        {
+            _log("[basler] Hardware trigger not available, using free-run");
+            UseFreeRunFallback();
+        }
     }
 
     // ── Grab callback (runs on Pylon's internal thread) ─────────────
@@ -281,6 +342,7 @@ public sealed class BaslerCameraCapture : IDisposable
         {
             _camera.StreamGrabber.Stop();
             IsCapturing = false;
+            IsFreeRunFallback = false;
             _log("[basler] Grab stopped (external)");
         }
         catch (Exception ex)
