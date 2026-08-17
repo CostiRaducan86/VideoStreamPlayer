@@ -4307,6 +4307,10 @@ namespace VilsSharpX
                 return;
             }
 
+            // Keep camera acquisition aligned with the current LVDS state even
+            // when a mode transition skips the LVDS timeout edge.
+            SynchronizeBaslerTriggerWithLvds();
+
             // AVTP Live: if CANoe (or the source) stops while we're still Running, clear the
             // last frame and fall back to the no-signal "Waiting for signal" UI.
             if (_playback.IsRunning
@@ -4544,6 +4548,17 @@ namespace VilsSharpX
             }
 
             UpdateFpsLabels();
+        }
+
+        private void SynchronizeBaslerTriggerWithLvds()
+        {
+            if (_baslerCapture == null || !_baslerCapture.IsCapturing)
+                return;
+
+            if (HasRecentLvdsFrame())
+                _baslerCapture.UseHardwareTrigger();
+            else
+                _baslerCapture.UseFreeRunFallback();
         }
 
         private void UpdateFpsLabels()
