@@ -67,6 +67,7 @@ Aurix_Firmware/*.pdf
 Aurix_Firmware/*.jpg
 Aurix_Firmware/*.csv
 Aurix_Firmware/*.patch
+Aurix_Firmware/images/
 Aurix_Firmware/Lcf_Gnuc_Tricore_Tc.lsl
 Aurix_Firmware/Lcf_Tasking_Tricore_Tc.lsl
 # TriCore build artifacts: track .elf, .map, .hex, .mdf; ignore other generated files

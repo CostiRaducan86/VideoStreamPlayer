@@ -22,6 +22,9 @@ It consolidates:
 
 X103 is a 2x20 connector. The project-relevant pins are:
 
+<!-- markdownlint-disable-next-line MD033 -->
+<img src="images/Connector_Pin_Assignment.jpg" alt="X103 connector pin assignment" width="500" align="right">
+
 | X103 pin | AURIX port | Note |
 | --- | --- | --- |
 | 2 | V_UC | 5V0 |
@@ -40,6 +43,9 @@ X103 is a 2x20 connector. The project-relevant pins are:
 | 29 | P00.7 | ASCLIN5 TX (CAN_TX_ECU) |
 | 31 | P00.9 | ASCLIN4 TX (CAN_TX_LSM) |
 | 34 | P00.12 | ASCLIN4 RX (CAN_RX_LSM) |
+
+<!-- markdownlint-disable-next-line MD033 -->
+<div style="clear: both;"></div>
 
 ## Adapter Connector Pinouts (From Captures)
 
