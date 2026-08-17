@@ -561,6 +561,9 @@ namespace VilsSharpX
             ResetSyncState();
             _lastLvdsFrameUtc = DateTime.MinValue;
             _lvdsSignalLost = true;
+            _baslerCapture?.UseFreeRunFallback();
+            ResetCameraDisplaySync();
+            _cameraDisplaySyncEnabled = false;
             ResetLvdsStatusForNewSession();
             _lastBaslerFrameUtc = DateTime.MinValue;
             _baslerSignalLost = false;
