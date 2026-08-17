@@ -496,17 +496,22 @@ namespace VilsSharpX
             // If Ethernet capture (Nichia or Osram) is active and already has frames,
             // pane B is valid — proceed with rendering even if AVTP (pane A)
             // hasn't arrived yet.  Pane A will show gray; B and D render normally.
-            if (_nichiaEthCapture != null
-                && _nichiaEthCapture.IsCapturing
-                && _nichiaEthCapture.FramesCompleted > 0)
-                return false;
-            if (_osramEthCapture != null
-                && _osramEthCapture.IsCapturing
-                && _osramEthCapture.FramesCompleted > 0)
+            if (HasRecentLvdsFrame())
                 return false;
 
             // In AVTP Live mode, keep panes in "Signal not available" until first valid frame arrives.
             return !_liveCapture.HasAvtpFrame;
+        }
+
+        private bool HasRecentLvdsFrame()
+        {
+            if (_lvdsSignalLost || _lastLvdsFrameUtc == DateTime.MinValue)
+                return false;
+
+            bool captureActive = (_nichiaEthCapture?.IsCapturing == true)
+                              || (_osramEthCapture?.IsCapturing == true);
+            return captureActive
+                && (DateTime.UtcNow - _lastLvdsFrameUtc) <= TimeSpan.FromSeconds(LiveSignalLostTimeoutSec);
         }
 
         private void EnterWaitingForSignalState()
@@ -543,7 +548,8 @@ namespace VilsSharpX
                 _pausedMatchedA = null;
             }
             _lastLvdsFrameUtc = DateTime.MinValue;
-            _lvdsSignalLost = false;
+            _lvdsSignalLost = true;
+            ResetLvdsStatusForNewSession();
             _lastBaslerFrameUtc = DateTime.MinValue;
             _baslerSignalLost = false;
             _baslerDispWindowFrames = 0;
@@ -3405,8 +3411,7 @@ namespace VilsSharpX
             {
                 _pausedA = _latestA ?? new Frame(_currentWidth, _currentHeight, GetASourceBytes(), DateTime.UtcNow);
 
-                bool ethActive = (_nichiaEthCapture != null && _nichiaEthCapture.IsCapturing && _nichiaEthCapture.FramesCompleted > 0)
-                              || (_osramEthCapture != null && _osramEthCapture.IsCapturing && _osramEthCapture.FramesCompleted > 0);
+                bool ethActive = HasRecentLvdsFrame();
 
                 if (_modeOfOperation == ModeOfOperation.AvtpLiveMonitor && ethActive && _latestB != null)
                 {
@@ -4150,8 +4155,7 @@ namespace VilsSharpX
                 Frame b;
                 bool useRealEthB = false;
                 Frame? genMatchedA = null;
-                bool hasEthLvds = (_nichiaEthCapture != null && _nichiaEthCapture.IsCapturing && _nichiaEthCapture.FramesCompleted > 0)
-                    || (_osramEthCapture != null && _osramEthCapture.IsCapturing && _osramEthCapture.FramesCompleted > 0);
+                bool hasEthLvds = HasRecentLvdsFrame();
                 if (hasEthLvds)
                 {
                     lock (_frameLock)
@@ -4408,8 +4412,7 @@ namespace VilsSharpX
             // Snapshot the matched-A reference ONCE to avoid race with HandleLvdsFrameReady.
             // When paused, use the frozen _pausedMatchedA that was saved at pause time.
             var matchedA = _playback.IsPaused ? _pausedMatchedA : _matchedAForDiff;
-            bool hasRealEthB = (_nichiaEthCapture != null && _nichiaEthCapture.IsCapturing && _nichiaEthCapture.FramesCompleted > 0)
-                            || (_osramEthCapture != null && _osramEthCapture.IsCapturing && _osramEthCapture.FramesCompleted > 0);
+            bool hasRealEthB = HasRecentLvdsFrame();
             bool liveLvdsNoSignal = _modeOfOperation == ModeOfOperation.AvtpLiveMonitor
                 && !_playback.IsPaused
                 && !hasRealEthB;

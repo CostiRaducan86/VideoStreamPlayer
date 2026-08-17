@@ -87,7 +87,7 @@ public static class StatusFormatter
     /// </summary>
     public static string FormatWaitingForSignal(string logPath)
     {
-        return $"Waiting for signal... (0.0 fps) (Mode=AVTP Live). Ethernet/AVTP capture best-effort. (log: {logPath})";
+        return "Waiting for AVTP signal... (0.0 fps)";
     }
 
     /// <summary>
