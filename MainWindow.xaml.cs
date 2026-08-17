@@ -300,6 +300,11 @@ namespace VilsSharpX
         private Frame? _matchedAForDiff;
         /// <summary>NCC of the best match (1.0 = perfect, 0 = uncorrelated). NaN when not computed.</summary>
         private double _lastMatchNcc = double.NaN;
+        /// <summary>LVDS frames received since the current synchronization session started.</summary>
+        private int _lvdsFramesSinceSyncReset;
+        /// <summary>Comparison starts after the startup pipeline has had time to settle.</summary>
+        private bool _lvdsComparisonReady;
+        private const int LvdsComparisonWarmupFrames = 4;
 
         // Zoom/pan manager (replaces individual _zoom/_pan fields)
         private readonly ZoomPanManager _zoomPan = new();
@@ -547,6 +552,7 @@ namespace VilsSharpX
                 _pausedD = null;
                 _pausedMatchedA = null;
             }
+            ResetSyncState();
             _lastLvdsFrameUtc = DateTime.MinValue;
             _lvdsSignalLost = true;
             ResetLvdsStatusForNewSession();
@@ -2899,11 +2905,20 @@ namespace VilsSharpX
 
             lock (_frameLock)
             {
+                _lvdsFramesSinceSyncReset++;
+                _lvdsComparisonReady = _lvdsFramesSinceSyncReset >= LvdsComparisonWarmupFrames;
                 _matchedAForDiff = matched;
                 _latestB = new Frame(_currentWidth, _currentHeight, frame, DateTime.UtcNow);
                 _lastLvdsFrameUtc = DateTime.UtcNow;
                 _lvdsSignalLost = false;
             }
+
+            // Pane C is updated immediately from the camera callback. Update the
+            // raw LVDS bitmap here as well so pane B cannot lag behind the frame
+            // already published for comparison while RenderAll is between ticks.
+            if (!_playback.IsPaused && frame.Length == _currentWidth * _currentHeight)
+                BitmapUtils.Blit(_wbB, frame, _currentWidth);
+
             _baslerCapture?.UseHardwareTrigger();
 
             // When the main playback loop is NOT running (user didn't press Start),
@@ -2962,6 +2977,16 @@ namespace VilsSharpX
             BitmapUtils.Blit(_wbA, aData, w);
 
             // Pane D: |A − B| diff
+            if (!_lvdsComparisonReady)
+            {
+                Array.Clear(_diffBgr);
+                BitmapUtils.Blit(_wbD, _diffBgr, w * 3);
+                if (LblDiffStats != null)
+                    LblDiffStats.Text = "Comparison warming up...";
+                ApplyNoSignalUiState(noSignal: false);
+                return;
+            }
+
             DiffRenderer.RenderCompareToBgr(_diffBgr, aData, frame.Length == w * h ? frame : _noSignalGrayFrame,
                 w, h, _diffThreshold, _zeroZeroIsWhite,
                 out var minDiff, out var maxDiff, out _,
@@ -4147,7 +4172,10 @@ namespace VilsSharpX
                     isNewPcapFrame = true; // non-PCAP: always treat as new
                 }
 
-                if (isNewPcapFrame)
+                // In AVTP live mode, HandleLiveFrameReady is the sole owner of
+                // the sync ring. Pushing the generator's polling copy as well
+                // creates duplicate/stale candidates while AVTP runs at 100 fps.
+                if (isNewPcapFrame && _modeOfOperation != ModeOfOperation.AvtpLiveMonitor)
                     PushSyncFrame(a);
         
                 // B: prefer real Ethernet LVDS when available. Do not fabricate
@@ -4413,9 +4441,22 @@ namespace VilsSharpX
             // In AVTP Live mode:
             //   - If LVDS capture is active and has a frame, use the real LVDS data for B
             //   - Otherwise, derive B from A using the UI delta (mock LVDS)
-            // Snapshot the matched-A reference ONCE to avoid race with HandleLvdsFrameReady.
-            // When paused, use the frozen _pausedMatchedA that was saved at pause time.
-            var matchedA = _playback.IsPaused ? _pausedMatchedA : _matchedAForDiff;
+            // Snapshot B and its matched A atomically. HandleLvdsFrameReady updates
+            // both values together; reading matched A after releasing this lock can
+            // pair the previous B with the next LVDS match during animation.
+            Frame? matchedA;
+            if (_playback.IsPaused)
+            {
+                matchedA = _pausedMatchedA;
+            }
+            else
+            {
+                lock (_frameLock)
+                {
+                    matchedA = _matchedAForDiff;
+                    b = _latestB ?? b;
+                }
+            }
             bool hasRealEthB = HasRecentLvdsFrame();
             bool liveLvdsNoSignal = _modeOfOperation == ModeOfOperation.AvtpLiveMonitor
                 && !_playback.IsPaused
@@ -4447,6 +4488,7 @@ namespace VilsSharpX
             byte[] diffLeft;
             byte[] diffRight;
             int cmpMode = _comparisonMode;
+            bool comparisonReady = cmpMode != 0 || !hasRealEthB || _lvdsComparisonReady;
 
             if (cmpMode == 1 || cmpMode == 2)
             {
@@ -4482,11 +4524,28 @@ namespace VilsSharpX
             // For camera comparison modes, relax the zero-detection threshold (optical noise prevents exact 0)
             byte zeroThr = (byte)(cmpMode > 0 ? 5 : 0);
 
-            DiffRenderer.RenderCompareToBgr(_diffBgr, diffLeft, diffRight, _currentWidth, _currentHeight, _diffThreshold,
-                _zeroZeroIsWhite,
-                out var minDiff, out var maxDiff, out _,
-                out _, out var meanAbsDiff, out var aboveDeadband,
-                out var totalDarkPixels, zeroThr);
+            int minDiff;
+            int maxDiff;
+            double meanAbsDiff;
+            int aboveDeadband;
+            int totalDarkPixels;
+            if (comparisonReady)
+            {
+                DiffRenderer.RenderCompareToBgr(_diffBgr, diffLeft, diffRight, _currentWidth, _currentHeight, _diffThreshold,
+                    _zeroZeroIsWhite,
+                    out minDiff, out maxDiff, out _,
+                    out _, out meanAbsDiff, out aboveDeadband,
+                    out totalDarkPixels, zeroThr);
+            }
+            else
+            {
+                Array.Clear(_diffBgr);
+                minDiff = 0;
+                maxDiff = 0;
+                meanAbsDiff = 0.0;
+                aboveDeadband = 0;
+                totalDarkPixels = 0;
+            }
             BitmapUtils.Blit(_wbD, _diffBgr, _currentWidth * 3);
 
             // Record what we render (A/B in Gray8; D in Bgr24). Diff buffer is reused, so copy it.
@@ -4498,7 +4557,9 @@ namespace VilsSharpX
             }
 
             if (LblDiffStats != null)
-                LblDiffStats.Text = FormatComparisonStats(maxDiff, minDiff, meanAbsDiff, aboveDeadband, totalDarkPixels);
+                LblDiffStats.Text = comparisonReady
+                    ? FormatComparisonStats(maxDiff, minDiff, meanAbsDiff, aboveDeadband, totalDarkPixels)
+                    : "Comparison warming up...";
 
             // Per-pane no-signal visibility.
             // When AVTP is lost: show "Signal not available" on A, B, D (comparison meaningless without reference).
@@ -4776,9 +4837,17 @@ namespace VilsSharpX
             // ── Full NCC matching for structured frames ──────────────────────
             Frame? best = null;
             double bestNcc = double.MinValue;
+            long bestSad = long.MaxValue;
+            int bestAge = int.MaxValue;
+            double bestCandidateNcc = double.MinValue;
+            const double MinimumCandidateNcc = 0.5;
 
-            for (int i = 0; i < SyncRingSize; i++)
+            // Search newest-first. If adjacent animation frames produce nearly
+            // identical NCC values, the newest candidate is the safest choice.
+            int head = _syncRingHead;
+            for (int age = 0; age < SyncRingSize; age++)
             {
+                int i = (head - age) & (SyncRingSize - 1);
                 var f = _syncRing[i];
                 if (f == null || f.Data.Length != expectedLen) continue;
 
@@ -4809,22 +4878,53 @@ namespace VilsSharpX
                     ncc = covN / Math.Sqrt(aNVar * bNVar);
                 }
 
-                if (ncc > bestNcc)
+                long sad = 0;
+                for (int j = 0; j < expectedLen; j++)
+                    sad += Math.Abs(aData[j] - bData[j]);
+
+                // A nearly uniform A frame has no meaningful NCC, but it can
+                // still be the exact temporal predecessor of a structured B
+                // frame at an animation transition. Never discard it before
+                // the position-sensitive SAD comparison.
+                bool structurallyValid = ncc >= MinimumCandidateNcc;
+                bool sadIsBetter = sad < bestSad;
+                bool sameSadPrefersHigherNcc = sad == bestSad && ncc > bestCandidateNcc;
+                bool sameMetricsPreferNewer = sad == bestSad
+                    && Math.Abs(ncc - bestCandidateNcc) <= 0.002
+                    && age < bestAge;
+                if (sadIsBetter || sameSadPrefersHigherNcc || sameMetricsPreferNewer)
                 {
-                    bestNcc = ncc;
+                    // NCC validates global structure; SAD decides exact content
+                    // alignment. This prevents a narrow moving bar from winning
+                    // merely because its global NCC is marginally higher.
+                    bestSad = sad;
+                    bestCandidateNcc = ncc;
                     best = f;
+                    bestAge = age;
                 }
+
+                if (structurallyValid && ncc > bestNcc)
+                    bestNcc = ncc;
             }
 
             // ── Quality gate ─────────────────────────────────────────────────
             // If the best NCC is still poor (< 0.5), the match is unreliable.
             // Fall back to the most recent A as a safe default.
-            if (bestNcc < 0.5)
+            if (best == null || bestNcc < 0.5)
             {
+                // A valid low-SAD match is preferable to the most recent A
+                // when B is at a transition and NCC is undefined for the
+                // matching flat predecessor.
+                if (best != null)
+                {
+                    _lastMatchNcc = bestNcc; // report actual NCC for diagnostics
+                    return best;
+                }
+
                 var recent = GetMostRecentSyncFrame(expectedLen);
                 if (recent != null)
                 {
-                    _lastMatchNcc = bestNcc; // report actual NCC for diagnostics
+                    _lastMatchNcc = bestNcc;
                     return recent;
                 }
             }
@@ -4881,6 +4981,8 @@ namespace VilsSharpX
             _syncRingHead = 0;
             _matchedAForDiff = null;
             _lastMatchNcc = double.NaN;
+            _lvdsFramesSinceSyncReset = 0;
+            _lvdsComparisonReady = false;
         }
 
         private void ImgA_MouseMove(object sender, MouseEventArgs e) => ShowPixelInfo(e, GetDisplayedFrameForPane(Pane.A), LblA);
