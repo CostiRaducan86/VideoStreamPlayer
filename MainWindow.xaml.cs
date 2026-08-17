@@ -3724,7 +3724,7 @@ namespace VilsSharpX
                 _ = Task.Run(() => UiRefreshLoop(ct));
 
                 // Until the first frame arrives, show explicit waiting message.
-                LblStatus.Text = StatusFormatter.FormatWaitingForSignal(GetDiagLogPath());
+                LblStatus.Text = StatusFormatter.FormatWaitingForSignal();
 
                 _playback.WasWaitingForSignal = true;
             }
@@ -4379,7 +4379,7 @@ namespace VilsSharpX
 
                 if (!_playback.WasWaitingForSignal && LblStatus != null)
                 {
-                    LblStatus.Text = StatusFormatter.FormatWaitingForSignal(GetDiagLogPath());
+                    LblStatus.Text = StatusFormatter.FormatWaitingForSignal();
                     _playback.RunningStatusText = LblStatus.Text;
                 }
                 _playback.WasWaitingForSignal = true;
@@ -5488,7 +5488,7 @@ namespace VilsSharpX
             }
             else
             {
-                LblStatus.Text = StatusFormatter.FormatWaitingForSignal(GetDiagLogPath());
+                LblStatus.Text = StatusFormatter.FormatWaitingForSignal();
                 _playback.RunningStatusText = LblStatus.Text;
             }
         }

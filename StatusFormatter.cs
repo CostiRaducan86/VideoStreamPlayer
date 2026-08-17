@@ -85,7 +85,7 @@ public static class StatusFormatter
     /// <summary>
     /// Formats waiting for signal status message.
     /// </summary>
-    public static string FormatWaitingForSignal(string logPath)
+    public static string FormatWaitingForSignal()
     {
         return "Waiting for AVTP signal... (0.0 fps)";
     }
