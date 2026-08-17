@@ -155,6 +155,22 @@ The LVDS callback now writes the validated frame directly to the pane B bitmap o
 
 Repeat the moving-bar test and compare pane B and pane C at the same instant. If the red/orange comparison region remains while B now shows the bar together with C, the remaining issue is frame pairing. If B and C become visually aligned, the previous anomaly was caused by pane B render-loop latency.
 
+## Change 7: LVDS-Ordered Camera Display
+
+### Callback Ordering Root Cause
+
+The Basler trigger can produce a camera frame before the complete LVDS Ethernet frame has been reassembled and dispatched to the WPF UI. The hardware sequence can therefore be correct while pane C becomes visually newer than pane B.
+
+### Display Credit Implementation
+
+Camera frames are now held as the newest pending frame once the session display barrier is active. Each validated LVDS frame updates pane B first and releases one pending camera frame to pane C. Pending camera data and display credits are reset on Start, Stop and LVDS signal loss.
+
+This changes display ordering only. It does not fabricate LVDS data, alter the comparison operands or change the Basler acquisition trigger.
+
+### B-to-C Validation Goal
+
+During the moving-bar test, pane C must not show the bar before pane B. If the bar is visible in C but not B after this change, the next investigation target is the LVDS Ethernet capture/reassembly path rather than WPF rendering order.
+
 ## Open Validation Work
 
 The implementation still needs hardware or replay validation with the original animation recording. For each consecutive LVDS frame, capture:

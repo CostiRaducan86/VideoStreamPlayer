@@ -259,6 +259,12 @@ namespace VilsSharpX
         private DateTime _lastBaslerFrameUtc = DateTime.MinValue;
         /// <summary>Persistent flag: true when Basler signal timed out (no trigger from ECU), cleared on new frame.</summary>
         private bool _baslerSignalLost;
+        /// <summary>After the first LVDS frame, camera display is released in LVDS order.</summary>
+        private bool _cameraDisplaySyncEnabled;
+        private int _lvdsCameraDisplayCredits;
+        private byte[]? _pendingCameraFrame;
+        private int _pendingCameraWidth;
+        private int _pendingCameraHeight;
 
         // ─── Pane C displayed-FPS tracking (sliding window counter, immune to UI jitter) ───
         private readonly Stopwatch _baslerDispFpsSw = Stopwatch.StartNew();
@@ -1653,6 +1659,27 @@ namespace VilsSharpX
             _lastBaslerFrameUtc = DateTime.UtcNow;
             _baslerSignalLost = false;
 
+            if (_cameraDisplaySyncEnabled)
+            {
+                if (_lvdsCameraDisplayCredits <= 0)
+                {
+                    // Keep the newest camera frame until its LVDS counterpart
+                    // has reached pane B through Ethernet reassembly.
+                    _pendingCameraFrame = (byte[])frame.Clone();
+                    _pendingCameraWidth = w;
+                    _pendingCameraHeight = h;
+                    return;
+                }
+
+                _lvdsCameraDisplayCredits--;
+            }
+
+            RenderBaslerFrameReady(frame, w, h);
+        }
+
+        private void RenderBaslerFrameReady(byte[] frame, int w, int h)
+        {
+
             // Displayed-FPS: count frames in a 1-second sliding window (stable, immune to UI jitter)
             _baslerDispWindowFrames++;
             long nowTicks = _baslerDispFpsSw.ElapsedTicks;
@@ -1694,6 +1721,28 @@ namespace VilsSharpX
 
             // Show live image, hide "Signal not available" overlay
             if (NoSignalC != null) NoSignalC.Visibility = Visibility.Collapsed;
+        }
+
+        private void ReleasePendingCameraFrameAfterLvds()
+        {
+            if (_pendingCameraFrame == null || _lvdsCameraDisplayCredits <= 0)
+                return;
+
+            var frame = _pendingCameraFrame;
+            int w = _pendingCameraWidth;
+            int h = _pendingCameraHeight;
+            _pendingCameraFrame = null;
+            _lvdsCameraDisplayCredits--;
+            RenderBaslerFrameReady(frame, w, h);
+        }
+
+        private void ResetCameraDisplaySync()
+        {
+            _cameraDisplaySyncEnabled = true;
+            _lvdsCameraDisplayCredits = 0;
+            _pendingCameraFrame = null;
+            _pendingCameraWidth = 0;
+            _pendingCameraHeight = 0;
         }
 
         /// <summary>
@@ -2905,6 +2954,7 @@ namespace VilsSharpX
 
             lock (_frameLock)
             {
+                _lvdsCameraDisplayCredits = Math.Min(_lvdsCameraDisplayCredits + 1, 2);
                 _lvdsFramesSinceSyncReset++;
                 _lvdsComparisonReady = _lvdsFramesSinceSyncReset >= LvdsComparisonWarmupFrames;
                 _matchedAForDiff = matched;
@@ -2919,6 +2969,7 @@ namespace VilsSharpX
             if (!_playback.IsPaused && frame.Length == _currentWidth * _currentHeight)
                 BitmapUtils.Blit(_wbB, frame, _currentWidth);
 
+            ReleasePendingCameraFrameAfterLvds();
             _baslerCapture?.UseHardwareTrigger();
 
             // When the main playback loop is NOT running (user didn't press Start),
@@ -3676,6 +3727,7 @@ namespace VilsSharpX
 
             // Init playback state and reset stats (includes CTS creation, running=true, paused=false)
             var ct = _playback.Start(fps);
+            ResetCameraDisplaySync();
 
             // Force immediate first refresh for pane A/C run-info labels.
             _runInfoALastUpdateTicks = 0;
@@ -3897,6 +3949,7 @@ namespace VilsSharpX
             _canDiagLastRecordUtc = DateTime.MinValue;
             StopDiagRetryTimer();
             ResetSyncState();
+            ResetCameraDisplaySync();
 
             StopRenderLoops();
 
@@ -4366,6 +4419,7 @@ namespace VilsSharpX
                     _latestB = null;
                     _matchedAForDiff = null;
                 }
+                ResetCameraDisplaySync();
                 if (LblLvdsFps != null) LblLvdsFps.Text = "FPS: 0.0";
                 UpdateMainEcuState(0.0);
                 _communicationFaultControlWindow?.UpdateEcuState(0.0);
