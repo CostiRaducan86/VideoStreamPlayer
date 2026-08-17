@@ -36,6 +36,7 @@ namespace VilsSharpX
         private const double FpsEstimationWindowSec = 0.25;
         private const double FpsEmaAlpha = 0.30; // 0..1, higher = more responsive, lower = smoother
         private const double LiveSignalLostTimeoutSec = 0.625; // ~5 frames at 8fps
+        private const double BaslerFallbackDisplayFps = 50.0;
         private const double NichiaLsmFpsDisplayOffset = 0.1; // display-only compensation to match LVDS monitor cadence
 
         private enum Pane
@@ -2923,6 +2924,14 @@ namespace VilsSharpX
             MainEcuStateText.Text = running ? "Running" : "Stop/Failsafe";
         }
 
+        private void ResetLvdsStatusForNewSession()
+        {
+            if (LblLvdsFrameCount != null) LblLvdsFrameCount.Text = "Frames: 0";
+            if (LblLvdsSyncLoss != null) LblLvdsSyncLoss.Text = "Sync_error: 0  CRC_error: 0  Parity_error: 0";
+            if (LblLvdsFps != null) LblLvdsFps.Text = "FPS: 0.0";
+            UpdateMainEcuState(0.0);
+        }
+
         private void RenderLvdsOnly(byte[] frame)
         {
             int w = _currentWidth;
@@ -3761,9 +3770,14 @@ namespace VilsSharpX
             // B from A while the ECU is already in failsafe before Start.
             _lastLvdsFrameUtc = DateTime.UtcNow;
             _lvdsSignalLost = true;
+            ResetLvdsStatusForNewSession();
 
             // Pane C: Basler USB3 camera live capture
             StartBaslerCapture();
+            // At session start there is no confirmed LVDS frame yet. Use the
+            // camera fallback immediately so a failsafe ECU cannot leave pane C
+            // waiting for a hardware trigger that will never arrive.
+            _baslerCapture?.UseFreeRunFallback();
             _lastBaslerFrameUtc = DateTime.UtcNow;
             _baslerSignalLost = false;
 
@@ -4328,6 +4342,7 @@ namespace VilsSharpX
                 && !_baslerSignalLost
                 && _lastBaslerFrameUtc != DateTime.MinValue
                 && _baslerCapture != null && _baslerCapture.IsCapturing
+                && !_baslerCapture.IsFreeRunFallback
                 && (DateTime.UtcNow - _lastBaslerFrameUtc) > TimeSpan.FromSeconds(LiveSignalLostTimeoutSec))
             {
                 _baslerSignalLost = true;
@@ -4345,6 +4360,14 @@ namespace VilsSharpX
             {
                 RenderNoSignalFrames();
                 ApplyNoSignalUiState(noSignal: true);
+
+                // AVTP may still be waiting for its first gateway frame while
+                // the camera is already producing valid black failsafe frames.
+                // Keep pane C independent from the global waiting overlay.
+                if (_baslerCapture?.IsFreeRunFallback == true && NoSignalC != null)
+                    NoSignalC.Visibility = Visibility.Collapsed;
+
+                UpdateBaslerRunInfoLabel();
 
                 if (!_playback.WasWaitingForSignal && LblStatus != null)
                 {
@@ -4522,8 +4545,7 @@ namespace VilsSharpX
 
         private void UpdateFpsLabels()
         {
-            if (!_playback.TryUpdateFpsEstimates(out _, out _, out _))
-                return;
+            _playback.TryUpdateFpsEstimates(out _, out _, out _);
 
             bool allowUiRefreshA = true;
             bool allowUiRefreshC = true;
@@ -4599,6 +4621,9 @@ namespace VilsSharpX
                         ? _baslerCapture.FpsEma
                         : _baslerDispFps;
 
+                    if (_baslerCapture?.IsFreeRunFallback == true && paneCFps <= 0.0)
+                        paneCFps = BaslerFallbackDisplayFps;
+
                     // Nichia path: apply a small display-only offset so LSM monitor aligns
                     // better with LVDS monitor reading (does not affect internal processing).
                     if (_currentDeviceType == LsmDeviceType.Nichia && paneCFps > 0.0)
@@ -4608,7 +4633,7 @@ namespace VilsSharpX
                         LblRunInfoC.Text = "";
                     else if (isPaused)
                         LblRunInfoC.Text = "Paused";
-                    else if (_baslerSignalLost)
+                    else if (_baslerSignalLost && _baslerCapture?.IsFreeRunFallback != true)
                         LblRunInfoC.Text = "";
                     else if (paneCFps > 0.0)
                         LblRunInfoC.Text = $"Running @: {paneCFps:F1} fps";
@@ -4616,6 +4641,26 @@ namespace VilsSharpX
                         LblRunInfoC.Text = "Running";
                 }
             }
+        }
+
+        private void UpdateBaslerRunInfoLabel()
+        {
+            if (LblRunInfoC == null || _playback.Cts == null || _playback.IsPaused)
+                return;
+
+            double paneCFps = (_baslerCapture != null && _baslerCapture.IsCapturing && _baslerCapture.FpsEma > 0.0)
+                ? _baslerCapture.FpsEma
+                : _baslerDispFps;
+
+            if (_baslerCapture?.IsFreeRunFallback == true && paneCFps <= 0.0)
+                paneCFps = BaslerFallbackDisplayFps;
+
+            if (_currentDeviceType == LsmDeviceType.Nichia && paneCFps > 0.0)
+                paneCFps += NichiaLsmFpsDisplayOffset;
+
+            LblRunInfoC.Text = paneCFps > 0.0
+                ? $"Running @: {paneCFps:F1} fps"
+                : "Running";
         }
 
         private double GetShownFps(double avtpInFps)
