@@ -4430,7 +4430,9 @@ namespace VilsSharpX
                 else
                 {
                     // AVTP-LSM: AVTP is reference (A), downscaled camera is measured (B)
-                    diffLeft = diffARef;
+                    // This mode is independent of LVDS timing. Do not use the
+                    // LVDS sync-matched A, which can be stale after an LVDS fault.
+                    diffLeft = a.Data;
                     diffRight = cameraData;
                 }
             }
@@ -4464,7 +4466,9 @@ namespace VilsSharpX
 
             // Per-pane no-signal visibility.
             // When AVTP is lost: show "Signal not available" on A, B, D (comparison meaningless without reference).
-            // When LVDS is lost: show "Signal not available" on B, D (no ECU output to compare).
+            // When LVDS is lost: show "Signal not available" on B and on D only
+            // for comparison modes that use LVDS as an operand. LSM-AVTP compares
+            // AVTP A directly against camera C, so D remains valid without B.
             if (_communicationFaultState.AvtpFaultEnabled)
             {
                 if (NoSignalA != null) NoSignalA.Visibility = Visibility.Visible;
@@ -4485,7 +4489,9 @@ namespace VilsSharpX
             {
                 if (NoSignalA != null) NoSignalA.Visibility = Visibility.Collapsed;
                 if (NoSignalB != null) NoSignalB.Visibility = Visibility.Visible;
-                if (NoSignalD != null) NoSignalD.Visibility = Visibility.Visible;
+                if (NoSignalD != null) NoSignalD.Visibility = _comparisonMode == 2
+                    ? Visibility.Collapsed
+                    : Visibility.Visible;
             }
             else
             {
