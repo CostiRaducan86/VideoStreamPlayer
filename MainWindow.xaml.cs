@@ -483,13 +483,8 @@ namespace VilsSharpX
 
         private void InitializeDefaultPatterns()
         {
-            int w = _currentWidth;
-            int h = _currentHeight;
-
-            // Horizontal gradient (fallback)
-            for (int y = 0; y < h; y++)
-                for (int x = 0; x < w; x++)
-                    _idleGradientFrame[y * w + x] = (byte)(x * 255 / (w - 1));
+            // Default generator frame: strict black until a source is loaded.
+            Array.Fill(_idleGradientFrame, (byte)0x00);
 
             // No-signal pattern: flat mid-gray
             Array.Fill(_noSignalGrayFrame, (byte)0x80);
@@ -601,6 +596,14 @@ namespace VilsSharpX
             bool isAvtpLive = _modeOfOperation == ModeOfOperation.AvtpLiveMonitor;
             // Load Files is disabled while running OR when in AVTP Live mode (no file sources)
             if (BtnLoadFiles != null) BtnLoadFiles.IsEnabled = !isRunning && !isAvtpLive;
+            if (ChkLoopPlaying != null)
+            {
+                bool canLoop = !isAvtpLive && _lastLoaded == LoadedSource.Avi;
+                ChkLoopPlaying.Visibility = isAvtpLive ? Visibility.Collapsed : Visibility.Visible;
+                ChkLoopPlaying.IsEnabled = canLoop;
+                if (!canLoop && ChkLoopPlaying.IsChecked == true)
+                    ChkLoopPlaying.IsChecked = false;
+            }
             if (BtnStart != null) BtnStart.IsEnabled = true; // always enabled (Start or Pause/Resume)
             if (BtnPrev != null) BtnPrev.IsEnabled = isRunning && isPaused;
             if (BtnNext != null) BtnNext.IsEnabled = isRunning && isPaused;
@@ -963,6 +966,12 @@ namespace VilsSharpX
 
             LoadUiSettings();
 
+            if (_modeOfOperation == ModeOfOperation.PlayerFromFiles
+                && !_communicationFaultState.AvtpFaultEnabled)
+            {
+                StartBlackKeepalive();
+            }
+
             // Startup should show "Signal not available".
             ApplyNoSignalUiState(noSignal: true);
             UpdateLvdsProtocolLabel();
@@ -1309,12 +1318,6 @@ namespace VilsSharpX
             StopAll();
             _liveCapture.Reassembler.ResetAll();
             _liveCapture.ClearAvtpFrame();
-
-            // Hide Loop Playing checkbox when switching to AVTP Live mode
-            if (_modeOfOperation == ModeOfOperation.AvtpLiveMonitor)
-            {
-                if (ChkLoopPlaying != null) ChkLoopPlaying.Visibility = Visibility.Collapsed;
-            }
 
             // Update button enabled states to reflect new mode (e.g. Load Files disabled in AVTP Live)
             ApplyButtonStates(isRunning: false);
@@ -3259,6 +3262,28 @@ namespace VilsSharpX
             }
         }
 
+        private void StartBlackKeepalive()
+        {
+            if (_modeOfOperation != ModeOfOperation.PlayerFromFiles
+                || _communicationFaultState.AvtpFaultEnabled)
+                return;
+
+            int fps = int.TryParse(TxtFps?.Text, out int parsedFps) && parsedFps > 0
+                ? parsedFps
+                : 100;
+
+            if (!_txManager.IsReady)
+            {
+                ushort ethType = ParseHexUshort(_avtpEtherType, 0x22F0);
+                byte stIdByte = ParseHexByte(_streamIdLastByte, 0x50);
+                string? deviceHint = LiveNicSelector.GetSelectedDeviceName(CmbLiveNic) ?? _avtpLiveDeviceHint;
+                _txManager.Initialize(deviceHint, _srcMac, _dstMac,
+                    _vlanId, _vlanPriority, ethType, stIdByte);
+            }
+
+            _txManager.StartBlackLoop(fps);
+        }
+
         /// <summary>
         /// Helper: Stop playback and send BLACK AVTP frames to LSM.
         /// Used when: Stop button pressed, AVI playback ends, or PCAP playback completes without loop.
@@ -3307,6 +3332,8 @@ namespace VilsSharpX
         {
             _loopPlayingEnabled = ChkLoopPlaying?.IsChecked == true;
             _aviPlayer.LoopEnabled = _loopPlayingEnabled;
+            if (LoopPlaybackIcon != null)
+                LoopPlaybackIcon.Foreground = _loopPlayingEnabled ? Brushes.ForestGreen : Brushes.Gray;
         }
 
         private void BtnRecord_Click(object sender, RoutedEventArgs e)
@@ -3643,10 +3670,8 @@ namespace VilsSharpX
             PrepareForNewSource(clearAvtpFrame: false);
             _lastLoaded = LoadedSource.Pcap;
             _lastLoadedPcapPath = path;
+            ApplyButtonStates(_playback.IsRunning, _playback.IsPaused);
             LblStatus.Text = SourceLoaderHelper.GetPcapStatusMessage();
-
-            // Show Loop checkbox for PCAP files
-            if (ChkLoopPlaying != null) ChkLoopPlaying.Visibility = Visibility.Visible;
 
             // Extract the first AVTP/RVF frame from the PCAP for preview on pane A
             var firstFrame = PcapAvtpRvfReplay.ExtractFirstFrame(path);
@@ -3680,14 +3705,12 @@ namespace VilsSharpX
         {
             PrepareForNewSource(clearAvtpFrame: true);
 
-            // Hide Loop checkbox for image files
-            if (ChkLoopPlaying != null) ChkLoopPlaying.Visibility = Visibility.Collapsed;
-
             var result = _sourceLoader.LoadImage(path);
             _pgmFrame = result.Frame;
             _lvdsFrame84 = result.LvdsFrame;
 
             _lastLoaded = LoadedSource.Image;
+            ApplyButtonStates(_playback.IsRunning, _playback.IsPaused);
             LblStatus.Text = result.StatusMessage;
 
             if (_playback.Cts == null || _playback.IsPaused) RenderOneFrameNow();
@@ -3699,10 +3722,8 @@ namespace VilsSharpX
             _aviPlayer.LoopEnabled = _loopPlayingEnabled;
             _aviPlayer.Load(path);
             _lastLoaded = LoadedSource.Avi;
+            ApplyButtonStates(_playback.IsRunning, _playback.IsPaused);
             LblStatus.Text = _aviPlayer.BuildStatusMessage();
-
-            // Show Loop checkbox for AVI files
-            if (ChkLoopPlaying != null) ChkLoopPlaying.Visibility = Visibility.Visible;
 
             if (_playback.Cts == null || _playback.IsPaused) RenderOneFrameNow();
         }
@@ -4118,11 +4139,9 @@ namespace VilsSharpX
             _liveCapture.ClearAvtpFrame();
             _lastLoadedPcapPath = null;
 
-            // Hide Loop checkbox for scene files
-            if (ChkLoopPlaying != null) ChkLoopPlaying.Visibility = Visibility.Collapsed;
-
             _scenePlayer.Load(scenePath);
             _lastLoaded = LoadedSource.Scene;
+            ApplyButtonStates(_playback.IsRunning, _playback.IsPaused);
 
             LblStatus.Text = _scenePlayer.BuildStatusMessage();
             if (_playback.Cts == null || _playback.IsPaused) RenderOneFrameNow();
@@ -5491,6 +5510,12 @@ namespace VilsSharpX
                     string? deviceHint = LiveNicSelector.GetSelectedDeviceName(CmbLiveNic) ?? _avtpLiveDeviceHint;
                     txManager.Initialize(deviceHint, _srcMac, _dstMac,
                         _vlanId, _vlanPriority, ethType, stIdByte);
+                }
+
+                if (_modeOfOperation == ModeOfOperation.PlayerFromFiles
+                    && _playback.Cts == null)
+                {
+                    StartBlackKeepalive();
                 }
 
                 // Fault recovery must clear the same signal-loss latches that

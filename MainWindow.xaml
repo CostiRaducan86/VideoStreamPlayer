@@ -501,7 +501,7 @@
                 <StackPanel.RenderTransform>
                     <TranslateTransform X="105"/>
                 </StackPanel.RenderTransform>
-                <Button x:Name="BtnLoadFiles" Content="Load Files…" Click="BtnLoadFiles_Click" Padding="10,4" />
+                <Button x:Name="BtnLoadFiles" Content="AVTP Input" Click="BtnLoadFiles_Click" Padding="10,4" />
 
                 <Rectangle Width="1" Height="26" Fill="Gray" Margin="12,0,12,0" VerticalAlignment="Center" />
 
@@ -513,9 +513,36 @@
                 <Button x:Name="BtnSave" Content="📷 Snapshot" Click="BtnSaveReport_Click" Padding="10,4" Margin="0,0,6,0" />
                 <Button x:Name="BtnStop" Content="⏹ Stop" Click="BtnStop_Click" Padding="10,4" Margin="0,0,0,0" />
 
-                <!-- Loop checkbox (visible only for AVI/PCAP) -->
-                <CheckBox x:Name="ChkLoopPlaying" Content="🔄 Loop Playback" VerticalAlignment="Center" Margin="12,0,0,0"
-                          Visibility="Collapsed" IsChecked="False" Checked="ChkLoopPlaying_Changed" Unchecked="ChkLoopPlaying_Changed" />
+                <!-- Loop toggle is available only for loaded video sources. -->
+                <ToggleButton x:Name="ChkLoopPlaying" VerticalAlignment="Center" Margin="12,0,0,0"
+                              Visibility="Visible" IsEnabled="False" IsChecked="False"
+                              Checked="ChkLoopPlaying_Changed" Unchecked="ChkLoopPlaying_Changed"
+                              Width="28" Height="28" Padding="0" Background="Transparent" BorderBrush="Transparent"
+                              BorderThickness="0" FocusVisualStyle="{x:Null}"
+                              ToolTip="Toggle video loop playback">
+                    <TextBlock x:Name="LoopPlaybackIcon" Text="↻" FontSize="28" FontWeight="Bold"
+                               Foreground="#777777" HorizontalAlignment="Center" VerticalAlignment="Bottom" />
+                    <ToggleButton.Style>
+                        <Style TargetType="ToggleButton">
+                            <Setter Property="Background" Value="Transparent" />
+                            <Setter Property="BorderBrush" Value="Transparent" />
+                            <Setter Property="BorderThickness" Value="0" />
+                            <Setter Property="Template">
+                                <Setter.Value>
+                                    <ControlTemplate TargetType="ToggleButton">
+                                        <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                    </ControlTemplate>
+                                </Setter.Value>
+                            </Setter>
+                            <Style.Triggers>
+                                <Trigger Property="IsEnabled" Value="False">
+                                    <Setter Property="Foreground" Value="#888888" />
+                                    <Setter Property="Opacity" Value="0.45" />
+                                </Trigger>
+                            </Style.Triggers>
+                        </Style>
+                    </ToggleButton.Style>
+                </ToggleButton>
 
                 <Rectangle Width="1" Height="26" Fill="Gray" Margin="12,0,12,0" VerticalAlignment="Center" />
 
