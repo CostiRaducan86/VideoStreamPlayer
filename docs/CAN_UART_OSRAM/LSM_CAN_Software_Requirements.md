@@ -1,5 +1,7 @@
 # LSM CAN Software Requirements
 
+> The implementation checklist for the current OSRAM path is maintained in
+> [CAN_UART_OSRAM_Implementation_Tracking.md](CAN_UART_OSRAM_Implementation_Tracking.md).
 > **Status**: Milestone 1 complete. Milestone 2 Osram real diagnostic UART path implemented. Nichia diagnostic protocol pending.
 
 ## 1. Module responsibilities
@@ -28,7 +30,7 @@ PC-side Ethernet reception and CAN diagnostics parsing shall be implemented as a
 
 A diagnostic record schema shall be defined with explicit field sizes and endian order.
 
-> **Implementation**: Protocol v2 — 94-byte payload with explicit offsets. See `LSM_CAN_Software_Architecture.md` §3.2 for full layout.
+> **Implementation**: Protocol v2 — 94-byte payload with explicit offsets. See `LSM_CAN_Software_Architecture.md` §2 for the wire layout.
 
 ### SWR-005 ✅ IMPLEMENTED
 
@@ -103,7 +105,7 @@ PC application shall decode diagnostic packets into typed C# records.
 
 PC application shall store the latest diagnostic records in a thread-safe in-memory store suitable for UI binding.
 
-> **Implementation**: `LsmCanDiagStore.cs` — thread-safe ring buffer (512 capacity), `GetSnapshot()` for UI queries.
+> **Implementation**: `LsmCanDiagStore.cs` — thread-safe session store with chronological snapshots for UI paging.
 
 ### SWR-015 ✅ IMPLEMENTED
 

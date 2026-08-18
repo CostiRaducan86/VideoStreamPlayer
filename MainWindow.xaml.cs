@@ -1,6 +1,7 @@
 ﻿using Microsoft.Win32;
 using System;
 using System.Collections.ObjectModel;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Globalization;
@@ -173,7 +174,7 @@ namespace VilsSharpX
         // Basler USB3 camera capture (pane C)
         private BaslerCameraCapture? _baslerCapture;
         private LsmCanDiagCapture? _canDiagCapture;
-        private readonly LsmCanDiagStore _canDiagStore = new(32768);
+        private readonly LsmCanDiagStore _canDiagStore = new(0);
         private OsramDefectStore? _osramDefectStore;
         private OsramDefectControlWindow? _osramDefectControlWindow;
         private CommunicationFaultControlWindow? _communicationFaultControlWindow;
@@ -181,11 +182,11 @@ namespace VilsSharpX
         private NichiaDefectStore? _nichiaDefectStore;
         private NichiaDefectControlWindow? _nichiaDefectControlWindow;
         private readonly ObservableCollection<CanDiagRowView> _canDiagRows = [];
+        private readonly ConcurrentQueue<LsmCanDiagRecord> _pendingRawCanRecords = new();
         private int _canDiagCurrentPage = 1;
         private int _canDiagTotalPages = 1;
         private DateTime _canDiagLastRefresh = DateTime.MinValue;
-        private bool _canDiagRefreshPending;
-        private bool _canDiagRecording;  // starts false — user presses Record to begin
+        private volatile bool _canDiagRecording;  // starts false — user presses Record to begin
         private bool _canDiagTraceLoaded;
         private DateTime _canRecordSessionStart = DateTime.MinValue; // filters stale Dispatcher-queued records
         private DispatcherTimer? _canDiagRetryTimer; // resends START if CD stays 0
@@ -193,9 +194,15 @@ namespace VilsSharpX
         private static readonly TimeSpan CanDiagRefreshInterval = TimeSpan.FromMilliseconds(200);
         private static readonly TimeSpan CanDiagStallTimeout = TimeSpan.FromSeconds(6);
         private DateTime _canDiagLastRecordUtc = DateTime.MinValue;
+        private DateTime _canDisplayTimestampUtc = DateTime.MinValue;
+        private uint _canPreviousSourceTimestamp;
+        private bool _canHasPreviousSourceTimestamp;
+        private int _canNextDisplaySequence;
         private bool _canDiagSessionHadTraffic;
         private int _canDiagConsecutiveRestarts;
         private bool _canDiagWatchdogRecovering;
+        private int _canDiagUiRefreshRequested;
+        private int _canDiagStopRequested;
         private string _canSortColumn = "Nr";     // column header text used for sorting
         private bool _canSortAscending = true;     // true = ascending, false = descending
         private GridViewColumnHeader? _canLastSortHeader;  // last clicked header for glyph tracking
@@ -1839,6 +1846,7 @@ namespace VilsSharpX
         }
 
         private DispatcherTimer? _canDiagStatusTimer;
+        private DispatcherTimer? _canDiagUiTimer;
 
         private void InitializeCanDiagMonitor()
         {
@@ -1851,6 +1859,13 @@ namespace VilsSharpX
             _canDiagStatusTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
             _canDiagStatusTimer.Tick += (_, _) => UpdateCanDiagStatusText();
             _canDiagStatusTimer.Start();
+
+            _canDiagUiTimer = new DispatcherTimer(DispatcherPriority.Background)
+            {
+                Interval = CanDiagRefreshInterval
+            };
+            _canDiagUiTimer.Tick += (_, _) => RefreshCanDiagUiIfNeeded();
+            _canDiagUiTimer.Start();
 
             _canDiagWatchdogTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
             _canDiagWatchdogTimer.Tick += (_, _) => CanDiagWatchdogTick();
@@ -1970,7 +1985,7 @@ namespace VilsSharpX
                 // The C# side only DEFINES defects (via OsramDefectControlWindow); the actual
                 // ELEDERP/ELEDERS injection into the CAN-UART stream is performed in the Aurix
                 // firmware (LSM -> SmartVisio Box -> ECU). Records are shown unmodified.
-                _canDiagCapture.OnRecordReady += record => Dispatcher.BeginInvoke(() => HandleCanDiagRecord(record));
+                _canDiagCapture.OnRecordReady += HandleCanDiagRecord;
                 AppendDiagLog("[can] diagnostic capture started");
                 UpdateCanDiagStatusText();
             }
@@ -2012,48 +2027,60 @@ namespace VilsSharpX
             if (record.ReceivedUtc < _canRecordSessionStart)
                 return;
 
-            _canDiagStore.Append(record);
-            AppendRawCanLine(record);
+            if (!_canHasPreviousSourceTimestamp)
+            {
+                _canDisplayTimestampUtc = record.ReceivedUtc;
+                _canHasPreviousSourceTimestamp = true;
+            }
+            else
+            {
+                uint deltaUs = unchecked(record.SourceTimestamp - _canPreviousSourceTimestamp);
+                _canDisplayTimestampUtc = _canDisplayTimestampUtc.AddTicks((long)deltaUs * 10L);
+            }
 
+            _canPreviousSourceTimestamp = record.SourceTimestamp;
+            record = record.WithDisplayTiming(_canDisplayTimestampUtc, _canNextDisplaySequence++);
+            _canDiagStore.Append(record);
+            _pendingRawCanRecords.Enqueue(record);
+            Interlocked.Exchange(ref _canDiagUiRefreshRequested, 1);
             // Auto-stop recording when store is full to prevent
             // oldest records from being silently discarded.
             if (_canDiagStore.IsFull)
             {
-                StopCanUartRecordingInternal();
-            }
-
-            /* Throttle UI refresh to avoid freezing under high packet rate.
-             * Records are still stored; only the visual update is deferred. */
-            var now = DateTime.UtcNow;
-            if (now - _canDiagLastRefresh >= CanDiagRefreshInterval)
-            {
-                _canDiagLastRefresh = now;
-                _canDiagRefreshPending = false;
-                RefreshCanDiagView();
-            }
-            else if (!_canDiagRefreshPending)
-            {
-                _canDiagRefreshPending = true;
-                var delay = CanDiagRefreshInterval - (now - _canDiagLastRefresh);
-                if (delay < TimeSpan.Zero) delay = TimeSpan.Zero;
-                _ = System.Threading.Tasks.Task.Delay(delay).ContinueWith(_ =>
+                if (Interlocked.Exchange(ref _canDiagStopRequested, 1) == 0)
+                {
                     Dispatcher.BeginInvoke(() =>
                     {
-                        if (_canDiagRefreshPending)
-                        {
-                            _canDiagRefreshPending = false;
-                            _canDiagLastRefresh = DateTime.UtcNow;
-                            RefreshCanDiagView();
-                        }
-                    }),
-                    System.Threading.Tasks.TaskScheduler.Default);
+                        if (_canDiagRecording)
+                            StopCanUartRecordingInternal();
+                    });
+                }
             }
+        }
+
+        private void RefreshCanDiagUiIfNeeded()
+        {
+            if (Interlocked.Exchange(ref _canDiagUiRefreshRequested, 0) == 0
+                && _pendingRawCanRecords.IsEmpty)
+                return;
+
+            _canDiagLastRefresh = DateTime.UtcNow;
+            FlushPendingRawCanLines();
+            RefreshCanDiagView();
         }
 
         private void RefreshCanDiagView()
         {
-            // Sequential log: show all stored records in arrival order.
-            var snapshot = _canDiagStore.SnapshotNewestFirst(0);  // 0 = all
+            int pageSize = CurrentCanPageSize;
+            int totalRecords = _canDiagStore.Count;
+            _canDiagTotalPages = Math.Max(1, (int)Math.Ceiling(totalRecords / (double)pageSize));
+            _canDiagCurrentPage = Math.Max(1, Math.Min(_canDiagCurrentPage, _canDiagTotalPages));
+
+            // The default monitor order is chronological, so page 1 remains stable while
+            // later pages are populated as the recording continues.
+            var snapshot = _canSortColumn == "Nr"
+                ? _canDiagStore.SnapshotOldestFirst((_canDiagCurrentPage - 1) * pageSize, pageSize)
+                : _canDiagStore.SnapshotNewestFirst(0);
             var filtered = snapshot
                 .Where(MatchesCanDiagFilter)
                 .Select(CanDiagRowView.FromRecord)
@@ -2061,7 +2088,9 @@ namespace VilsSharpX
 
             IEnumerable<CanDiagRowView> ordered = _canSortColumn switch
             {
-                "Time" => filtered.OrderBy(row => row.RawReceivedUtc),
+                "Time (us)" => filtered
+                    .OrderBy(row => row.RawDisplayTimestampUtc)
+                    .ThenBy(row => row.RawSequence),
                 "Name" => filtered.OrderBy(row => row.Name, StringComparer.OrdinalIgnoreCase),
                 "Address" => filtered.OrderBy(row => row.RawAddress),
                 "MemoryType" => filtered.OrderBy(row => row.MemoryType, StringComparer.OrdinalIgnoreCase),
@@ -2075,15 +2104,13 @@ namespace VilsSharpX
             if (!_canSortAscending)
                 ordered = ordered.Reverse();
 
-            var pageSource = ordered.ToList();
-            int pageSize = CurrentCanPageSize;
-            _canDiagTotalPages = Math.Max(1, (int)Math.Ceiling(pageSource.Count / (double)pageSize));
-            _canDiagCurrentPage = Math.Max(1, Math.Min(_canDiagCurrentPage, _canDiagTotalPages));
-
-            var pageItems = pageSource
-                .Skip((_canDiagCurrentPage - 1) * pageSize)
-                .Take(pageSize)
-                .ToList();
+            List<CanDiagRowView> pageItems;
+            if (_canSortColumn == "Nr")
+                pageItems = [.. ordered];
+            else
+                pageItems = [.. ordered
+                    .Skip((_canDiagCurrentPage - 1) * pageSize)
+                    .Take(pageSize)];
 
             _canDiagRows.Clear();
 
@@ -2093,7 +2120,7 @@ namespace VilsSharpX
             if (LblCanPageInfo != null)
                 LblCanPageInfo.Text = $"Page: {_canDiagCurrentPage} / {_canDiagTotalPages}";
 
-            bool hasMessages = pageSource.Count > 0;
+            bool hasMessages = totalRecords > 0;
             if (BtnCanPrevPage != null)
                 BtnCanPrevPage.IsEnabled = hasMessages && _canDiagCurrentPage > 1;
 
@@ -2183,10 +2210,64 @@ namespace VilsSharpX
         }
 
         private bool _canMonitorExpanded;
-        private const int CanDiagPageSizeNormal = 14;
-        private const int CanDiagPageSizeExpanded = 32;
+        private const double CanDiagRowHeight = 18.0;
+        private const double CanDiagLayoutReserve = 4.0;
+        private const int CanDiagCompactRowCorrection = 1;
+        private const int CanDiagExpandedRowCorrection = 2;
+        private bool _canDiagSizeRefreshPending;
 
-        private int CurrentCanPageSize => _canMonitorExpanded ? CanDiagPageSizeExpanded : CanDiagPageSizeNormal;
+        private int CurrentCanPageSize
+        {
+            get
+            {
+                if (LvCanDiag == null || LvCanDiag.ActualHeight <= 0)
+                    return 15;
+
+                double headerHeight = FindVisualChild<GridViewColumnHeader>(LvCanDiag)?.ActualHeight ?? 0.0;
+                // Do not use ScrollViewer.ViewportHeight here. With vertical scrolling
+                // disabled, WPF can report a one-row viewport even when the ListView is
+                // much taller, which collapses pagination to one record per page.
+                double availableRowsHeight = LvCanDiag.ActualHeight
+                    - headerHeight
+                    - SystemParameters.HorizontalScrollBarHeight
+                    - CanDiagLayoutReserve;
+                int fittedRows = (int)Math.Floor(availableRowsHeight / CanDiagRowHeight);
+                int correction = _canMonitorExpanded
+                    ? CanDiagExpandedRowCorrection
+                    : CanDiagCompactRowCorrection;
+                return Math.Max(1, fittedRows - correction);
+            }
+        }
+
+        private static T? FindVisualChild<T>(DependencyObject parent) where T : DependencyObject
+        {
+            int childCount = VisualTreeHelper.GetChildrenCount(parent);
+            for (int i = 0; i < childCount; i++)
+            {
+                var child = VisualTreeHelper.GetChild(parent, i);
+                if (child is T match)
+                    return match;
+
+                var nested = FindVisualChild<T>(child);
+                if (nested != null)
+                    return nested;
+            }
+
+            return null;
+        }
+
+        private void LvCanDiag_SizeChanged(object sender, SizeChangedEventArgs e)
+        {
+            if (_canDiagSizeRefreshPending)
+                return;
+
+            _canDiagSizeRefreshPending = true;
+            Dispatcher.BeginInvoke(() =>
+            {
+                _canDiagSizeRefreshPending = false;
+                RefreshCanDiagView();
+            }, DispatcherPriority.Loaded);
+        }
 
         private void BtnCanExpandCollapse_Click(object sender, RoutedEventArgs e)
         {
@@ -2228,8 +2309,11 @@ namespace VilsSharpX
         private void ClearCanUartInternal()
         {
             _canDiagStore.Clear();
+            ResetCanDisplayTiming();
             _canDiagTraceLoaded = false;
             _rawCanLines.Clear();
+            while (_pendingRawCanRecords.TryDequeue(out _)) { }
+            Interlocked.Exchange(ref _canDiagUiRefreshRequested, 0);
 
             if (TblRawCan != null)
                 TblRawCan.Text = string.Empty;
@@ -2282,20 +2366,32 @@ namespace VilsSharpX
 
             // Start a fresh recording session: clear previous data
             _canDiagStore.Clear();
+            ResetCanDisplayTiming();
             _canDiagTraceLoaded = false;
             _rawCanLines.Clear();
+            while (_pendingRawCanRecords.TryDequeue(out _)) { }
+            Interlocked.Exchange(ref _canDiagUiRefreshRequested, 0);
 
             if (TblRawCan != null)
                 TblRawCan.Text = string.Empty;
 
             _canDiagCurrentPage = 1;
             _canDiagRecording = true;
+            Interlocked.Exchange(ref _canDiagStopRequested, 0);
 
             UpdateCanDiagRecordingButtons();
             RefreshCanDiagView();
 
             // Start a retry timer: if CD stays 0 after 2 seconds, resend START.
             StartDiagRetryTimer();
+        }
+
+        private void ResetCanDisplayTiming()
+        {
+            _canDisplayTimestampUtc = DateTime.MinValue;
+            _canPreviousSourceTimestamp = 0;
+            _canHasPreviousSourceTimestamp = false;
+            _canNextDisplaySequence = 0;
         }
 
         /// <summary>Sends DiagSniff START to SmartVisio Box (3× broadcast for reliability).</summary>
@@ -2412,6 +2508,7 @@ namespace VilsSharpX
         private void StopCanUartRecordingInternal()
         {
             _canDiagRecording = false;
+            Interlocked.Exchange(ref _canDiagStopRequested, 0);
             _canDiagWatchdogRecovering = false;
             _canDiagSessionHadTraffic = false;
             _canDiagConsecutiveRestarts = 0;
@@ -2791,7 +2888,7 @@ namespace VilsSharpX
             }
         }
 
-        private void AppendRawCanLine(LsmCanDiagRecord record)
+        private void AppendRawCanLine(LsmCanDiagRecord record, bool flushUi = true)
         {
             string line;
             if (record.IsCanRawFrame)
@@ -2815,7 +2912,7 @@ namespace VilsSharpX
             if (_rawCanLines.Count > RawCanMaxLines)
                 _rawCanLines.RemoveAt(0);
 
-            if (_activeCanTab == CanTab.RawCan)
+            if (flushUi && _activeCanTab == CanTab.RawCan)
                 FlushRawCanText();
         }
 
@@ -2827,6 +2924,15 @@ namespace VilsSharpX
             ScvRawCan?.ScrollToEnd();
         }
 
+        private void FlushPendingRawCanLines()
+        {
+            while (_pendingRawCanRecords.TryDequeue(out var record))
+                AppendRawCanLine(record, flushUi: false);
+
+            if (_activeCanTab == CanTab.RawCan)
+                FlushRawCanText();
+        }
+
         // ── CAN Monitor: row double-click → detail popup ────────────────────────
 
         private void LvCanDiag_MouseDoubleClick(object sender, System.Windows.Input.MouseButtonEventArgs e)
@@ -2834,7 +2940,7 @@ namespace VilsSharpX
             if (LvCanDiag?.SelectedItem is CanDiagRowView row && row.Record != null)
             {
                 var win = new CanDetailWindow(row.Record) { Owner = this };
-                win.ShowDialog();
+                win.Show();
             }
         }
 
@@ -2849,8 +2955,10 @@ namespace VilsSharpX
             public string Operation { get; init; } = string.Empty;
             public string Value { get; init; } = string.Empty;
             public string Error { get; init; } = string.Empty;
-            public ushort RawSequence { get; init; }
+            public int RawSequence { get; init; }
             public ushort RawAddress { get; init; }
+            public uint RawSourceTimestamp { get; init; }
+            public DateTime RawDisplayTimestampUtc { get; init; }
             public DateTime RawReceivedUtc { get; init; }
             public LsmCanDiagRecord? Record { get; init; }
 
@@ -2879,8 +2987,8 @@ namespace VilsSharpX
 
                 return new CanDiagRowView
                 {
-                    Timestamp = record.ReceivedUtc.ToLocalTime().ToString("HH:mm:ss.fff", CultureInfo.InvariantCulture),
-                    Number = record.Sequence.ToString(CultureInfo.InvariantCulture),
+                    Timestamp = record.EffectiveDisplayTimestampUtc.ToLocalTime().ToString("HH:mm:ss.ffffff", CultureInfo.InvariantCulture),
+                    Number = record.EffectiveDisplaySequence.ToString(CultureInfo.InvariantCulture),
                     Name = regName,
                     Address = addrStr,
                     MemoryType = memType,
@@ -2893,8 +3001,10 @@ namespace VilsSharpX
                         LsmCanDiagStatus.CrcMismatch => "CRC",
                         _ => "Error",
                     },
-                    RawSequence = record.Sequence,
+                    RawSequence = record.EffectiveDisplaySequence,
                     RawAddress = record.Address,
+                    RawSourceTimestamp = record.SourceTimestamp,
+                    RawDisplayTimestampUtc = record.EffectiveDisplayTimestampUtc,
                     RawReceivedUtc = record.ReceivedUtc,
                     Record = record,
                 };

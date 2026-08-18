@@ -1,5 +1,8 @@
 # LSM CAN/UART System Architecture
 
+> For the current OSRAM inline-bridge timing definition and Saleae analysis, see
+> [CAN_UART_OSRAM_Architecture.md](CAN_UART_OSRAM_Architecture.md).
+
 **Last updated:** 2026-04-30
 
 ## 1. Overview
@@ -13,11 +16,11 @@ The feature is still called CAN/UART in the UI because the physical harness uses
 ```text
 ECU / LSM diagnostic bus
   -> CAN transceiver PHY
-  -> AURIX ASCLIN9/P20.7
-  -> DMA ch0 ping-pong buffers
-  -> diag_uart_poll_idle()
-  -> diag_uart_tick()
-  -> diag_uart_try_receive()
+  -> AURIX ASCLIN5/ASCLIN4 Adapter_V2 bridge
+  -> CPU2 RX ISR relay and echo filtering
+  -> merged STM-timestamped monitor stream
+  -> OSRAM/Nichia length parser
+  -> CPU2 -> CPU0 SPSC handoff
   -> DiagUartFrame
   -> can_diag_bridge_uart_frame()
   -> CanDiagRecord queue
@@ -49,7 +52,7 @@ User presses Stop
 | Block | Implementation | Notes |
 | --- | --- | --- |
 | LVDS acquisition | ASCLIN1/P14.8, DMA ch1 | Independent from diagnostic path |
-| Diagnostic UART acquisition | ASCLIN9/P20.7, DMA ch0 | Current Osram config: 2M 8O2 |
+| Diagnostic UART acquisition | ASCLIN5/ASCLIN4 on X103-28/29/31/34 | Current OSRAM config: 2M 8O2 |
 | Diagnostic parser | `diag_uart_try_receive()` | Osram `[0x80][0xA5][HCTRL][HADR] + data + CRC16` |
 | Record bridge | `can_diag_bridge_uart_frame()` | Converts `DiagUartFrame` to `CanDiagRecord` |
 | Diagnostic queue | `can_diag.c` | 32 records, oldest dropped on overflow |
@@ -79,7 +82,7 @@ User presses Stop
 ## 7. Current Validation State
 
 - Synthetic M1 data path was validated end-to-end previously.
-- ASCLIN9 DMA traffic and LVDS coexistence were validated on target in earlier hardware sessions.
+- ASCLIN5/ASCLIN4 bridge traffic and LVDS coexistence were validated with four-channel Saleae captures and target sessions.
 - Current code contains the Osram real-frame parser and bridge path.
 - The C# application was manually validated after analyzer cleanup and still behaves as before.
 

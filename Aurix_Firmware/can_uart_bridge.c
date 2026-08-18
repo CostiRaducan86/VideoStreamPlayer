@@ -64,8 +64,6 @@
 #define BRIDGE_OSRAM_SYNC1        0xA5u  /* SYNC1 (master address)            */
 #define BRIDGE_FRAME_HEADER_LEN   4u     /* SYNC0 SYNC1 HCTRL HADR            */
 #define BRIDGE_FRAME_CRC_LEN      2u     /* trailing CRC-16                   */
-#define BRIDGE_RD_DELAY_US        6u     /* read response latency (~1 byte)   */
-
 /* A header whose remaining bytes never arrive (e.g. a read request whose
  * response was lost) is discarded after this much bus-quiet so the parser
  * resynchronises on the next transaction instead of stalling on the partial.
@@ -159,6 +157,7 @@ static volatile uint32 s_relayLastStm;  /* STM of last byte seen on the bus  */
 static volatile uint32 s_relayReqCount; /* telemetry: ECU->LSM locks taken   */
 static volatile uint32 s_relayRspCount; /* telemetry: LSM->ECU locks taken   */
 static volatile uint32 s_relayResyncs;  /* telemetry: idle/overflow resyncs  */
+static volatile uint32 s_lsmLastRequestEchoStm; /* STM of last request echo on LSM RX */
 
 /* ---- Shared monitoring stream -------------------------------------------
  * Genuine (echo-filtered) bytes from BOTH directions are appended here in
@@ -171,6 +170,7 @@ static volatile uint8  s_monAcc[BRIDGE_ACC_MAX];
 static volatile uint16 s_monLen;
 static volatile uint32 s_monStartStm;    /* STM of byte[0] (current frame)    */
 static volatile uint32 s_monLastStm;     /* STM of last byte appended         */
+static volatile uint16 s_monResponseDelayUs; /* turnaround for current frame  */
 static uint32          s_monPrevEndStm;  /* for inter-frame delay             */
 static volatile uint32 s_monNoiseSkipped;/* sync-hunt / discarded bytes       */
 static volatile uint32 s_monOverflow;    /* accumulator overflow              */
@@ -324,12 +324,13 @@ static void bridge_relay_pump(void)
         if (ecu->RXFIFOCON.B.FILL > 0u)
         {
             uint8 b = (uint8)IfxAsclin_readRxData(ecu);
+            uint32 byteStm = IfxStm_getLower(&MODULE_STM0);
             s_ecuDir.rxBytes++;
             more = TRUE;
 
             if (s_bridgeActive != 0u)
             {
-                s_relayLastStm = stm;
+                s_relayLastStm = byteStm;
 
                 if (s_relay == BRIDGE_RELAY_RSP && s_echoCount < s_fwdCount)
                 {
@@ -347,14 +348,16 @@ static void bridge_relay_pump(void)
                         s_echoCount = 0u;
                         s_relayReqCount++;
                         s_reqLen    = 0u;   /* start of new request: reset capture */
+                        s_lsmLastRequestEchoStm = 0u;
+                        s_monResponseDelayUs = 0u;
                     }
                     /* Capture first 4 bytes of request for HCTRL/HADR extraction. */
                     if (s_reqLen < 4u)
                         s_reqBuf[s_reqLen++] = b;
                     if (can_uart_fault_should_drop(CAN_UART_FAULT_DIR_ECU_TO_LSM))
-                        bridge_mon_capture(b, stm);
+                        bridge_mon_capture(b, byteStm);
                     else
-                        bridge_forward(&s_ecuDir, lsm, b, stm);
+                        bridge_forward(&s_ecuDir, lsm, b, byteStm);
                 }
             }
         }
@@ -363,18 +366,20 @@ static void bridge_relay_pump(void)
         if (lsm->RXFIFOCON.B.FILL > 0u)
         {
             uint8 b = (uint8)IfxAsclin_readRxData(lsm);
+            uint32 byteStm = IfxStm_getLower(&MODULE_STM0);
             s_lsmDir.rxBytes++;
             more = TRUE;
 
             if (s_bridgeActive != 0u)
             {
-                s_relayLastStm = stm;
+                s_relayLastStm = byteStm;
 
                 if (s_relay == BRIDGE_RELAY_REQ && s_echoCount < s_fwdCount)
                 {
                     /* Echo of a request byte we just forwarded onto LSM TX. */
                     s_echoCount++;
                     s_lsmDir.echoDiscarded++;
+                    s_lsmLastRequestEchoStm = byteStm;
                 }
                 else
                 {
@@ -394,6 +399,20 @@ static void bridge_relay_pump(void)
                         s_fwdCount  = 0u;
                         s_echoCount = 0u;
                         s_relayRspCount++;
+
+                        if (s_lsmLastRequestEchoStm != 0u)
+                        {
+                            /* Measure from the last request echo observed on
+                             * the LSM segment to the first genuine LSM byte.
+                             * This excludes ECU-side forwarding latency. */
+                            uint32 turnaroundUs = (byteStm - s_lsmLastRequestEchoStm) / s_ticksPerUs;
+                            s_monResponseDelayUs = (turnaroundUs > 0xFFFFu)
+                                                 ? 0xFFFFu : (uint16)turnaroundUs;
+                        }
+                        else
+                        {
+                            s_monResponseDelayUs = 0u;
+                        }
 
                         if (s_reqLen >= 4u && s_reqBuf[0] == 0x55u)
                         {
@@ -424,9 +443,9 @@ static void bridge_relay_pump(void)
                       ? nichia_defect_inject_filter_byte(b)
                       : defect_inject_filter_byte(b);
                                         if (can_uart_fault_should_drop(CAN_UART_FAULT_DIR_LSM_TO_ECU))
-                                                bridge_mon_capture(b, stm);
+                                            bridge_mon_capture(b, byteStm);
                                         else
-                                                bridge_forward(&s_lsmDir, ecu, b, stm);
+                                            bridge_forward(&s_lsmDir, ecu, b, byteStm);
                 }
             }
         }
@@ -593,6 +612,8 @@ void can_uart_bridge_init(uint8 deviceId)
     s_fwdCount     = 0u;
     s_echoCount    = 0u;
     s_relayLastStm = 0u;
+    s_lsmLastRequestEchoStm = 0u;
+    s_monResponseDelayUs = 0u;
 
     /* STM0 ticks per microsecond for idle-gap timing. */
     {
@@ -731,7 +752,7 @@ static boolean bridge_mon_parse_step(DiagUartFrame *out, boolean *haveFrame)
     memcpy(out->data, (const void *)s_monAcc, copyLen);
     out->len             = copyLen;
     out->timestampUs     = s_monStartStm / s_ticksPerUs;
-    out->responseDelayUs = ((hctrl & 0x80u) != 0u) ? BRIDGE_RD_DELAY_US : 0u;
+    out->responseDelayUs = ((hctrl & 0x80u) != 0u) ? s_monResponseDelayUs : 0u;
 
     if (s_monPrevEndStm != 0u)
     {
@@ -932,7 +953,7 @@ static boolean bridge_mon_parse_step_nichia(DiagUartFrame *out, boolean *haveFra
     memcpy(out->data, (const void *)s_monAcc, copyLen);
     out->len             = copyLen;
     out->timestampUs     = s_monStartStm / s_ticksPerUs;
-    out->responseDelayUs = BRIDGE_RD_DELAY_US;
+    out->responseDelayUs = s_monResponseDelayUs;
 
     if (s_monPrevEndStm != 0u)
     {
@@ -1130,6 +1151,8 @@ void can_uart_bridge_reset_state(void)
     s_monStartStm     = 0u;
     s_monLastStm      = 0u;
     s_monPrevEndStm   = 0u;
+    s_lsmLastRequestEchoStm = 0u;
+    s_monResponseDelayUs = 0u;
     s_monNoiseSkipped = 0u;
     s_monOverflow     = 0u;
     s_monFramesBridged = 0u;

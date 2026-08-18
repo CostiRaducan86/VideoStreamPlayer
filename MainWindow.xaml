@@ -255,11 +255,14 @@
 
                 <!-- Monitor view (default visible) -->
                 <ListView x:Name="LvCanDiag" Grid.Row="1" Margin="0,0,0,8"
+                          ScrollViewer.VerticalScrollBarVisibility="Disabled"
+                          ScrollViewer.HorizontalScrollBarVisibility="Auto"
                           MouseDoubleClick="LvCanDiag_MouseDoubleClick"
+                          SizeChanged="LvCanDiag_SizeChanged"
                           GridViewColumnHeader.Click="LvCanDiag_ColumnHeaderClick">
                     <ListView.View>
                         <GridView>
-                            <GridViewColumn Header="Time" DisplayMemberBinding="{Binding Timestamp}" Width="86"/>
+                            <GridViewColumn Header="Time (us)" DisplayMemberBinding="{Binding Timestamp}" Width="118"/>
                             <GridViewColumn Header="Nr" DisplayMemberBinding="{Binding Number}" Width="44"/>
                             <GridViewColumn Header="Name" DisplayMemberBinding="{Binding Name}" Width="96"/>
                             <GridViewColumn Header="Address" DisplayMemberBinding="{Binding Address}" Width="72"/>
@@ -272,6 +275,8 @@
                     </ListView.View>
                     <ListView.ItemContainerStyle>
                         <Style TargetType="ListViewItem">
+                            <Setter Property="Height" Value="18"/>
+                            <Setter Property="Padding" Value="0"/>
                             <Style.Triggers>
                                 <DataTrigger Binding="{Binding Error}" Value="Timeout">
                                     <Setter Property="Background" Value="#FFEEEE"/>

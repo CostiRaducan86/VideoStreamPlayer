@@ -66,7 +66,7 @@
                     <TextBlock Grid.Row="0" Grid.Column="0" Style="{StaticResource LabelStyle}" Text="Time:"/>
                     <TextBox x:Name="TxtTime" Grid.Row="0" Grid.Column="1" Style="{StaticResource ValueStyle}" Margin="0,0,16,4"/>
 
-                    <TextBlock Grid.Row="0" Grid.Column="2" Style="{StaticResource LabelStyle}" Text="UnixTs:"/>
+                    <TextBlock Grid.Row="0" Grid.Column="2" Style="{StaticResource LabelStyle}" Text="UnixTs(us):"/>
                     <TextBox x:Name="TxtUnixTs" Grid.Row="0" Grid.Column="3" Style="{StaticResource ValueStyle}"/>
 
                     <TextBlock Grid.Row="1" Grid.Column="0" Style="{StaticResource LabelStyle}" Text="ResponseDelay:"/>

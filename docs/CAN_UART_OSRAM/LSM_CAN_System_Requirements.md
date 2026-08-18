@@ -1,5 +1,7 @@
 # LSM CAN System Requirements
 
+> OSRAM-specific timing definitions and Saleae validation are maintained in
+> [CAN_UART_OSRAM_Architecture.md](CAN_UART_OSRAM_Architecture.md).
 > **Status**: Milestone 1 complete. Milestone 2 Osram real diagnostic UART path implemented. Nichia diagnostic protocol pending.
 
 ## 1. Introduction
@@ -12,7 +14,7 @@ This document defines system-level requirements for CAN-based diagnostic communi
 
 The system shall acquire diagnostic data originating from the LSM diagnostic communication path.
 
-> **M1**: Synthetic data from diagnostic record queue. **M2 current**: real Osram UART traffic via ASCLIN9 DMA (2M 8O2 through CAN transceivers used as PHY).
+> **M1**: Synthetic data from diagnostic record queue. **Current**: real OSRAM UART traffic through the Adapter_V2 ASCLIN5/ASCLIN4 inline bridge (2M 8O2 through CAN transceivers used as PHY).
 
 ### SR-002 Device coverage ✅ IMPLEMENTED
 
@@ -59,7 +61,7 @@ The PC application shall provide a live diagnostic monitor view for incoming rec
 
 The PC application shall support saving diagnostic records for offline analysis.
 
-> **Note**: In-memory ring buffer (512 entries) provides session-level persistence. File export/recording not yet implemented.
+> **Implementation**: The session store is thread-safe and unbounded for active recording; chronological paging and `.rply` export are implemented.
 
 ### SR-009 Existing video pipeline compatibility ✅ VALIDATED
 
@@ -74,7 +76,7 @@ The CAN diagnostic feature shall coexist with the existing LVDS/AVTP video flow 
 The system shall use a physically valid connection between ECU/LSM and AURIX for diagnostic traffic.
 
 > **Discovery**: Diagnostic bus is UART through CAN transceivers (TLE9251V/TJA1057 as differential PHY only). MCMCAN not used. Current Osram implementation uses 2 Mbaud 8O2.
-> **Implementation**: ASCLIN9 on P20.7 → TLE9251V U206 → X202 IDC10. DMA channel 0. Validated on target: dmaCompletions incrementing, synced=1.
+> **Implementation**: Adapter_V2 routes ECU and LSM diagnostic segments to ASCLIN5/ASCLIN4. Relevant AURIX test points are X103-28/29/31/34. Four-channel Saleae validation confirmed byte-level forwarding and echo behavior.
 
 ### SR-011 AURIX forwarding interface ✅ IMPLEMENTED
 

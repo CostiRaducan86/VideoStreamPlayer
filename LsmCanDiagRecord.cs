@@ -43,6 +43,34 @@ public sealed class LsmCanDiagRecord
     public byte RawLength { get; init; }
     public byte[] RawPayload { get; init; } = [];
     public DateTime ReceivedUtc { get; init; }
+    public DateTime DisplayTimestampUtc { get; init; }
+    public int DisplaySequence { get; init; } = -1;
+
+    public int EffectiveDisplaySequence => DisplaySequence >= 0 ? DisplaySequence : Sequence;
+    public DateTime EffectiveDisplayTimestampUtc => DisplayTimestampUtc == default ? ReceivedUtc : DisplayTimestampUtc;
+
+    public LsmCanDiagRecord WithDisplayTiming(DateTime displayTimestampUtc, int displaySequence)
+    {
+        return new LsmCanDiagRecord
+        {
+            Sequence = Sequence,
+            RecordType = RecordType,
+            SourceTimestamp = SourceTimestamp,
+            Address = Address,
+            ResponseDelayUs = ResponseDelayUs,
+            InterFrameDelayUs = InterFrameDelayUs,
+            Value = Value,
+            Checksum = Checksum,
+            DeviceId = DeviceId,
+            Operation = Operation,
+            Status = Status,
+            RawLength = RawLength,
+            RawPayload = RawPayload,
+            ReceivedUtc = ReceivedUtc,
+            DisplayTimestampUtc = displayTimestampUtc,
+            DisplaySequence = displaySequence,
+        };
+    }
 
     public string DeviceName => DeviceId switch
     {
@@ -156,13 +184,12 @@ public sealed class LsmCanDiagRecord
     }
 
     /// <summary>
-    /// Calculate timestamp in microseconds combining SourceTimestamp (milliseconds) and InterFrameDelayUs.
-    /// Result: SourceTimestamp_ms * 1000 + InterFrameDelayUs.
-    /// Useful for high-precision timing reconstruction and display in microseconds.
+    /// Returns the hardware capture timestamp supplied by the Aurix STM, in microseconds.
+    /// InterFrameDelayUs is a separate duration and must not be added to this timestamp.
     /// </summary>
     public long GetCalculatedTimestampMicroseconds()
     {
-        return (long)SourceTimestamp * 1000 + InterFrameDelayUs;
+        return SourceTimestamp;
     }
 
     private (ushort Address, ushort Value)[] DecodeOsramRegisters()

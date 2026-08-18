@@ -1,6 +1,10 @@
 # LSM CAN/UART Functionality Description
 
-**Last updated:** 2026-04-30
+**Last updated:** 2026-08-18
+
+> Current OSRAM timing evidence and implementation status are tracked in
+> [CAN_UART_OSRAM_Architecture.md](CAN_UART_OSRAM_Architecture.md) and
+> [CAN_UART_OSRAM_Implementation_Tracking.md](CAN_UART_OSRAM_Implementation_Tracking.md).
 
 ## Purpose
 
@@ -12,7 +16,7 @@ The name "CAN" is kept for project continuity and UI familiarity, but the diagno
 
 - Milestone 1 synthetic diagnostic transport is complete and remains useful as historical validation.
 - Milestone 2 real diagnostic UART transport is implemented for the Osram-style protocol and initial Nichia/TLD816K protocol variant.
-- Current AURIX sniffer path: ASCLIN9/P20.7, DMA channel 0, ping-pong buffers.
+- Current AURIX acquisition path: Adapter_V2 inline bridge using ASCLIN5 ECU-side RX/TX and ASCLIN4 LSM-side RX/TX. RX ISRs run on CPU2.
 - Osram diagnostic UART format: 2 Mbaud, 8 data bits, odd parity, 2 stop bits.
 - Nichia/TLD816K diagnostic UART format: 2 Mbaud, 8 data bits, no parity, 1 stop bit, LSB first, non-inverted.
 - LVDS capture remains independent on ASCLIN1/P14.8, DMA channel 1.
@@ -32,13 +36,13 @@ The name "CAN" is kept for project continuity and UI familiarity, but the diagno
 
 ### Acquisition and Forwarding
 
-1. ASCLIN9 receives diagnostic UART bytes through the TLE9251V path.
-2. DMA channel 0 writes bytes into 2 x 2560-byte ping-pong buffers.
-3. `diag_uart_poll_idle()` samples DMA destination movement to detect inter-frame gaps.
-4. `diag_uart_try_receive()` dispatches to the active parser:
+1. ASCLIN5 receives ECU-side bytes and ASCLIN4 receives LSM-side bytes through the transceiver PHY.
+2. The CPU2 bridge forwards genuine bytes in the opposite direction and suppresses transceiver echoes.
+3. The bridge captures a merged request/response stream with STM timestamps.
+4. The bridge parser dispatches to the active OSRAM or Nichia framing path:
    - Osram: `[0x80][0xA5][HCTRL][HADR] + data + CRC16`; 4-byte read requests are skipped.
    - Nichia/TLD816K: `[0x55][MasterRequest][DLC/FUN][address][data][CRC8/ACK]`; read requests are skipped, read responses and write transactions are emitted.
-5. `can_diag_bridge_uart_frame()` converts each `DiagUartFrame` into a protocol v2 `CanDiagRecord`.
+5. `can_uart_bridge_poll_out()` hands completed frames to `can_diag_bridge_uart_frame()`, which converts them into protocol v2 `CanDiagRecord` values.
 6. `frame_eth_send_can_diag_pending()` drains the diagnostic queue and sends at most two records per call to avoid starving LVDS frame TX.
 7. The PC app captures the packets with `LsmCanDiagCapture`, parses them with `LsmCanDiagParser`, stores them in `LsmCanDiagStore`, and displays them in the CAN/UART monitor.
 
@@ -127,7 +131,8 @@ This validation confirms that the first Nichia UART capture path is alive end-to
 
 ### Firmware
 
-- `Aurix_Firmware/can_hw.h/.c` - ASCLIN9 diagnostic UART sniffer, DMA, parser, timing.
+- `Aurix_Firmware/can_uart_bridge.h/.c` - Adapter_V2 ASCLIN5/ASCLIN4 relay, echo filtering, parser, and timing.
+- `Aurix_Firmware/can_hw.h/.c` - legacy compatibility symbols for the previous sniffer path.
 - `Aurix_Firmware/can_diag.h/.c` - protocol v2 record queue and UART-frame bridge.
 - `Aurix_Firmware/frame_eth.h/.c` - diagnostic Ethernet serialization, TX, RX command handling.
 - `Aurix_Firmware/Cpu0_Main.c` - main-loop integration for poll, parse, bridge, and TX.

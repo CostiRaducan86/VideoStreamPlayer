@@ -1,10 +1,21 @@
 using System;
 using System.Buffers.Binary;
+using System.Diagnostics;
 
 namespace VilsSharpX;
 
 public static class LsmCanDiagParser
 {
+    private static readonly long TimestampOriginTicks = DateTime.UtcNow.Ticks;
+    private static readonly long TimestampOriginStopwatch = Stopwatch.GetTimestamp();
+
+    private static DateTime GetCaptureUtcNow()
+    {
+        long elapsedStopwatch = Stopwatch.GetTimestamp() - TimestampOriginStopwatch;
+        long elapsedDateTimeTicks = (long)(elapsedStopwatch * (double)TimeSpan.TicksPerSecond / Stopwatch.Frequency);
+        return new DateTime(TimestampOriginTicks + elapsedDateTimeTicks, DateTimeKind.Utc);
+    }
+
     public static bool TryParseEthernet(ReadOnlySpan<byte> frame, out LsmCanDiagRecord? record)
     {
         record = null;
@@ -96,7 +107,7 @@ public static class LsmCanDiagParser
                 : LsmCanDiagStatus.Unsupported,
             RawLength = rawLen,
             RawPayload = rawPayload,
-            ReceivedUtc = DateTime.UtcNow,
+            ReceivedUtc = GetCaptureUtcNow(),
         };
 
         return true;

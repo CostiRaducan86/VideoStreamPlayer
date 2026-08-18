@@ -1,6 +1,10 @@
 # LSM CAN/UART Software Architecture
 
-**Last updated:** 2026-04-30
+**Last updated:** 2026-08-18
+
+> The OSRAM-specific concept, Saleae evidence, and implementation checklist are
+> maintained in [CAN_UART_OSRAM_Architecture.md](CAN_UART_OSRAM_Architecture.md)
+> and [CAN_UART_OSRAM_Implementation_Tracking.md](CAN_UART_OSRAM_Implementation_Tracking.md).
 
 ## Status
 
@@ -14,25 +18,30 @@
 
 | File | Role | Current status |
 | --- | --- | --- |
-| `can_hw.h` | `DiagUartStats`, `DiagUartFrame`, diagnostic UART sniffer API | Implemented |
-| `can_hw.c` | ASCLIN9/P20.7, DMA ch0, ping-pong buffers, idle-gap polling, device-specific UART config, Osram and Nichia UART frame parsers | Implemented |
+| `can_uart_bridge.h` | Adapter_V2 bridge API and bridge telemetry | Implemented |
+| `can_uart_bridge.c` | ASCLIN5/ASCLIN4 byte-level relay, echo filtering, OSRAM/Nichia framing, STM timing | Implemented |
+| `can_hw.h/.c` | Legacy compatibility symbols for the previous sniffer path | Retained for compatibility |
 | `can_diag.h` | Protocol v2 constants, `CanDiagRecord`, queue API, UART bridge API | Implemented |
 | `can_diag.c` | 32-entry queue, overrun counters, `can_diag_bridge_uart_frame()` | Implemented |
 | `frame_eth.h` | Diagnostic Ethernet constants and `frame_eth_send_can_diag_pending()` declaration | Implemented |
 | `frame_eth.c` | Diagnostic Ethernet serialization, burst-limited TX, `DIAG_SNIFF` RX command | Implemented |
 | `Cpu0_Main.c` | Poll, parse, bridge, and send diagnostic records from the main loop | Implemented |
-| `device_mode.c` | Initializes diagnostic queue and ASCLIN9 sniffer; resets state on mode changes | Implemented |
+| `device_mode.c` | Initializes diagnostic mode and bridge state on mode changes | Implemented |
 
 ### 1.2 Main Loop Integration
 
 ```text
-ASCLIN1 LVDS DMA drain
-  -> consume_dma_buffer()
+CPU2 RX ISR on ASCLIN5/ASCLIN4
+  -> relay one byte to the opposite side
+  -> discard transceiver echo
+  -> capture merged monitor stream with STM timestamps
 
-diag_uart_poll_idle()
-if g_diagSniffEnabled:
-  -> diag_uart_tick()
-  -> diag_uart_try_receive()
+CPU2 bridge tick
+if diagnostic sniff is enabled:
+  -> parse complete OSRAM/Nichia transaction
+  -> push completed DiagUartFrame to CPU0 SPSC ring
+
+CPU0 bridge output poll
   -> can_diag_bridge_uart_frame()
 
 frame_eth_send_pending()
@@ -65,7 +74,7 @@ Read requests are 4-byte header-only frames and are skipped. Full read responses
 
 #### Nichia / TLD816K parser
 
-Nichia/TLD816K uses the same ASCLIN9/P20.7 sniffer path, but `diag_uart_init_for_device()` reconfigures ASCLIN9 to the Nichia CAN-UART format:
+Nichia/TLD816K uses the same ASCLIN5/ASCLIN4 bridge path, with the bridge parser selected by device mode:
 
 ```text
 2 Mbaud, 8 data bits, no parity, 1 stop bit, LSB first, non-inverted
@@ -91,9 +100,9 @@ The parser skips read requests, emits read responses and write transactions, and
 
 ### 1.4 Timing
 
-- `ResponseDelayUs`: currently estimated for read responses using a small constant, because the request-to-response gap is near one byte time and can be missed by the main-loop poller.
-- `InterFrameDelayUs`: measured by polling DMA destination-address movement and detecting idle gaps above the configured threshold.
-- Parser state and timing FIFOs are reset on sniff start.
+- `ResponseDelayUs`: measured on the LSM segment from the last request echo on `CAN_RX_LSM` to the first genuine LSM response byte. This excludes ECU-side forwarding latency and matches the direct LSM-side Saleae measurement.
+- `InterFrameDelayUs`: measured from the end of the previous merged transaction to the start of the next transaction.
+- Relay state, echo counters, parser state, and timing state are reset when the bridge is enabled or reset.
 
 ## 2. Protocol v2 Wire Format
 
@@ -151,12 +160,11 @@ The parser skips read requests, emits read responses and write transactions, and
 ```text
 SharpPcap callback thread
   -> LsmCanDiagParser.TryParseEthernet()
-  -> Dispatcher.BeginInvoke(HandleCanDiagRecord)
+  -> thread-safe store append and pending-record queue
 
-UI thread
-  -> append to LsmCanDiagStore
-  -> append RawCan line
-  -> throttled RefreshCanDiagView()
+WPF DispatcherTimer (Background priority)
+  -> flush RawCan records in batches
+  -> refresh only the visible trace page
   -> update status counters
 ```
 
@@ -166,7 +174,7 @@ The capture thread does not directly mutate WPF controls.
 
 | View | Content |
 | --- | --- |
-| Monitor | 14-row paginated table with filters/sorting |
+| Monitor | Chronological paginated table with dynamic row count and sorting |
 | RawCan | Scrollable raw diagnostic text, capped to 500 lines |
 | UartTransaction | Placeholder, reserved for expanded transaction view |
 | Detail popup | Timing, identity, CRC, raw payload, decoded registers |

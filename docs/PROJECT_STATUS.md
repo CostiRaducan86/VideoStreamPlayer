@@ -32,7 +32,7 @@ This section is the current source of truth for session recovery. Some older sec
 
 - Platform: AURIX TC397 TFT board.
 - LVDS pixel capture: ASCLIN1/P14.8, DMA channel 1 (Osram 20 Mbaud 8O1 / Nichia 12.5 Mbaud 8N1).
-- Diagnostic UART sniffer: ASCLIN9/P20.7, DMA channel 0 (2 Mbaud 8O2 through TLE9251V).
+- Diagnostic UART bridge: ASCLIN5/ASCLIN4 on X103-28/29/31/34 (2 Mbaud 8O2 through Adapter_V2 transceivers; CPU2 byte relay).
 - Camera trigger: STM0 timer on P23.1 (free-run or frame-synced modes).
 - SmartVisio Adapter GPIO control: `adapter_ctrl.c/h` (ECU mode / direct mode switching).
 - CD:0 stall bug fully resolved (RFO mask extended to 0xFFF + recovery watchdog).
@@ -41,7 +41,7 @@ This section is the current source of truth for session recovery. Some older sec
 
 - Nichia diagnostic semantic validation against captures still pending.
 - UartTransaction tab is still a placeholder.
-- CAN/UART monitor export/recording is still pending.
+- CAN/UART session recording, chronological paging, `.rply` export, and multiple Detail windows are implemented.
 - Unit test coverage: 0% (no test project).
 
 ## 1. Project Overview & Mission
@@ -955,11 +955,13 @@ Three GUI views matching classic VILS layout:
 
 See `docs/tehnical_docs/`:
 
-- `LSM_CAN_System_Requirements.md` — 20 system requirements (all M1-scope met)
-- `LSM_CAN_Software_Requirements.md` — 22 software requirements (all M1-scope met)
-- `LSM_CAN_System_Architecture.md` — block diagram, data flow, constraints
-- `LSM_CAN_Software_Architecture.md` — module inventory, protocol layout, threading
-- `LSM_CAN_Functionality_Description.md` — runtime behavior, UART format, GUI views
+- `docs/CAN_UART_OSRAM/LSM_CAN_System_Requirements.md` — system requirements
+- `docs/CAN_UART_OSRAM/LSM_CAN_Software_Requirements.md` — software requirements
+- `docs/CAN_UART_OSRAM/LSM_CAN_System_Architecture.md` — block diagram, data flow, constraints
+- `docs/CAN_UART_OSRAM/LSM_CAN_Software_Architecture.md` — module inventory, protocol layout, threading
+- `docs/CAN_UART_OSRAM/LSM_CAN_Functionality_Description.md` — runtime behavior, UART format, GUI views
+- `docs/CAN_UART_OSRAM/CAN_UART_OSRAM_Architecture.md` — OSRAM concept and Saleae timing analysis
+- `docs/CAN_UART_OSRAM/CAN_UART_OSRAM_Implementation_Tracking.md` — implementation and validation tracking
 
 ### 16.3 Documentation Phase
 

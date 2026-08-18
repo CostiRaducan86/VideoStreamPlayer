@@ -28,13 +28,13 @@ public partial class CanDetailWindow : Window
         TxtTitle.Text = name == "/" ? $"0x{record.Address:X4}" : name;
 
         // Timing
-        TxtTime.Text = record.ReceivedUtc.ToLocalTime().ToString("HH:mm:ss.fff", CultureInfo.InvariantCulture);
+        TxtTime.Text = record.EffectiveDisplayTimestampUtc.ToLocalTime().ToString("HH:mm:ss.ffffff", CultureInfo.InvariantCulture);
         TxtUnixTs.Text = record.SourceTimestamp.ToString(CultureInfo.InvariantCulture);
         TxtResponseDelay.Text = $"{record.ResponseDelayUs} µs";
         TxtInterFrameDelay.Text = $"{record.InterFrameDelayUs} µs";
 
         // Identity
-        TxtNr.Text = record.Sequence.ToString(CultureInfo.InvariantCulture);
+        TxtNr.Text = record.EffectiveDisplaySequence.ToString(CultureInfo.InvariantCulture);
         TxtName.Text = name;
         TxtAddress.Text = $"0x{record.Address:X4}";
         TxtMemoryType.Text = memType;
@@ -98,12 +98,12 @@ public partial class CanDetailWindow : Window
         string idStr = record.IsExtendedCanId ? $"0x{record.CanId:X8}" : $"0x{record.CanId:X3}";
         TxtTitle.Text = $"CAN Frame {idStr}";
 
-        TxtTime.Text = record.ReceivedUtc.ToLocalTime().ToString("HH:mm:ss.fff", CultureInfo.InvariantCulture);
+        TxtTime.Text = record.EffectiveDisplayTimestampUtc.ToLocalTime().ToString("HH:mm:ss.ffffff", CultureInfo.InvariantCulture);
         TxtUnixTs.Text = record.SourceTimestamp.ToString(CultureInfo.InvariantCulture);
         TxtResponseDelay.Text = "/";
         TxtInterFrameDelay.Text = "/";
 
-        TxtNr.Text = record.Sequence.ToString(CultureInfo.InvariantCulture);
+        TxtNr.Text = record.EffectiveDisplaySequence.ToString(CultureInfo.InvariantCulture);
         TxtName.Text = "CAN";
         TxtAddress.Text = idStr;
         TxtMemoryType.Text = "BUS";
