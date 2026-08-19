@@ -2,6 +2,8 @@
 
 > For the current OSRAM inline-bridge timing definition and Saleae analysis, see
 > [CAN_UART_OSRAM_Architecture.md](CAN_UART_OSRAM_Architecture.md).
+> Nichia/TLD816K architecture and timing are documented in
+> [CAN_UART_NICHIA_Architecture.md](CAN_UART_NICHIA_Architecture.md).
 
 **Last updated:** 2026-04-30
 
@@ -9,7 +11,7 @@
 
 The diagnostic feature is a side-channel that runs in parallel with the existing LVDS frame pipeline. It observes ECU-to-LSM diagnostic traffic, normalizes it into protocol v2 records, forwards those records over the existing AURIX Ethernet path, and displays them in the VilsSharpX PC application.
 
-The feature is still called CAN/UART in the UI because the physical harness uses CAN transceivers, but the active diagnostic traffic handled by firmware is UART over that differential PHY. The current implemented parser is Osram-specific.
+The feature is still called CAN/UART in the UI because the physical harness uses CAN transceivers, but the active diagnostic traffic handled by firmware is UART over that differential PHY. OSRAM and Nichia/TLD816K use separate protocol parsers behind the same bridge and Ethernet record boundary.
 
 ## 2. Current End-to-End Flow
 
@@ -86,12 +88,12 @@ User presses Stop
 - Current code contains the Osram real-frame parser and bridge path.
 - The C# application was manually validated after analyzer cleanup and still behaves as before.
 
-## 8. Next System Extension: Nichia
+## 8. Nichia/TLD816K Extension
 
-Nichia diagnostic support should add a protocol-specific parser path behind the same normalized `DiagUartFrame` / `CanDiagRecord` boundary. The preferred shape is:
+Nichia diagnostic support is implemented as a protocol-specific parser path behind the same normalized `DiagUartFrame` / `CanDiagRecord` boundary. The remaining work is validation and tooling:
 
 ```text
-raw DMA bytes
+raw bridge bytes
   -> protocol-specific parser (Osram or Nichia)
   -> normalized DiagUartFrame
   -> existing can_diag_bridge_uart_frame() or a small variant if fields differ
@@ -99,7 +101,7 @@ raw DMA bytes
   -> unchanged PC monitor
 ```
 
-Open questions for Nichia:
+Remaining Nichia validation questions:
 
 - sync/header bytes
 - frame length encoding

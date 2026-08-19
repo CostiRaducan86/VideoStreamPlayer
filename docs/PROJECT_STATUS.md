@@ -955,13 +955,15 @@ Three GUI views matching classic VILS layout:
 
 See `docs/tehnical_docs/`:
 
-- `docs/CAN_UART_OSRAM/LSM_CAN_System_Requirements.md` — system requirements
-- `docs/CAN_UART_OSRAM/LSM_CAN_Software_Requirements.md` — software requirements
-- `docs/CAN_UART_OSRAM/LSM_CAN_System_Architecture.md` — block diagram, data flow, constraints
-- `docs/CAN_UART_OSRAM/LSM_CAN_Software_Architecture.md` — module inventory, protocol layout, threading
-- `docs/CAN_UART_OSRAM/LSM_CAN_Functionality_Description.md` — runtime behavior, UART format, GUI views
-- `docs/CAN_UART_OSRAM/CAN_UART_OSRAM_Architecture.md` — OSRAM concept and Saleae timing analysis
-- `docs/CAN_UART_OSRAM/CAN_UART_OSRAM_Implementation_Tracking.md` — implementation and validation tracking
+- `docs/CAN_UART_Communication/LSM_CAN_System_Requirements.md` — system requirements
+- `docs/CAN_UART_Communication/LSM_CAN_Software_Requirements.md` — software requirements
+- `docs/CAN_UART_Communication/LSM_CAN_System_Architecture.md` — block diagram, data flow, constraints
+- `docs/CAN_UART_Communication/LSM_CAN_Software_Architecture.md` — module inventory, protocol layout, threading
+- `docs/CAN_UART_Communication/LSM_CAN_Functionality_Description.md` — runtime behavior, UART format, GUI views
+- `docs/CAN_UART_Communication/CAN_UART_OSRAM_Architecture.md` — OSRAM concept and Saleae timing analysis
+- `docs/CAN_UART_Communication/CAN_UART_OSRAM_Implementation_Tracking.md` — implementation and validation tracking
+- `docs/CAN_UART_Communication/CAN_UART_NICHIA_Architecture.md` — Nichia concept and Saleae timing analysis
+- `docs/CAN_UART_Communication/CAN_UART_NICHIA_Implementation_Tracking.md` — Nichia implementation and validation tracking
 
 ### 16.3 Documentation Phase
 

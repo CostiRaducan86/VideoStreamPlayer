@@ -2,7 +2,8 @@
 
 > OSRAM-specific timing definitions and Saleae validation are maintained in
 > [CAN_UART_OSRAM_Architecture.md](CAN_UART_OSRAM_Architecture.md).
-> **Status**: Milestone 1 complete. Milestone 2 Osram real diagnostic UART path implemented. Nichia diagnostic protocol pending.
+> Nichia/TLD816K status and validation are maintained in [CAN_UART_NICHIA_Implementation_Tracking.md](CAN_UART_NICHIA_Implementation_Tracking.md).
+> **Status**: Milestone 1 complete. OSRAM and initial Nichia real diagnostic UART paths implemented.
 
 ## 1. Introduction
 
@@ -75,7 +76,7 @@ The CAN diagnostic feature shall coexist with the existing LVDS/AVTP video flow 
 
 The system shall use a physically valid connection between ECU/LSM and AURIX for diagnostic traffic.
 
-> **Discovery**: Diagnostic bus is UART through CAN transceivers (TLE9251V/TJA1057 as differential PHY only). MCMCAN not used. Current Osram implementation uses 2 Mbaud 8O2.
+> **Discovery**: Diagnostic bus is UART through CAN transceivers (TLE9251V/TJA1057 as differential PHY only). MCMCAN is not used. OSRAM uses 2 Mbaud 8O2; Nichia uses 2 Mbaud 8N1.
 > **Implementation**: Adapter_V2 routes ECU and LSM diagnostic segments to ASCLIN5/ASCLIN4. Relevant AURIX test points are X103-28/29/31/34. Four-channel Saleae validation confirmed byte-level forwarding and echo behavior.
 
 ### SR-011 AURIX forwarding interface ✅ IMPLEMENTED

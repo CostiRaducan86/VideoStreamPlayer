@@ -2,7 +2,10 @@
 
 > The implementation checklist for the current OSRAM path is maintained in
 > [CAN_UART_OSRAM_Implementation_Tracking.md](CAN_UART_OSRAM_Implementation_Tracking.md).
-> **Status**: Milestone 1 complete. Milestone 2 Osram real diagnostic UART path implemented. Nichia diagnostic protocol pending.
+>
+> The Nichia/TLD816K implementation checklist is maintained in
+> [CAN_UART_NICHIA_Implementation_Tracking.md](CAN_UART_NICHIA_Implementation_Tracking.md).
+> **Status**: Milestone 1 complete. OSRAM and initial Nichia real diagnostic UART paths implemented.
 
 ## 1. Module responsibilities
 
@@ -16,7 +19,7 @@ Firmware-side diagnostic capture and packetisation shall be isolated from image 
 
 Firmware shall provide a dedicated diagnostic record producer API that emits normalized records (device, op, address, value, crc, timing, status).
 
-> **Implementation**: `can_diag_push_record()` accepts a `CanDiagRecord` with all required fields. Current real-frame path uses `diag_uart_try_receive()` and `can_diag_bridge_uart_frame()` to produce normalized records from Osram diagnostic UART traffic.
+> **Implementation**: `can_diag_push_record()` accepts a `CanDiagRecord` with all required fields. The real-frame path uses the Adapter_V2 bridge and device-specific OSRAM/Nichia parsers before `can_diag_bridge_uart_frame()` normalizes records.
 
 ### SWR-003 ✅ IMPLEMENTED
 
@@ -161,3 +164,9 @@ Unit-level parser tests shall verify:
 Integration verification shall confirm that enabling diagnostics does not regress existing frame ingestion/render behavior.
 
 > **Implementation**: Validated on hardware — LVDS frames at 48.5 FPS continue normally with CAN diagnostic packets flowing concurrently.
+
+### SWR-023 ✅ IMPLEMENTED
+
+The Nichia diagnostic path shall support ASIC and EEPROM transactions with device-specific framing and timing.
+
+> **Implementation**: Nichia `0x55` framing, FUN 4/5/6/7, DLC lengths, one-byte ASIC addressing, two-byte EEPROM addressing, CRC8, `READ_EEPROM` no-CRC behavior, and LSM-side response turnaround are implemented and validated against startup-to-Normal-Run traces.

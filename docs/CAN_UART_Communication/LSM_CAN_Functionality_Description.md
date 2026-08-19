@@ -5,6 +5,9 @@
 > Current OSRAM timing evidence and implementation status are tracked in
 > [CAN_UART_OSRAM_Architecture.md](CAN_UART_OSRAM_Architecture.md) and
 > [CAN_UART_OSRAM_Implementation_Tracking.md](CAN_UART_OSRAM_Implementation_Tracking.md).
+>
+> Nichia/TLD816K details are tracked in [CAN_UART_NICHIA_Architecture.md](CAN_UART_NICHIA_Architecture.md)
+> and [CAN_UART_NICHIA_Implementation_Tracking.md](CAN_UART_NICHIA_Implementation_Tracking.md).
 
 ## Purpose
 
@@ -110,7 +113,7 @@ Implemented Nichia frame rules:
 - Runtime counters in WinIDEA showed the path active: `initOk=1`, `synced=1`, `baudrate=2000000`, `badDlc=0`, `framesDecoded` increasing, and PC parser errors at `0`.
 - LVDS information stayed healthy in the same run: Nichia protocol selected, 256x64 frame mode, about 49.9 FPS, and LVDS CRC/parity counters at zero in the PC panel.
 
-This validation confirms that the first Nichia UART capture path is alive end-to-end. It does not yet prove that every message is semantically correct or complete.
+The Nichia UART path is validated end-to-end. The 2026-08-19 startup-to-run trace confirms valid read/write/EEPROM records, valid status values, and the expected cyclic ASIC Normal Run sequence. Extended Saleae protocol-result exports and formal CRC test vectors remain open.
 
 ## Coexistence Constraints
 
@@ -121,7 +124,7 @@ This validation confirms that the first Nichia UART capture path is alive end-to
 
 ## Known Gaps
 
-- Nichia message semantic validation is still pending, including missing-response analysis and delay accuracy.
+- Extended Nichia semantic validation, missing-response analysis, and formal CRC test vectors remain open.
 - `UartTransaction` view is not implemented yet.
 - Monitor export/recording is not implemented yet.
 - CRC is displayed from the UART payload; full host-side CRC verification is still pending.

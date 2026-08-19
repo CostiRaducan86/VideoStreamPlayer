@@ -5,12 +5,15 @@
 > The OSRAM-specific concept, Saleae evidence, and implementation checklist are
 > maintained in [CAN_UART_OSRAM_Architecture.md](CAN_UART_OSRAM_Architecture.md)
 > and [CAN_UART_OSRAM_Implementation_Tracking.md](CAN_UART_OSRAM_Implementation_Tracking.md).
+>
+> Nichia/TLD816K details are maintained in [CAN_UART_NICHIA_Architecture.md](CAN_UART_NICHIA_Architecture.md)
+> and [CAN_UART_NICHIA_Implementation_Tracking.md](CAN_UART_NICHIA_Implementation_Tracking.md).
 
 ## Status
 
 - Milestone 1 synthetic diagnostic transport: complete.
 - Milestone 2 real diagnostic UART transport: implemented for the Osram-style protocol and initial Nichia/TLD816K protocol variant.
-- Next planned work: Nichia message-correctness and timing validation, `UartTransaction` view, and monitor export/recording.
+- Next planned work: extended Nichia Saleae/CRC validation, `UartTransaction` view, and formal parser tests.
 
 ## 1. Firmware-Side Architecture
 
@@ -198,7 +201,7 @@ Implemented:
 
 Pending:
 
-- Nichia message semantic validation, missing-response analysis, and delay validation against captures.
+- Extended Nichia message semantic validation and formal CRC test vectors against Saleae protocol exports.
 - UartTransaction view content.
 - Monitor export/recording.
 - Host-side CRC verification beyond display/field extraction.
