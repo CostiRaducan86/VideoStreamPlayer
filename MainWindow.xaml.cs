@@ -3341,6 +3341,10 @@ namespace VilsSharpX
             catch { /* ignore */ }
             try { StopDiagRetryTimer(); } catch { /* ignore */ }
             try { _canDiagWatchdogTimer?.Stop(); } catch { /* ignore */ }
+            try { _appSettingsWindow?.Close(); } catch { /* ignore */ }
+            try { _ethConfigWindow?.Close(); } catch { /* ignore */ }
+            try { _cameraConfigWindow?.Close(); } catch { /* ignore */ }
+            try { _apiConfigWindow?.Close(); } catch { /* ignore */ }
             try { _osramDefectControlWindow?.Close(); } catch { /* ignore */ }
             try { _nichiaDefectControlWindow?.Close(); } catch { /* ignore */ }
             try { _communicationFaultControlWindow?.Close(); } catch { /* ignore */ }
