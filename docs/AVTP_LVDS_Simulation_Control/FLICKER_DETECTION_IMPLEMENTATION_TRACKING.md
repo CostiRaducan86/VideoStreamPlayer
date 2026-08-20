@@ -80,8 +80,11 @@
 
 ## Phase 6: Control Window UI
 
-- [x] Move the AVTP/LVDS simulation control window layout to `FlickerControlWindow.xaml`.
-- [x] Keep the window fixed at `620 x 660` pixels after adding the log actions.
+- [x] Move the Flicker Monitoring and Control window layout to `FlickerControlWindow.xaml`.
+- [x] Keep Flicker Monitoring and Control separate from the LVDS simulation controls.
+- [x] Define the independent `AVTP LVDS Simulation Control` window in `AvtpLvdsSimulationControlWindow.xaml`.
+- [x] Keep the Flicker window fixed at `620 x 580` pixels after removing the LVDS section.
+- [x] Place the `Clear` and `Save` log actions inside the Flickering Monitor group below the table.
 - [x] Separate panel symbols from title text so symbols use `DarkBlue` and titles use `Black`.
 - [x] Add the horizontal separator between the injection description and its controls.
 

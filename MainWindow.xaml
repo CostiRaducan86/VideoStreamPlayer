@@ -22,7 +22,8 @@
                 <MenuItem x:Name="MenuOsramDefectControl" Header="OSRAM Defect Injection Control" Click="MenuOsramDefectControl_Click"/>
                 <MenuItem x:Name="MenuNichiaDefectControl" Header="NICHIA Defect Injection Control" Click="MenuNichiaDefectControl_Click"/>
                 <MenuItem x:Name="MenuCommunicationFaultControl" Header="Communication Fault Injection Control" Click="MenuCommunicationFaultControl_Click"/>
-                <MenuItem Header="AVTP LVDS Simulation Control" Click="MenuAppSettings_Click"/>
+                <MenuItem Header="Flicker Monitoring and Control" Click="MenuFlickerControl_Click"/>
+                <MenuItem Header="AVTP LVDS Simulation Control" Click="MenuLvdsSimulationControl_Click"/>
             </MenuItem>
         </Menu>
 

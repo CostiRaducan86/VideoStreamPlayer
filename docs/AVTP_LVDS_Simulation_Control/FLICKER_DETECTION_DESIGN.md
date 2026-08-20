@@ -4,6 +4,8 @@
 
 Flicker Detection identifies short positive or negative visual anomalies on the LSM camera path in pane C. It uses the existing comparison pipeline and supports both simulated and real camera events.
 
+The Flicker feature is exposed independently through the `Flicker Monitoring and Control` Tools menu. Its UI is defined in `FlickerControlWindow.xaml` and contains only the Flickering Monitor, Flicker Injection Control, and Info sections. The unrelated LVDS controls are opened from the separate `AVTP LVDS Simulation Control` menu and window.
+
 A flicker must exceed the configured deviation trigger, may affect only a small spot, and must last no longer than the configured frame threshold. Longer anomalies are treated as intentional light-function transitions.
 
 ## Runtime Path
@@ -75,7 +77,7 @@ The `FlickerControlWindow.xaml` window keeps the latest 100 detector transitions
 
 `Time` is the default ascending sort. Clicking any header toggles ascending/descending order for that column. A selected row can be copied with `Ctrl+C` or with the right-click `Copy` command. The copied row is tab-separated so it can be pasted directly into a text editor or spreadsheet.
 
-The `Clear` button removes the current in-memory history. `Save` writes the visible history to:
+The `Clear` and `Save` buttons are placed inside the Flickering Monitor group, directly below the table. `Clear` removes the current in-memory history. `Save` writes the visible history to:
 
 ```text
 docs/outputs/flickerDetections/Logs/FLK_Log_yyyy_MM_dd_HHmmss.log

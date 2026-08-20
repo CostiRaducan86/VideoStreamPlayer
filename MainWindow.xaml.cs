@@ -3366,7 +3366,8 @@ namespace VilsSharpX
             catch { /* ignore */ }
             try { StopDiagRetryTimer(); } catch { /* ignore */ }
             try { _canDiagWatchdogTimer?.Stop(); } catch { /* ignore */ }
-            try { _appSettingsWindow?.Close(); } catch { /* ignore */ }
+            try { _flickerControlWindow?.Close(); } catch { /* ignore */ }
+            try { _lvdsSimulationControlWindow?.Close(); } catch { /* ignore */ }
             try { _ethConfigWindow?.Close(); } catch { /* ignore */ }
             try { _cameraConfigWindow?.Close(); } catch { /* ignore */ }
             try { _apiConfigWindow?.Close(); } catch { /* ignore */ }
@@ -5485,7 +5486,8 @@ namespace VilsSharpX
 
         private void MenuExit_Click(object sender, RoutedEventArgs e) => Close();
 
-        private Window? _appSettingsWindow;
+        private FlickerControlWindow? _flickerControlWindow;
+        private AvtpLvdsSimulationControlWindow? _lvdsSimulationControlWindow;
         private Window? _ethConfigWindow;
         private CameraConfigWindow? _cameraConfigWindow;
         private ApiConfigurationWindow? _apiConfigWindow;
@@ -5573,13 +5575,12 @@ namespace VilsSharpX
             return toggle;
         }
 
-        private void MenuAppSettings_Click(object sender, RoutedEventArgs e)
+        private void MenuFlickerControl_Click(object sender, RoutedEventArgs e)
         {
-            if (_appSettingsWindow != null && _appSettingsWindow.IsVisible) { _appSettingsWindow.Activate(); return; }
-            HiddenConfigPanel.Children.Remove(GrpAppSettings);
+            if (_flickerControlWindow != null && _flickerControlWindow.IsVisible) { _flickerControlWindow.Activate(); return; }
             var flickerWindow = new FlickerControlWindow();
 
-            var flickerControls = new Grid { Margin = new Thickness(0, 8, 0, 0) };
+            var flickerControls = new Grid { Margin = new Thickness(0) };
             for (int row = 0; row < 5; row++)
                 flickerControls.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
             flickerControls.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
@@ -5683,17 +5684,35 @@ namespace VilsSharpX
             flickerWindow.FlickerLogSaveRequested += SaveFlickerLog;
             UpdateFlickerInjectionButton();
 
-            GrpAppSettings.Margin = new Thickness(0);
-            flickerWindow.LvdsContentHost.Content = GrpAppSettings;
-            _appSettingsWindow = flickerWindow;
             flickerWindow.Closed += (_, _) =>
             {
-                flickerWindow.LvdsContentHost.Content = null;
+                _flickerControlWindow = null;
+            };
+            _flickerControlWindow = flickerWindow;
+            flickerWindow.Show();
+        }
+
+        private void MenuLvdsSimulationControl_Click(object sender, RoutedEventArgs e)
+        {
+            if (_lvdsSimulationControlWindow != null && _lvdsSimulationControlWindow.IsVisible)
+            {
+                _lvdsSimulationControlWindow.Activate();
+                return;
+            }
+
+            HiddenConfigPanel.Children.Remove(GrpAppSettings);
+            GrpAppSettings.Margin = new Thickness(0);
+            var lvdsWindow = new AvtpLvdsSimulationControlWindow();
+            lvdsWindow.LvdsContentHost.Content = GrpAppSettings;
+            lvdsWindow.Closed += (_, _) =>
+            {
+                lvdsWindow.LvdsContentHost.Content = null;
                 GrpAppSettings.Margin = new Thickness(8);
                 HiddenConfigPanel.Children.Add(GrpAppSettings);
-                _appSettingsWindow = null;
+                _lvdsSimulationControlWindow = null;
             };
-            flickerWindow.Show();
+            _lvdsSimulationControlWindow = lvdsWindow;
+            lvdsWindow.Show();
         }
 
         /// <summary>

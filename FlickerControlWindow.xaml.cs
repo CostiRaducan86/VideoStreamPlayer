@@ -25,8 +25,6 @@ namespace VilsSharpX
         public TextBlock FlickerInfoText => InfoText;
         public ListView FlickerEventLogView => FlickerEventLog;
         public Grid FlickerInjectionControlsHost => InjectionControlsHost;
-        public ContentControl LvdsContentHost => LvdsHost;
-
         private void FlickerEventLog_ColumnHeaderClick(object sender, RoutedEventArgs e)
             => FlickerLogColumnHeaderClicked?.Invoke(sender, e);
 
