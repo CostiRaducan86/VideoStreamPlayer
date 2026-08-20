@@ -238,6 +238,24 @@ public sealed class AviTripletRecorder : IDisposable
         WriteCompareXlsx(finalPath, sheetName, aGrayTopDown, bGrayTopDown, w, h, deadband: deviationThreshold);
     }
 
+    public static void SaveFlickerCompareXlsx(
+        string path,
+        string eventId,
+        DateTime timestampUtc,
+        FlickerDetectionStatus status,
+        int deviatedPixelCount,
+        byte[] referenceGrayTopDown,
+        byte[] measuredGrayTopDown,
+        int w,
+        int h,
+        byte deviationThreshold)
+    {
+        WriteCompareXlsx(
+            EnsureXlsxExtension(path), "Flk_frame", referenceGrayTopDown,
+            measuredGrayTopDown, w, h, deviationThreshold,
+            eventId, timestampUtc, status, deviatedPixelCount);
+    }
+
     private AviWriter CreateGray8Writer(string path, int fps, out IAviVideoStream stream)
     {
         var writer = new AviWriter(path)
@@ -370,7 +388,11 @@ public sealed class AviTripletRecorder : IDisposable
         }
     }
 
-    private static void WriteCompareXlsx(string path, string sheetName, byte[]? aGrayTopDown, byte[]? bGrayTopDown, int w, int h, byte deadband)
+    private static void WriteCompareXlsx(
+        string path, string sheetName, byte[]? aGrayTopDown, byte[]? bGrayTopDown,
+        int w, int h, byte deadband, string? eventId = null,
+        DateTime? timestampUtc = null, FlickerDetectionStatus? flickerStatus = null,
+        int? deviatedPixelCount = null)
     {
         EnsureParentDirExists(path);
 
@@ -426,7 +448,19 @@ public sealed class AviTripletRecorder : IDisposable
         ws.Cell(5, 1).Value = $"deviation threshold: {deadband}";
         ws.Cell(6, 1).Value = $"total number of dark pixels: {darkPixels}";
 
-        int headerRow = 9;
+        int headerRow;
+        if (eventId != null)
+        {
+            ws.Cell(7, 1).Value = $"Event ID: {eventId}";
+            ws.Cell(8, 1).Value = $"Timestamp_UTC: {(timestampUtc ?? DateTime.UtcNow):O}";
+            ws.Cell(9, 1).Value = $"Flicker_Status: {flickerStatus}";
+            ws.Cell(10, 1).Value = $"Deviated_pixel_count: {deviatedPixelCount ?? 0}";
+            headerRow = 12;
+        }
+        else
+        {
+            headerRow = 9;
+        }
         ws.Cell(headerRow, 1).Value = "pixel_ID";
         ws.Cell(headerRow, 2).Value = "x-Pos";
         ws.Cell(headerRow, 3).Value = "y-Pos";
@@ -464,42 +498,41 @@ public sealed class AviTripletRecorder : IDisposable
                 }
             }
 
-            // Dedicated list tab for quick review.
-            var wsDark = wb.Worksheets.Add("DarkPixels");
-            wsDark.Cell(1, 1).Value = "Dark pixels (A>0 && B==0)";
-            wsDark.Cell(2, 1).Value = $"Frame: {sheetName}";
-            wsDark.Cell(3, 1).Value = $"Deviation threshold: {deadband}";
-            wsDark.Cell(4, 1).Value = $"Total dark pixels: {darkPixels}";
-
-            int dh = 6;
-            wsDark.Cell(dh, 1).Value = "pixel_ID";
-            wsDark.Cell(dh, 2).Value = "x-Pos";
-            wsDark.Cell(dh, 3).Value = "y-Pos";
-            wsDark.Cell(dh, 4).Value = "deviation";
-            wsDark.Cell(dh, 5).Value = "A";
-            wsDark.Cell(dh, 6).Value = "B";
-            var hdr = wsDark.Range(dh, 1, dh, 6);
-            hdr.Style.Font.Bold = true;
-
-            int dr = dh + 1;
-            foreach (var dp in darkList)
+            if (eventId == null)
             {
-                wsDark.Cell(dr, 1).Value = dp.PixelId;
-                wsDark.Cell(dr, 2).Value = dp.X;
-                wsDark.Cell(dr, 3).Value = dp.Y;
-                wsDark.Cell(dr, 4).Value = dp.Deviation;
-                wsDark.Cell(dr, 5).Value = dp.A;
-                wsDark.Cell(dr, 6).Value = dp.B;
+                // The normal Snapshot report keeps a dedicated DarkPixels tab.
+                // Flicker evidence intentionally remains a single Flk_frame sheet.
+                var wsDark = wb.Worksheets.Add("DarkPixels");
+                wsDark.Cell(1, 1).Value = "Dark pixels (A>0 && B==0)";
+                wsDark.Cell(2, 1).Value = $"Frame: {sheetName}";
+                wsDark.Cell(3, 1).Value = $"Deviation threshold: {deadband}";
+                wsDark.Cell(4, 1).Value = $"Total dark pixels: {darkPixels}";
 
-                var rr = wsDark.Range(dr, 1, dr, 6);
-                rr.Style.Fill.BackgroundColor = XLColor.DarkRed;
-                rr.Style.Font.FontColor = XLColor.White;
-                rr.Style.Font.Bold = true;
-                dr++;
+                int dh = 6;
+                wsDark.Cell(dh, 1).Value = "pixel_ID";
+                wsDark.Cell(dh, 2).Value = "x-Pos";
+                wsDark.Cell(dh, 3).Value = "y-Pos";
+                wsDark.Cell(dh, 4).Value = "deviation";
+                wsDark.Cell(dh, 5).Value = "A";
+                wsDark.Cell(dh, 6).Value = "B";
+                var hdr = wsDark.Range(dh, 1, dh, 6);
+                hdr.Style.Font.Bold = true;
+
+                int dr = dh + 1;
+                foreach (var dp in darkList)
+                {
+                    wsDark.Cell(dr, 1).Value = dp.PixelId;
+                    wsDark.Cell(dr, 2).Value = dp.X;
+                    wsDark.Cell(dr, 3).Value = dp.Y;
+                    wsDark.Cell(dr, 4).Value = dp.Deviation;
+                    wsDark.Cell(dr, 5).Value = dp.A;
+                    wsDark.Cell(dr, 6).Value = dp.B;
+                    dr++;
+                }
+
+                wsDark.Columns(1, 6).AdjustToContents();
+                wsDark.SheetView.FreezeRows(dh);
             }
-
-            wsDark.Columns(1, 6).AdjustToContents();
-            wsDark.SheetView.FreezeRows(dh);
         }
 
         wb.SaveAs(path);

@@ -198,7 +198,7 @@ VilsSharpX is a dual-mode **8-bit grayscale frame visualization** application de
    - LSM Device Type: Osram 2.0, Osram 2.05, Nichia
    - ECU Variant: 15 options (MB PLU-HD, CHLC, GM MLD, MB PLU, MB HLI)
 
-   **Application Settings (20%)**:
+   **AVTP LVDS Simulation Control (20%)**:
    - FPS: playback frame rate
    - Deviation value: B-delta offset
    - Deviation threshold: Diff pixel threshold

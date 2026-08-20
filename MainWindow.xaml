@@ -22,7 +22,7 @@
                 <MenuItem x:Name="MenuOsramDefectControl" Header="OSRAM Defect Injection Control" Click="MenuOsramDefectControl_Click"/>
                 <MenuItem x:Name="MenuNichiaDefectControl" Header="NICHIA Defect Injection Control" Click="MenuNichiaDefectControl_Click"/>
                 <MenuItem x:Name="MenuCommunicationFaultControl" Header="Communication Fault Injection Control" Click="MenuCommunicationFaultControl_Click"/>
-                <MenuItem Header="Application Settings" Click="MenuAppSettings_Click"/>
+                <MenuItem Header="AVTP LVDS Simulation Control" Click="MenuAppSettings_Click"/>
             </MenuItem>
         </Menu>
 
@@ -571,26 +571,33 @@
 
         <!-- Hidden Configuration Panels (used by popup windows via re-parenting) -->
         <StackPanel x:Name="HiddenConfigPanel" Visibility="Collapsed">
-            <!-- 2. Application Settings -->
-            <GroupBox x:Name="GrpAppSettings" Header="Application Settings" Padding="10" Margin="8">
-                <StackPanel Orientation="Vertical">
-                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Left" Margin="0,0,0,8">
-                        <TextBlock Text="FPS:" VerticalAlignment="Center" Width="110" Margin="0,0,4,0"/>
-                        <TextBox x:Name="TxtFps" Width="60" Text="100"/>
+            <!-- 2. AVTP LVDS Simulation Control -->
+            <GroupBox x:Name="GrpAppSettings" Padding="10" Margin="8">
+                <GroupBox.Header>
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock Text="⇉" FontWeight="Bold" Foreground="DarkBlue" Margin="0,0,5,0" />
+                        <TextBlock Text="LVDS Simulation Control" FontWeight="Bold" Foreground="Black" />
                     </StackPanel>
-                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Left" Margin="0,0,0,8">
-                        <TextBlock Text="Deviation value:" VerticalAlignment="Center" Width="110" Margin="0,0,4,0"/>
-                        <TextBox x:Name="TxtBDelta" Width="60" Text="0" TextChanged="BDelta_TextChanged"/>
+                </GroupBox.Header>
+                <StackPanel Orientation="Horizontal" HorizontalAlignment="Left" VerticalAlignment="Center">
+                    <StackPanel Orientation="Horizontal" Margin="0,0,10,0">
+                        <TextBlock Text="FPS:" VerticalAlignment="Center" Margin="0,0,5,0"/>
+                        <TextBox x:Name="TxtFps" Width="48" Text="100"/>
                     </StackPanel>
-                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Left" Margin="0,0,0,8">
-                        <TextBlock Text="Dead pixel ID:" VerticalAlignment="Center" Width="110" Margin="0,0,4,0"/>
-                        <TextBox x:Name="TxtDeadPixelId" Width="60" Text="0" TextChanged="TxtDeadPixelId_TextChanged"/>
+                    <Rectangle Width="1" Height="24" Fill="Gray" Margin="0,0,10,0"/>
+                    <StackPanel Orientation="Horizontal" Margin="0,0,10,0">
+                        <TextBlock Text="Deviation:" VerticalAlignment="Center" Margin="0,0,5,0"/>
+                        <TextBox x:Name="TxtBDelta" Width="48" Text="0" TextChanged="BDelta_TextChanged"/>
                     </StackPanel>
-                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Left" Margin="0,0,0,0">
-                        <CheckBox x:Name="ChkDarkPixelComp" Content="Dark pixel compensation" IsChecked="False" VerticalAlignment="Center"
-                                  ToolTip="Boost neighbors around dark pixels: +15% (N/S/E/W), +10% (diagonals), +5% (2-step N/S/E/W)"
-                                  Checked="ChkDarkPixelComp_Changed" Unchecked="ChkDarkPixelComp_Changed" />
+                    <Rectangle Width="1" Height="24" Fill="Gray" Margin="0,0,10,0"/>
+                    <StackPanel Orientation="Horizontal" Margin="0,0,10,0">
+                        <TextBlock Text="Dead pixel ID:" VerticalAlignment="Center" Margin="0,0,5,0"/>
+                        <TextBox x:Name="TxtDeadPixelId" Width="48" Text="0" TextChanged="TxtDeadPixelId_TextChanged"/>
                     </StackPanel>
+                    <Rectangle Width="1" Height="24" Fill="Gray" Margin="0,0,10,0"/>
+                    <CheckBox x:Name="ChkDarkPixelComp" Content="Dark pixel compensation" IsChecked="False" VerticalAlignment="Center"
+                              ToolTip="Boost neighbors around dark pixels: +15% (N/S/E/W), +10% (diagonals), +5% (2-step N/S/E/W)"
+                              Checked="ChkDarkPixelComp_Changed" Unchecked="ChkDarkPixelComp_Changed" />
                 </StackPanel>
             </GroupBox>
 
