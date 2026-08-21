@@ -93,7 +93,7 @@ public sealed class FlickerInjectionController : IDisposable
     {
         var frame = new byte[width * height];
         Buffer.BlockCopy(sourceFrame, 0, frame, 0, frame.Length);
-        byte textValue = polarity == FlickerInjectionPolarity.White ? byte.MaxValue : (byte)0;
+        byte textValue = polarity == FlickerInjectionPolarity.White ? (byte)200 : (byte)0;
         const string text = "FLICKER";
         const int glyphWidth = 7;
         const int glyphHeight = 9;

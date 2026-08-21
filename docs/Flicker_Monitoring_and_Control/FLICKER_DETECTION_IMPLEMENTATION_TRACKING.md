@@ -15,9 +15,9 @@
 | Deviation Trigger | [x] | Configurable `0..255`; applies symmetrically to positive and negative deviations |
 | Flickering Polarity | [x] | Simulator-only `White` / `Black` text fault |
 | Duration control | [x] | Removed; flicker timing is frame-based |
-| Active comparison modes | [x] | `LSM-LVDS` and `LSM-AVTP` |
+| Active comparison modes | [x] | Detector is independent of `LSM-LVDS` and `LSM-AVTP`; those modes remain contextual UI views |
 | Detector reset | [x] | Reset when a new injection starts |
-| Per-camera sample gating | [x] | One detector sample per real Basler timestamp |
+| Per-camera sample gating | [x] | One detector sample per displayed Basler frame, after optional injection |
 
 ## Phase 1: State and Configuration
 
@@ -29,16 +29,19 @@
 
 ## Phase 2: Detector
 
-- [x] Evaluate positive deviation using `maxPositiveDeviation`.
-- [x] Evaluate negative deviation using `maxNegativeDeviation`.
-- [x] Accept small spots with at least three deviated pixels.
-- [x] Maintain an adaptive normal-operation baseline.
-- [x] Do not update the baseline while a candidate is active.
-- [x] Count candidate frames from real camera samples.
-- [x] Accept candidates lasting `1..threshold` frames, with threshold configurable up to 250 (approximately 5 seconds at 50 fps).
-- [x] Reject candidates lasting longer than the configured threshold as intentional transitions.
-- [x] Prevent duplicate detection events during cooldown.
-- [x] Record metric and candidate-frame count in the event log.
+- [x] Compare pane C against a stable pane C baseline frame.
+- [x] Adopt a new baseline only after three quiet and settled frames, so a slow ramp is not tracked away.
+- [x] Apply `Deviation Trigger` per pixel instead of as a mean over already-deviated pixels.
+- [x] Keep positive and negative extremes and the mean absolute deviation as diagnostic values only.
+- [x] Arm an event at 0.5% deviated area and close it at 25% of that area (hysteresis).
+- [x] Remove the upper area limit; duration alone separates flicker from transition.
+- [x] Wait for the frame mean level to settle before rebaselining after an over-threshold transition.
+- [x] Count event frames from real camera samples.
+- [x] Accept events lasting `1..threshold` frames, with threshold configurable up to 250 (approximately 5 seconds at 50 fps).
+- [x] Reject events lasting longer than the configured threshold as intentional transitions.
+- [x] Suppress a second `Detected` during the 100..200 ms cooldown.
+- [x] Refresh the snapshot on every sample and raise `StatusChanged` only on real transitions.
+- [x] Record the metric and the event duration in the event log, including for rejected excursions.
 
 ## Phase 3: Simulation Injection
 
@@ -70,7 +73,8 @@
 ## Phase 5: Evidence Export
 
 - [x] Create a unique event directory named by event ID under `docs/outputs/flickerDetections`.
-- [x] Capture anomalous candidate-time A/B/C/D snapshots.
+- [x] Capture the peak anomalous pane C frame of the event, not the first frame.
+- [x] Capture anomalous candidate-time A/B/D snapshots.
 - [x] Clone frame buffers before background file I/O.
 - [x] Export `A_AVTP.png`, `B_LVDS.png`, `C_LSM.png`, and `D_Compare.png`.
 - [x] Generate one `flicker_report.xlsx` file.
@@ -78,7 +82,7 @@
 - [x] Include normal Snapshot metrics plus event ID, UTC timestamp, status, and deviated pixel count.
 - [x] Include the complete pixel table with pixel ID, coordinates, and deviation.
 - [x] Omit the `DarkPixels` sheet from flicker reports.
-- [x] Use the exact operands from the active `LSM-LVDS` or `LSM-AVTP` comparison.
+- [x] Capture pane C as the detector source; A/B/D are contextual evidence only.
 - [x] Run export off the UI thread.
 
 ## Phase 6: Control Window UI
@@ -109,15 +113,19 @@
 ## Remaining Work
 
 - [ ] Add automated unit tests for detector boundary cases `1`, `10`, and `11` frames.
-- [ ] Reconsider the provisional `deviatedPixelCount >= 3` rule and define a robust pixel/area criterion.
+- [x] Replace the provisional three-pixel rule with a relative changed-area criterion.
+- [x] Replace the previous-frame reference with a stability-gated baseline.
+- [x] Add entry/exit area hysteresis so a noisy return still closes the event.
 - [ ] Validate a real optical positive flicker with hardware.
 - [ ] Validate a real optical negative flicker with hardware.
 - [ ] Decide whether REST API commands for injection and detector status are required.
 - [ ] Consider adding a small pre-trigger/post-trigger frame history for future investigations.
+- [ ] Derive the cooldown from the measured camera frame rate instead of the assumed 50 fps.
 
 ## Known Risks
 
-- Camera and LVDS timestamps are not identical; frame synchronization remains dependent on the existing comparison matching path.
-- A real anomaly that does not produce at least three pixels over the configured deviation trigger may remain below the current candidate rule.
+- Flicker detection uses pane C frame order and does not depend on camera/LVDS timestamp matching.
+- The 0.5% arming area is a noise floor; it should be validated against real camera noise.
+- A slow *local* fade can still be absorbed, because the settle gate uses the frame mean level.
 - Evidence export requires valid A/B/C frames at the anomalous sample.
-- The detector uses comparison metrics and does not independently localize connected components yet.
+- The detector uses pane C statistics and does not independently localize connected components yet.

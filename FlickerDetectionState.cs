@@ -42,13 +42,13 @@ public sealed record FlickerDetectionConfiguration
     public const int DefaultTriggerThreshold = 32;
     public const int MinConsecutiveSamples = 1;
     public const int MaxConsecutiveSamples = 100;
-    public const int MinCooldownMilliseconds = 0;
-    public const int MaxCooldownMilliseconds = 60000;
+    public const int MinCooldownMilliseconds = 100;
+    public const int MaxCooldownMilliseconds = 200;
 
     public int FlickeringFramesThreshold { get; init; } = 10;
     public int DeviationTrigger { get; init; } = DefaultTriggerThreshold;
     public int ConsecutiveSamples { get; init; } = 1;
-    public int CooldownMilliseconds { get; init; } = 1000;
+    public int CooldownMilliseconds { get; init; } = 150;
     public FlickerInjectionMode InjectionMode { get; init; } = FlickerInjectionMode.ReplayLatestFrame;
     public FlickerInjectionPolarity InjectionPolarity { get; init; } = FlickerInjectionPolarity.White;
 
