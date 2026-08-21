@@ -21,7 +21,7 @@
                     </Grid.ColumnDefinitions>
                     <StackPanel Orientation="Horizontal">
                         <TextBlock Text="▣" FontWeight="Bold" Foreground="DarkBlue" Margin="0,0,5,0" />
-                        <TextBlock Text="Flickering Monitor" FontWeight="Bold" Foreground="Black" />
+                        <TextBlock Text="Flicker Monitoring" FontWeight="Bold" Foreground="Black" />
                     </StackPanel>
                     <Border x:Name="StatusBadge" Grid.Column="1" Background="#EDEDED" CornerRadius="12" Padding="9,3">
                         <TextBlock x:Name="StatusHeaderText" Text="Idle" Foreground="#666666" FontWeight="SemiBold" />
@@ -59,7 +59,9 @@
                     <Button x:Name="ClearFlickerLogButton" Content="Clear" Click="ClearFlickerLogButton_Click"
                             Padding="12,4" Margin="0,0,6,0" />
                     <Button x:Name="SaveFlickerLogButton" Content="💾 Save" Click="SaveFlickerLogButton_Click"
-                            Padding="10,4" />
+                            Padding="10,4" Margin="0,0,6,0" />
+                        <Button x:Name="OpenFlickerFolderButton" Content="📂" Click="OpenFlickerFolderButton_Click"
+                            Padding="8,4" ToolTip="Open Flicker detections folder" />
                 </StackPanel>
             </Grid>
         </GroupBox>

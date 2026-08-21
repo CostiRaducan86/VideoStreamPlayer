@@ -51,7 +51,7 @@
 - [x] Add red Stop behavior while injection is active.
 - [x] Reset detector and candidate evidence at the start of each new injection.
 
-## Phase 4: Detection UI and Diagnostics
+## Phase 4: Detection UI and Log
 
 - [x] Show current detector status.
 - [x] Keep a scrollable table of the latest 100 status transitions.
@@ -61,8 +61,11 @@
 - [x] Copy one selected row with `Ctrl+C` or right-click `Copy`.
 - [x] Clear the in-memory event history with `Clear`.
 - [x] Save the event history as a timestamped `.log` file under `docs/outputs/flickerDetections/Logs`.
+- [x] Add an Open Folder action after Save for the parent `docs/outputs/flickerDetections` directory.
+- [x] Create the parent output directory automatically before opening it in Windows Explorer.
 - [x] Keep the event history visible after status changes to Cooldown or Idle.
 - [x] Show export success or failure in the Flicker status area.
+- [x] Preserve single-row right-click selection for the custom Copy command.
 
 ## Phase 5: Evidence Export
 
@@ -85,6 +88,7 @@
 - [x] Define the independent `AVTP LVDS Simulation Control` window in `AvtpLvdsSimulationControlWindow.xaml`.
 - [x] Keep the Flicker window fixed at `620 x 580` pixels after removing the LVDS section.
 - [x] Place the `Clear` and `Save` log actions inside the Flickering Monitor group below the table.
+- [x] Place the Open Folder icon action immediately after Save in the monitor action row.
 - [x] Separate panel symbols from title text so symbols use `DarkBlue` and titles use `Black`.
 - [x] Add the horizontal separator between the injection description and its controls.
 

@@ -77,13 +77,21 @@ The `FlickerControlWindow.xaml` window keeps the latest 100 detector transitions
 
 `Time` is the default ascending sort. Clicking any header toggles ascending/descending order for that column. A selected row can be copied with `Ctrl+C` or with the right-click `Copy` command. The copied row is tab-separated so it can be pasted directly into a text editor or spreadsheet.
 
-The `Clear` and `Save` buttons are placed inside the Flickering Monitor group, directly below the table. `Clear` removes the current in-memory history. `Save` writes the visible history to:
+The `Clear`, `Save`, and Open Folder actions are placed inside the Flicker Monitoring group, directly below the table. `Clear` removes the current in-memory history. `Save` writes the visible history to:
 
 ```text
 docs/outputs/flickerDetections/Logs/FLK_Log_yyyy_MM_dd_HHmmss.log
 ```
 
 The saved file includes the column header and one tab-separated row per transition. The window also shows the current status as a badge and reports evidence/log save messages in the `Info` section.
+
+The folder action opens the parent evidence directory directly in Windows Explorer:
+
+```text
+docs/outputs/flickerDetections/
+```
+
+This directory is created automatically if it does not already exist. Right-clicking a log row selects that row and provides the `Copy` context-menu action.
 
 ```text
 Time<TAB>Status<TAB>Metric<TAB>Frames

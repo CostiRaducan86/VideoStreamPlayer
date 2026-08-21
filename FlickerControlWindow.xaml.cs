@@ -12,6 +12,7 @@ namespace VilsSharpX
         public event RoutedEventHandler? FlickerLogCopyRequested;
         public event RoutedEventHandler? FlickerLogClearRequested;
         public event RoutedEventHandler? FlickerLogSaveRequested;
+        public event RoutedEventHandler? FlickerFolderOpenRequested;
 
         public FlickerControlWindow()
         {
@@ -43,8 +44,7 @@ namespace VilsSharpX
             if (e.OriginalSource is not DependencyObject source)
                 return;
 
-            var item = ItemsControl.ContainerFromElement(FlickerEventLog, source) as ListViewItem;
-            if (item == null)
+            if (ItemsControl.ContainerFromElement(FlickerEventLog, source) is not ListViewItem item)
                 return;
 
             item.IsSelected = true;
@@ -58,5 +58,8 @@ namespace VilsSharpX
 
         private void SaveFlickerLogButton_Click(object sender, RoutedEventArgs e)
             => FlickerLogSaveRequested?.Invoke(sender, e);
+
+        private void OpenFlickerFolderButton_Click(object sender, RoutedEventArgs e)
+            => FlickerFolderOpenRequested?.Invoke(sender, e);
     }
 }

@@ -5682,6 +5682,7 @@ namespace VilsSharpX
             flickerWindow.FlickerLogCopyRequested += CopySelectedFlickerLogEntry;
             flickerWindow.FlickerLogClearRequested += ClearFlickerLog;
             flickerWindow.FlickerLogSaveRequested += SaveFlickerLog;
+            flickerWindow.FlickerFolderOpenRequested += OpenFlickerFolder;
             UpdateFlickerInjectionButton();
 
             flickerWindow.Closed += (_, _) =>
@@ -5990,6 +5991,33 @@ namespace VilsSharpX
             string directory = System.IO.Path.Combine(root, "docs", "outputs", "flickerDetections", "Logs");
             Directory.CreateDirectory(directory);
             return directory;
+        }
+
+        private static string GetFlickerDetectionsDirectory()
+        {
+            string root = RecordingManager.FindRepoRootWithDocs(AppContext.BaseDirectory)
+                ?? Directory.GetCurrentDirectory();
+            string directory = System.IO.Path.Combine(root, "docs", "outputs", "flickerDetections");
+            Directory.CreateDirectory(directory);
+            return directory;
+        }
+
+        private void OpenFlickerFolder(object? sender, RoutedEventArgs e)
+        {
+            try
+            {
+                var psi = new ProcessStartInfo
+                {
+                    FileName = "explorer.exe",
+                    Arguments = $"\"{GetFlickerDetectionsDirectory()}\"",
+                    UseShellExecute = true
+                };
+                Process.Start(psi);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Failed to open folder: {ex.Message}", "Open Flicker Folder", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
         }
 
         private void SaveFlickerLog(object? sender, RoutedEventArgs e)
