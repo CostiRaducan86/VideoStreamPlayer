@@ -5680,7 +5680,7 @@ namespace VilsSharpX
             };
 
             _flickerEventLog = flickerWindow.FlickerEventLogView;
-            _flickerLogEvents = new ObservableCollection<FlickerLogEntry>();
+            _flickerLogEvents = [];
             var flickerLogView = new ListCollectionView((IList)_flickerLogEvents);
             flickerLogView.SortDescriptions.Add(new SortDescription(
                 nameof(FlickerLogEntry.Time), ListSortDirection.Ascending));
