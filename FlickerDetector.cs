@@ -19,7 +19,7 @@ public sealed class FlickerDetector
     private const int MinimumChangedPixels = 64;
     private const double EnterChangedPixelRatio = 0.005;
     private const double ExitAreaFactor = 0.25;
-    private const int MinimumPixelDeviation = 4;
+    public const int MinimumPixelDeviation = 4;
     private const int RecoveryFrames = 2;
     private const int BaselineStabilityFrames = 3;
     private const double LevelStabilityDelta = 0.5;

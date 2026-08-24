@@ -44,9 +44,11 @@ public sealed class FlickerEvidenceExporter
             ImageUtils.SaveBgr24Png(Path.Combine(outputDirectory, "D_Compare.png"), d, comparisonWidth, comparisonHeight);
             AviTripletRecorder.SaveFlickerCompareXlsx(
                 xlsxPath, eventId, snapshot.LastEventUtc ?? DateTime.UtcNow,
-                snapshot.Status, snapshot.DeviatedPixelCount, reportA, reportB,
+                snapshot.Status, reportA, reportB,
                 comparisonWidth, comparisonHeight,
-                snapshot.DeviationTrigger <= byte.MaxValue ? (byte)snapshot.DeviationTrigger : byte.MaxValue);
+                (byte)Math.Max(snapshot.DeviationTrigger, FlickerDetector.MinimumPixelDeviation),
+                snapshot.CandidateFrameCount, snapshot.MaxPositiveDeviation,
+                snapshot.MaxNegativeDeviation, snapshot.MeanAbsoluteDeviation);
         });
 
         return Path.Combine("~", "outputs", "flickerDetections", folderName);

@@ -11,7 +11,8 @@ A flicker must produce a sufficiently strong change in a local part of pane C an
 ## Runtime Path
 
 ```text
-BaslerCameraCapture -> pane C -> optional injection -> FlickerDetector
+BaslerCameraCapture -> pane C -> optional injection -> downscale to active LVDS resolution
+-> FlickerDetector
 -> event log and evidence export
 ```
 
@@ -31,11 +32,16 @@ The old Duration control was removed. Both simulation and real detection are fra
 ## Candidate Detection
 
 ```text
-deviation = current_C_pixel - baseline_C_pixel
+deviation = current_downscaled_pixel - baseline_downscaled_pixel
 ```
 
-The baseline is a *stable* pane C frame, never a frame from pane A or pane B and never simply the
-previous frame. A frame is adopted as the new baseline only when both conditions hold for three
+The detector always receives a camera frame downscaled to the active LVDS resolution: `256 x 64`
+for NICHIA or `320 x 80` for OSRAM. This keeps detection, metrics, report values, and the
+per-pixel evidence table in the same coordinate system even when the native Basler resolution
+changes after a physical camera adjustment or recalibration.
+
+The baseline is a *stable downscaled camera* frame, never a frame from pane A or pane B and never
+simply the previous frame. A frame is adopted as the new baseline only when both conditions hold for three
 consecutive frames:
 
 - the deviated area is below the exit area (the scene is back at a steady level);
@@ -90,7 +96,7 @@ moving for three consecutive frames before adopting the new level as baseline. W
 the baseline would be captured mid-transition and the following frames would drift. If the scene
 returns to the original level while rebaselining, the previous baseline is kept.
 
-Detection uses the actual displayed pane C frame after injection.
+Detection uses the camera frame after injection and after downscaling to the active LVDS resolution.
 
 ## Simulation
 
@@ -101,6 +107,10 @@ The simulator clones the latest valid camera frame and overwrites only the cente
 - all other pixels remain unchanged;
 - the modified frame is replayed for exactly `Flickering Frames Threshold` camera frames;
 - Basler-owned buffers are never mutated.
+
+When an injection starts, the detector is reset and initialized with the same downscaled version of
+the pre-injection camera frame. The injected frame can therefore never become a baseline merely
+because its native Basler dimensions differ from the detector dimensions.
 
 ## Event Log
 
@@ -161,7 +171,19 @@ The directory contains:
 The exported `C_LSM.png` is the frame with the largest deviated area inside the event, not the
 first frame of the event, so a ramped anomaly is captured at its worst point.
 
-The flicker report has exactly one sheet named `Flk_frame`. It contains the normal Snapshot metrics, followed by `Event ID`, `Timestamp_UTC`, `Flicker_Status`, and `Deviated_pixel_count`. The pixel table starts two rows later and contains `pixel_ID`, `x-Pos`, `y-Pos`, and `deviation`. Flicker evidence is captured from pane C; A/B/D images are contextual snapshots and are not detector inputs. The normal Snapshot report may still contain `DarkPixels`; flicker reports do not.
+The flicker report has exactly one sheet named `FlickerEvent`; it does not contain a `DarkPixels`
+sheet. Its summary contains the event ID, UTC timestamp with milliseconds, detector status,
+comparison resolution, effective per-pixel threshold, event duration, peak diagnostic values, and
+report statistics calculated from the downscaled evidence frame.
+
+The report table lists only pixels where $|measured - reference|$ is at least the effective
+threshold. Its centered columns are `Pixel ID`, `X`, `Y`, `Reference`, `Measured`, and `Deviation`.
+The pixel count and pixel ratio in the summary are consequently bounded by the active resolution.
+For example, a NICHIA report cannot contain more than `16384` report pixels.
+
+`C_LSM.png` preserves the native camera frame for visual inspection. The XLSX calculations and its
+pixel coordinates use the downscaled camera frame; `A_AVTP.png`, `B_LVDS.png`, and
+`D_Compare.png` remain contextual evidence and are not detector inputs.
 
 ## Threading and Ownership
 
@@ -181,4 +203,4 @@ The flicker report has exactly one sheet named `Flk_frame`. It contains the norm
 1. A full-panel on/off pulse shorter than the threshold is detected; the same pulse held longer is absorbed as a transition and rebaselined.
 1. A gradual fade shorter than the threshold is detected, because the baseline does not follow the ramp.
 1. Repeated UI refreshes do not increase the candidate count.
-1. Evidence contains the peak anomalous frame and the complete `Flk_frame` pixel table.
+1. Evidence contains the peak anomalous frame and a threshold-filtered `FlickerEvent` pixel table.

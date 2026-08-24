@@ -17,7 +17,7 @@
 | Duration control | [x] | Removed; flicker timing is frame-based |
 | Active comparison modes | [x] | Detector is independent of `LSM-LVDS` and `LSM-AVTP`; those modes remain contextual UI views |
 | Detector reset | [x] | Reset when a new injection starts |
-| Per-camera sample gating | [x] | One detector sample per displayed Basler frame, after optional injection |
+| Per-camera sample gating | [x] | One detector sample per injected, downscaled Basler frame at active LVDS resolution |
 
 ## Phase 1: State and Configuration
 
@@ -29,7 +29,8 @@
 
 ## Phase 2: Detector
 
-- [x] Compare pane C against a stable pane C baseline frame.
+- [x] Downscale pane C to the active LVDS resolution before all detector calculations.
+- [x] Compare the downscaled camera frame against a stable downscaled camera baseline frame.
 - [x] Adopt a new baseline only after three quiet and settled frames, so a slow ramp is not tracked away.
 - [x] Apply `Deviation Trigger` per pixel instead of as a mean over already-deviated pixels.
 - [x] Keep positive and negative extremes and the mean absolute deviation as diagnostic values only.
@@ -53,6 +54,7 @@
 - [x] Route injected frames through pane C, downscaling, comparison, and recording.
 - [x] Add red Stop behavior while injection is active.
 - [x] Reset detector and candidate evidence at the start of each new injection.
+- [x] Initialize an injection baseline from the pre-injection downscaled camera frame.
 
 ## Phase 4: Detection UI and Log
 
@@ -78,11 +80,11 @@
 - [x] Clone frame buffers before background file I/O.
 - [x] Export `A_AVTP.png`, `B_LVDS.png`, `C_LSM.png`, and `D_Compare.png`.
 - [x] Generate one `flicker_report.xlsx` file.
-- [x] Use one XLSX sheet named `Flk_frame` for flicker evidence.
-- [x] Include normal Snapshot metrics plus event ID, UTC timestamp, status, and deviated pixel count.
-- [x] Include the complete pixel table with pixel ID, coordinates, and deviation.
-- [x] Omit the `DarkPixels` sheet from flicker reports.
-- [x] Capture pane C as the detector source; A/B/D are contextual evidence only.
+- [x] Use one XLSX sheet named `FlickerEvent` for flicker evidence.
+- [x] Include event metadata, active comparison resolution, effective threshold, duration, peak values, and downscaled report statistics.
+- [x] Include only threshold-exceeding pixels with ID, coordinates, reference, measured, and deviation values.
+- [x] Exclude dark-pixel reporting from flicker reports.
+- [x] Use the downscaled pane C frame as detector and report source; native C and A/B/D images are contextual evidence only.
 - [x] Run export off the UI thread.
 
 ## Phase 6: Control Window UI
@@ -107,7 +109,9 @@
 | Above configured threshold | Rejected as flicker / treated as transition |
 | Repeated UI refreshes | Does not inflate candidate count |
 | Consecutive injection tests | Detector reset prevents inherited cooldown/candidate state |
-| Flicker report | Single `Flk_frame` worksheet with complete pixel table |
+| Flicker report | Single `FlickerEvent` worksheet with a threshold-filtered, downscaled pixel table |
+| White text injection | Detected and exported after initializing the downscaled pre-injection baseline |
+| Real optical rapid off/on/off flickers | Detected and exported; positive and mixed-polarity evidence observed |
 | C# build | `dotnet build` succeeds with 0 warnings and 0 errors |
 
 ## Remaining Work
@@ -116,8 +120,7 @@
 - [x] Replace the provisional three-pixel rule with a relative changed-area criterion.
 - [x] Replace the previous-frame reference with a stability-gated baseline.
 - [x] Add entry/exit area hysteresis so a noisy return still closes the event.
-- [ ] Validate a real optical positive flicker with hardware.
-- [ ] Validate a real optical negative flicker with hardware.
+- [x] Validate real optical flickers with rapid off/on/off transitions; positive and mixed-polarity evidence exported.
 - [ ] Decide whether REST API commands for injection and detector status are required.
 - [ ] Consider adding a small pre-trigger/post-trigger frame history for future investigations.
 - [ ] Derive the cooldown from the measured camera frame rate instead of the assumed 50 fps.

@@ -30,8 +30,8 @@ The monitor displays the latest 100 detector transitions in the columns `Time`, 
 
 The `Clear`, `Save`, and Open Folder actions are located inside the Flicker Monitoring group below the table. `Clear` removes the current monitor history. `Save` writes the displayed history as a tab-separated `.log` file under `docs/outputs/flickerDetections/Logs/` using the name format `FLK_Log_yyyy_MM_dd_HHmmss.log`. The folder button opens the parent `docs/outputs/flickerDetections/` directory in Windows Explorer, where both event evidence folders and saved logs are stored. The directory is created automatically when the action is used.
 
-The old Duration control was removed. Real camera events and simulated events use the same pane C detector path, independent of the active LVDS/AVTP comparison mode. The detector compares each camera frame with a stable camera reference, not with pane A or pane B.
+The old Duration control was removed. Real camera events and simulated events use the same detector path, independent of the active LVDS/AVTP comparison mode. Each camera frame is downscaled to the active LVDS resolution before it is compared with a stable downscaled camera reference, not with pane A or pane B. This keeps detection and reporting valid after a Basler resolution change or camera recalibration.
 
-Evidence is written automatically after a valid flicker event under `docs/outputs/flickerDetections/<eventId>/`. The directory contains A/B/C/D PNG snapshots and one `flicker_report.xlsx` file with the `Flk_frame` sheet.
+Evidence is written automatically after a valid flicker event under `docs/outputs/flickerDetections/<eventId>/`. The directory contains A/B/C/D PNG snapshots and one `flicker_report.xlsx` file with the `FlickerEvent` sheet. The report lists only downscaled pixels at or above the effective deviation threshold and contains no dark-pixel tab.
 
 Legacy FPS, Deviation value, Dead pixel ID, and Dark pixel compensation controls remain available for compatibility and are not flicker detector inputs.

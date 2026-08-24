@@ -243,17 +243,21 @@ public sealed class AviTripletRecorder : IDisposable
         string eventId,
         DateTime timestampUtc,
         FlickerDetectionStatus status,
-        int deviatedPixelCount,
         byte[] referenceGrayTopDown,
         byte[] measuredGrayTopDown,
         int w,
         int h,
-        byte deviationThreshold)
+        byte deviationThreshold,
+        int eventFrameCount,
+        int detectorMaxPositiveDeviation,
+        int detectorMaxNegativeDeviation,
+        double detectorMeanAbsoluteDeviation)
     {
-        WriteCompareXlsx(
-            EnsureXlsxExtension(path), "Flk_frame", referenceGrayTopDown,
-            measuredGrayTopDown, w, h, deviationThreshold,
-            eventId, timestampUtc, status, deviatedPixelCount);
+        WriteFlickerCompareXlsx(
+            EnsureXlsxExtension(path), eventId, timestampUtc, status,
+            referenceGrayTopDown, measuredGrayTopDown, w, h, deviationThreshold,
+            eventFrameCount, detectorMaxPositiveDeviation, detectorMaxNegativeDeviation,
+            detectorMeanAbsoluteDeviation);
     }
 
     private AviWriter CreateGray8Writer(string path, int fps, out IAviVideoStream stream)
@@ -386,6 +390,129 @@ public sealed class AviTripletRecorder : IDisposable
                 dstBgr32[di + 3] = 0; // X
             }
         }
+    }
+
+    private static void WriteFlickerCompareXlsx(
+        string path,
+        string eventId,
+        DateTime timestampUtc,
+        FlickerDetectionStatus status,
+        byte[] referenceGrayTopDown,
+        byte[] measuredGrayTopDown,
+        int w,
+        int h,
+        byte deviationThreshold,
+        int eventFrameCount,
+        int detectorMaxPositiveDeviation,
+        int detectorMaxNegativeDeviation,
+        double detectorMeanAbsoluteDeviation)
+    {
+        int pixelCount = w * h;
+        if (referenceGrayTopDown.Length < pixelCount)
+            throw new ArgumentException("Reference buffer too small.", nameof(referenceGrayTopDown));
+        if (measuredGrayTopDown.Length < pixelCount)
+            throw new ArgumentException("Measured buffer too small.", nameof(measuredGrayTopDown));
+
+        int maxPositiveDeviation = 0;
+        int maxNegativeDeviation = 0;
+        long absoluteDeviationSum = 0;
+        int deviatedPixelCount = 0;
+        for (int index = 0; index < pixelCount; index++)
+        {
+            int deviation = measuredGrayTopDown[index] - referenceGrayTopDown[index];
+            if (Math.Abs(deviation) < deviationThreshold)
+                continue;
+
+            deviatedPixelCount++;
+            absoluteDeviationSum += Math.Abs(deviation);
+            if (deviation > maxPositiveDeviation)
+                maxPositiveDeviation = deviation;
+            else if (deviation < maxNegativeDeviation)
+                maxNegativeDeviation = deviation;
+        }
+
+        double meanAbsoluteDeviation = deviatedPixelCount == 0
+            ? 0.0
+            : (double)absoluteDeviationSum / deviatedPixelCount;
+        double deviatedPixelRatio = pixelCount == 0
+            ? 0.0
+            : (double)deviatedPixelCount / pixelCount;
+
+        using var wb = new XLWorkbook();
+        var ws = wb.Worksheets.Add("FlickerEvent");
+        ws.Cell(1, 1).Value = "Flicker detection evidence";
+        ws.Range(1, 1, 1, 2).Merge();
+        ws.Cell(1, 1).Style.Font.Bold = true;
+        ws.Cell(1, 1).Style.Font.FontSize = 14;
+
+        ws.Cell(3, 1).Value = "Event ID";
+        ws.Cell(3, 2).Value = eventId;
+        ws.Cell(4, 1).Value = "Timestamp UTC";
+        ws.Cell(4, 2).Value = timestampUtc;
+        ws.Cell(4, 2).Style.DateFormat.Format = "yyyy-mm-dd hh:mm:ss.000";
+        ws.Cell(5, 1).Value = "Status";
+        ws.Cell(5, 2).Value = status.ToString();
+        ws.Cell(6, 1).Value = "Comparison resolution";
+        ws.Cell(6, 2).Value = $"{w} x {h}";
+        ws.Range(3, 2, 17, 2).Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Right;
+        ws.Cell(7, 1).Value = "Deviation threshold";
+        ws.Cell(7, 2).Value = deviationThreshold;
+        ws.Cell(8, 1).Value = "Event duration (frames)";
+        ws.Cell(8, 2).Value = eventFrameCount;
+        ws.Cell(9, 1).Value = "Peak positive deviation";
+        ws.Cell(9, 2).Value = detectorMaxPositiveDeviation;
+        ws.Cell(10, 1).Value = "Peak negative deviation";
+        ws.Cell(10, 2).Value = detectorMaxNegativeDeviation;
+        ws.Cell(11, 1).Value = "Peak mean absolute deviation";
+        ws.Cell(11, 2).Value = detectorMeanAbsoluteDeviation;
+
+        ws.Cell(13, 1).Value = "Pixels above threshold";
+        ws.Cell(13, 2).Value = deviatedPixelCount;
+        ws.Cell(14, 1).Value = "Pixels above threshold ratio";
+        ws.Cell(14, 2).Value = deviatedPixelRatio;
+        ws.Cell(14, 2).Style.NumberFormat.Format = "0.00%";
+        ws.Cell(15, 1).Value = "Maximum positive deviation";
+        ws.Cell(15, 2).Value = maxPositiveDeviation;
+        ws.Cell(16, 1).Value = "Maximum negative deviation";
+        ws.Cell(16, 2).Value = maxNegativeDeviation;
+        ws.Cell(17, 1).Value = "Mean absolute deviation";
+        ws.Cell(17, 2).Value = meanAbsoluteDeviation;
+
+        const int headerRow = 19;
+        string[] headers = ["Pixel ID", "X", "Y", "Reference", "Measured", "Deviation"];
+        for (int column = 0; column < headers.Length; column++)
+            ws.Cell(headerRow, column + 1).Value = headers[column];
+        var tableRange = ws.Range(headerRow, 1, headerRow, headers.Length);
+        tableRange.Style.Font.Bold = true;
+        tableRange.Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
+        tableRange.Style.Alignment.Vertical = XLAlignmentVerticalValues.Center;
+
+        int row = headerRow + 1;
+        for (int index = 0; index < pixelCount; index++)
+        {
+            int deviation = measuredGrayTopDown[index] - referenceGrayTopDown[index];
+            if (Math.Abs(deviation) < deviationThreshold)
+                continue;
+
+            int y = index / w;
+            ws.Cell(row, 1).Value = index + 1;
+            ws.Cell(row, 2).Value = index - (y * w);
+            ws.Cell(row, 3).Value = y;
+            ws.Cell(row, 4).Value = referenceGrayTopDown[index];
+            ws.Cell(row, 5).Value = measuredGrayTopDown[index];
+            ws.Cell(row, 6).Value = deviation;
+            row++;
+        }
+
+        if (row > headerRow + 1)
+        {
+            var valuesRange = ws.Range(headerRow + 1, 1, row - 1, headers.Length);
+            valuesRange.Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
+            valuesRange.Style.Alignment.Vertical = XLAlignmentVerticalValues.Center;
+        }
+        ws.Columns(1, headers.Length).AdjustToContents();
+        ws.SheetView.FreezeRows(headerRow);
+        wb.SaveAs(path);
     }
 
     private static void WriteCompareXlsx(

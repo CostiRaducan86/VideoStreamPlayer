@@ -1685,8 +1685,10 @@ namespace VilsSharpX
             if (_flickerDetectionEnabled)
             {
                 // Flicker detection is camera-only and must not wait for an LVDS display credit.
+                byte[] detectionFrame = FrameDownscaler.DownscaleBlockAverage(
+                    displayFrame, w, h, _currentWidth, _currentHeight);
                 FlickerDetectionStatus previousFlickerStatus = _flickerDetector.Snapshot.Status;
-                _flickerDetector.ProcessFrame(displayFrame, w, h);
+                _flickerDetector.ProcessFrame(detectionFrame, _currentWidth, _currentHeight);
                 FlickerDetectionStatus currentFlickerStatus = _flickerDetector.Snapshot.Status;
                 if (currentFlickerStatus == FlickerDetectionStatus.Candidate)
                 {
@@ -5981,10 +5983,13 @@ namespace VilsSharpX
             };
             _flickerDetector.UpdateConfiguration(_flickerConfiguration);
             _flickerDetector.Reset();
+            byte[] detectionBaseline = FrameDownscaler.DownscaleBlockAverage(
+                latestCameraFrame.Data, latestCameraFrame.Width, latestCameraFrame.Height,
+                _currentWidth, _currentHeight);
             _flickerDetector.ProcessFrame(
-                latestCameraFrame.Data,
-                latestCameraFrame.Width,
-                latestCameraFrame.Height);
+                detectionBaseline,
+                _currentWidth,
+                _currentHeight);
             ClearFlickerCandidateFrames();
 
             if (!_flickerInjection.TryStart(latestCameraFrame.Data, latestCameraFrame.Width, latestCameraFrame.Height, _flickerConfiguration))
