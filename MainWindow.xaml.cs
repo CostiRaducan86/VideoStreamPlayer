@@ -1678,29 +1678,33 @@ namespace VilsSharpX
             _lastBaslerFrameUtc = DateTime.UtcNow;
             _baslerSignalLost = false;
 
-            if (!_flickerInjection.TryGetFrame(frame, w, h, out byte[] displayFrame))
+            if (!_flickerDetectionEnabled
+                || !_flickerInjection.TryGetFrame(frame, w, h, out byte[] displayFrame))
                 displayFrame = frame;
 
-            // Flicker detection is camera-only and must not wait for an LVDS display credit.
-            FlickerDetectionStatus previousFlickerStatus = _flickerDetector.Snapshot.Status;
-            _flickerDetector.ProcessFrame(displayFrame, w, h);
-            FlickerDetectionStatus currentFlickerStatus = _flickerDetector.Snapshot.Status;
-            if (currentFlickerStatus == FlickerDetectionStatus.Candidate)
+            if (_flickerDetectionEnabled)
             {
-                // Keep the strongest frame of the excursion, not merely the first one.
-                int deviatedPixels = _flickerDetector.Snapshot.DeviatedPixelCount;
-                if (previousFlickerStatus != FlickerDetectionStatus.Candidate
-                    || _flickerCandidateC == null
-                    || deviatedPixels > _flickerCandidatePeakPixels)
+                // Flicker detection is camera-only and must not wait for an LVDS display credit.
+                FlickerDetectionStatus previousFlickerStatus = _flickerDetector.Snapshot.Status;
+                _flickerDetector.ProcessFrame(displayFrame, w, h);
+                FlickerDetectionStatus currentFlickerStatus = _flickerDetector.Snapshot.Status;
+                if (currentFlickerStatus == FlickerDetectionStatus.Candidate)
                 {
-                    _flickerCandidatePeakPixels = deviatedPixels;
-                    _flickerCandidateC = new Frame(
-                        w, h, (byte[])displayFrame.Clone(), DateTime.UtcNow);
+                    // Keep the strongest frame of the excursion, not merely the first one.
+                    int deviatedPixels = _flickerDetector.Snapshot.DeviatedPixelCount;
+                    if (previousFlickerStatus != FlickerDetectionStatus.Candidate
+                        || _flickerCandidateC == null
+                        || deviatedPixels > _flickerCandidatePeakPixels)
+                    {
+                        _flickerCandidatePeakPixels = deviatedPixels;
+                        _flickerCandidateC = new Frame(
+                            w, h, (byte[])displayFrame.Clone(), DateTime.UtcNow);
+                    }
                 }
-            }
-            else if (previousFlickerStatus == FlickerDetectionStatus.Candidate)
-            {
-                ClearFlickerCandidateFrames();
+                else if (previousFlickerStatus == FlickerDetectionStatus.Candidate)
+                {
+                    ClearFlickerCandidateFrames();
+                }
             }
 
             if (_cameraDisplaySyncEnabled)
@@ -4785,7 +4789,7 @@ namespace VilsSharpX
 
             if (LblDiffStats != null)
             {
-                CaptureFlickerCandidateFrames(a, b, diffLeft, diffRight, maxDiff, minDiff, aboveDeadband);
+                CaptureFlickerCandidateFrames(a, b);
                 LblDiffStats.Text = comparisonReady
                     ? FormatComparisonStats(maxDiff, minDiff, meanAbsDiff, aboveDeadband, totalDarkPixels)
                     : "Comparison warming up...";
@@ -5502,6 +5506,7 @@ namespace VilsSharpX
         private FlickerDetectionConfiguration _flickerConfiguration = new();
         private readonly FlickerInjectionController _flickerInjection = new();
         private readonly FlickerDetector _flickerDetector = new();
+        private bool _flickerDetectionEnabled;
         private Frame? _flickerCandidateA;
         private Frame? _flickerCandidateB;
         private Frame? _flickerCandidateC;
@@ -5511,6 +5516,8 @@ namespace VilsSharpX
         private byte[]? _flickerCandidateReportMeasured;
         private TextBox? _flickerFrameCountTextBox;
         private TextBox? _flickerThresholdTextBox;
+        private Border? _flickerFrameCountBorder;
+        private Border? _flickerThresholdBorder;
         private Border? _flickerStatusBadge;
         private TextBlock? _flickerStatusHeaderText;
         private Button? _flickerInjectButton;
@@ -5518,7 +5525,9 @@ namespace VilsSharpX
         private TextBlock? _flickerInfoText;
         private DispatcherTimer? _flickerInfoClearTimer;
         private ListView? _flickerEventLog;
-        private ObservableCollection<FlickerLogEntry>? _flickerLogEvents;
+        private readonly ObservableCollection<FlickerLogEntry> _flickerLogEvents = [];
+        private string _flickerInfoMessage = string.Empty;
+        private Brush _flickerInfoForeground = Brushes.Black;
         private string _flickerSortColumn = nameof(FlickerLogEntry.Time);
         private bool _flickerSortAscending = true;
         private GridViewColumnHeader? _flickerLastSortHeader;
@@ -5543,20 +5552,23 @@ namespace VilsSharpX
         {
             var toggle = new ToggleButton
             {
-                Width = 46,
-                Height = 24,
-                ToolTip = "Switch between positive (White) and negative (Black) flicker"
+                Width = 64,
+                Height = 25,
+                Margin = new Thickness(-25, 0, 0, 0),
+                ToolTip = "Switch between bright and dark flicker"
             };
 
             var track = new FrameworkElementFactory(typeof(Border)) { Name = "Track" };
-            track.SetValue(Border.BackgroundProperty, new SolidColorBrush(Color.FromRgb(0xD9, 0xEA, 0xD3)));
+            track.SetValue(Border.BackgroundProperty, Brushes.Black);
+            track.SetValue(Border.BorderBrushProperty, new SolidColorBrush(Color.FromRgb(0xB8, 0xBD, 0xC2)));
+            track.SetValue(Border.BorderThicknessProperty, new Thickness(1));
             track.SetValue(Border.CornerRadiusProperty, new CornerRadius(12));
             track.SetValue(Border.PaddingProperty, new Thickness(3));
 
             var thumb = new FrameworkElementFactory(typeof(Ellipse)) { Name = "Thumb" };
-            thumb.SetValue(FrameworkElement.WidthProperty, 18.0);
-            thumb.SetValue(FrameworkElement.HeightProperty, 18.0);
-            thumb.SetValue(Shape.FillProperty, Brushes.White);
+            thumb.SetValue(FrameworkElement.WidthProperty, 17.0);
+            thumb.SetValue(FrameworkElement.HeightProperty, 17.0);
+            thumb.SetValue(Shape.FillProperty, new SolidColorBrush(Color.FromRgb(0xB8, 0xBD, 0xC2)));
             thumb.SetValue(FrameworkElement.HorizontalAlignmentProperty, HorizontalAlignment.Left);
 
             var grid = new FrameworkElementFactory(typeof(Grid));
@@ -5574,11 +5586,66 @@ namespace VilsSharpX
                 Value = true
             };
             checkedTrigger.Setters.Add(new Setter(Border.BackgroundProperty,
-                new SolidColorBrush(Color.FromRgb(0x4A, 0x4A, 0x4A)), "Track"));
+                Brushes.White, "Track"));
             checkedTrigger.Setters.Add(new Setter(FrameworkElement.HorizontalAlignmentProperty,
                 HorizontalAlignment.Right, "Thumb"));
             template.Triggers.Add(checkedTrigger);
 
+            var disabledTrigger = new Trigger
+            {
+                Property = ToggleButton.IsEnabledProperty,
+                Value = false
+            };
+            disabledTrigger.Setters.Add(new Setter(
+                Border.BackgroundProperty,
+                new SolidColorBrush(Color.FromRgb(0xD8, 0xDC, 0xE0)),
+                "Track"));
+            template.Triggers.Add(disabledTrigger);
+
+            toggle.IsChecked = true;
+            toggle.Template = template;
+            return toggle;
+        }
+
+        private static ToggleButton CreateFlickerEnableSwitch()
+        {
+            var toggle = new ToggleButton
+            {
+                Width = 46,
+                Height = 24,
+                ToolTip = "Enable or disable flicker detection and monitoring"
+            };
+
+            var track = new FrameworkElementFactory(typeof(Border)) { Name = "Track" };
+            track.SetValue(Border.BackgroundProperty, new SolidColorBrush(Color.FromRgb(0xD0, 0xD4, 0xD8)));
+            track.SetValue(Border.CornerRadiusProperty, new CornerRadius(12));
+            track.SetValue(Border.PaddingProperty, new Thickness(3));
+
+            var thumb = new FrameworkElementFactory(typeof(Ellipse)) { Name = "Thumb" };
+            thumb.SetValue(FrameworkElement.WidthProperty, 18.0);
+            thumb.SetValue(FrameworkElement.HeightProperty, 18.0);
+            thumb.SetValue(Shape.FillProperty, Brushes.White);
+            thumb.SetValue(FrameworkElement.HorizontalAlignmentProperty, HorizontalAlignment.Left);
+
+            var grid = new FrameworkElementFactory(typeof(Grid));
+            grid.AppendChild(thumb);
+            track.AppendChild(grid);
+
+            var template = new ControlTemplate(typeof(ToggleButton)) { VisualTree = track };
+            var checkedTrigger = new Trigger
+            {
+                Property = ToggleButton.IsCheckedProperty,
+                Value = true
+            };
+            checkedTrigger.Setters.Add(new Setter(
+                Border.BackgroundProperty,
+                new SolidColorBrush(Color.FromRgb(0x1F, 0x5A, 0x91)),
+                "Track"));
+            checkedTrigger.Setters.Add(new Setter(
+                FrameworkElement.HorizontalAlignmentProperty,
+                HorizontalAlignment.Right,
+                "Thumb"));
+            template.Triggers.Add(checkedTrigger);
             toggle.Template = template;
             return toggle;
         }
@@ -5600,7 +5667,7 @@ namespace VilsSharpX
 
             var flickerDescription = new TextBlock
             {
-                Text = "Inject a controlled flicker event on pane C (LSM camera)",
+                Text = "Configure flicker detection and optionally inject test frames on LSM Monitor",
                 FontWeight = FontWeights.Bold,
                 Foreground = Brushes.Gray
             };
@@ -5619,6 +5686,13 @@ namespace VilsSharpX
             flickerControls.Children.Add(flickerSeparator);
             flickerWindow.FlickerInjectionControlsHost.Children.Add(flickerControls);
 
+            var enableToggle = CreateFlickerEnableSwitch();
+            enableToggle.IsChecked = _flickerDetectionEnabled;
+            enableToggle.Checked += FlickerEnableToggle_Changed;
+            enableToggle.Unchecked += FlickerEnableToggle_Changed;
+            flickerWindow.FlickerEnableControlHost.Children.Add(enableToggle);
+            flickerWindow.FlickerEnableToggle = enableToggle;
+
             _flickerInjectButton = new Button
             {
                 Content = "Inject Flicker",
@@ -5632,30 +5706,32 @@ namespace VilsSharpX
             Grid.SetColumn(_flickerInjectButton, 5);
             flickerControls.Children.Add(_flickerInjectButton);
 
-            var frameCountBorder = CreateFaultStyleSpinner(
+            _flickerFrameCountBorder = CreateFaultStyleSpinner(
                 _flickerConfiguration.FlickeringFramesThreshold, 1,
                 FlickerDetectionConfiguration.MinFrameCount, FlickerDetectionConfiguration.MaxFrameCount,
                 out _flickerFrameCountTextBox);
             _flickerFrameCountTextBox.TextChanged += FlickerConfigurationTextChanged;
-            AddFlickerLabel(flickerControls, "Flickering Frames Threshold:", 2, 0);
-            AddFlickerControl(flickerControls, frameCountBorder, 2, 1);
+            AddFlickerLabel(flickerControls, "Flickering Threshold:", 2, 0);
+            AddFlickerControl(flickerControls, _flickerFrameCountBorder, 2, 1);
             AddFlickerUnit(flickerControls, "frames", 2, 2);
 
-            var thresholdBorder = CreateFaultStyleSpinner(
+            _flickerThresholdBorder = CreateFaultStyleSpinner(
                 _flickerConfiguration.DeviationTrigger, 1,
                 FlickerDetectionConfiguration.MinTriggerThreshold, FlickerDetectionConfiguration.MaxTriggerThreshold,
                 out _flickerThresholdTextBox);
             _flickerThresholdTextBox.TextChanged += FlickerConfigurationTextChanged;
             AddFlickerLabel(flickerControls, "Deviation Trigger:", 3, 0);
-            AddFlickerControl(flickerControls, thresholdBorder, 3, 1);
+            AddFlickerControl(flickerControls, _flickerThresholdBorder, 3, 1);
             AddFlickerUnit(flickerControls, "abs. dev", 3, 2);
 
             AddFlickerLabel(flickerControls, "Flickering Polarity:", 4, 0);
             _flickerPolarityToggle = CreateFlickerPolaritySwitch();
+            _flickerPolarityToggle.IsChecked = _flickerConfiguration.InjectionPolarity == FlickerInjectionPolarity.White;
             _flickerPolarityToggle.Checked += FlickerPolarityToggle_Changed;
             _flickerPolarityToggle.Unchecked += FlickerPolarityToggle_Changed;
+            FlickerPolarityToggle_Changed(_flickerPolarityToggle, new RoutedEventArgs());
             AddFlickerControl(flickerControls, _flickerPolarityToggle, 4, 1);
-            AddFlickerUnit(flickerControls, "White / Black", 4, 2);
+            AddFlickerUnit(flickerControls, "Dark / Bright", 4, 2);
 
             _flickerInfoText = new TextBlock
             {
@@ -5673,6 +5749,7 @@ namespace VilsSharpX
             _flickerInfoClearTimer.Tick += (_, _) =>
             {
                 _flickerInfoClearTimer.Stop();
+                _flickerInfoMessage = string.Empty;
                 if (_flickerInfoText != null)
                 {
                     _flickerInfoText.Text = string.Empty;
@@ -5680,12 +5757,13 @@ namespace VilsSharpX
             };
 
             _flickerEventLog = flickerWindow.FlickerEventLogView;
-            _flickerLogEvents = [];
             var flickerLogView = new ListCollectionView((IList)_flickerLogEvents);
             flickerLogView.SortDescriptions.Add(new SortDescription(
                 nameof(FlickerLogEntry.Time), ListSortDirection.Ascending));
             _flickerEventLog.ItemsSource = flickerLogView;
             _flickerInfoText = flickerWindow.FlickerInfoText;
+            _flickerInfoText.Text = _flickerInfoMessage;
+            _flickerInfoText.Foreground = _flickerInfoForeground;
             _flickerStatusBadge = flickerWindow.FlickerStatusBadge;
             _flickerStatusHeaderText = flickerWindow.FlickerStatusHeaderText;
             flickerWindow.FlickerLogColumnHeaderClicked += FlickerEventLog_ColumnHeaderClick;
@@ -5694,9 +5772,20 @@ namespace VilsSharpX
             flickerWindow.FlickerLogSaveRequested += SaveFlickerLog;
             flickerWindow.FlickerFolderOpenRequested += OpenFlickerFolder;
             UpdateFlickerInjectionButton();
+            UpdateFlickerFeatureEnabledState(flickerWindow);
 
             flickerWindow.Closed += (_, _) =>
             {
+                if (_flickerPolarityToggle != null)
+                {
+                    _flickerConfiguration = _flickerConfiguration with
+                    {
+                        InjectionPolarity = _flickerPolarityToggle.IsChecked == true
+                            ? FlickerInjectionPolarity.White
+                            : FlickerInjectionPolarity.Black
+                    };
+                }
+                _flickerInfoClearTimer?.Stop();
                 _flickerControlWindow = null;
             };
             _flickerControlWindow = flickerWindow;
@@ -5787,6 +5876,9 @@ namespace VilsSharpX
 
             var upButton = new RepeatButton { Width = 16, Height = 9, MinWidth = 16, MaxWidth = 16, MinHeight = 9, MaxHeight = 9, Content = "▲", FontSize = 6, Padding = new Thickness(0), BorderThickness = new Thickness(0) };
             var downButton = new RepeatButton { Width = 16, Height = 9, MinWidth = 16, MaxWidth = 16, MinHeight = 9, MaxHeight = 9, Content = "▼", FontSize = 6, Padding = new Thickness(0), BorderThickness = new Thickness(0) };
+            textBox.Foreground = Brushes.Black;
+            upButton.Foreground = Brushes.Black;
+            downButton.Foreground = Brushes.Black;
             upButton.Click += (_, _) => ChangeFlickerSpinnerValue(capturedTextBox, step, min, max);
             downButton.Click += (_, _) => ChangeFlickerSpinnerValue(capturedTextBox, -step, min, max);
 
@@ -5857,6 +5949,9 @@ namespace VilsSharpX
 
         private void FlickerInjectButton_Click(object sender, RoutedEventArgs e)
         {
+            if (!_flickerDetectionEnabled)
+                return;
+
             if (_flickerInjection.IsActive)
             {
                 _flickerInjection.Cancel();
@@ -5878,22 +5973,11 @@ namespace VilsSharpX
                 return;
             }
 
-            // Flicker is injected into the LSM camera path. LVDS-AVTP does not
-            // include camera data, so switch to the matching comparison mode.
-            if (_comparisonMode == 0)
-            {
-                _comparisonMode = 1;
-                if (CmbComparisonMode != null)
-                    CmbComparisonMode.SelectedIndex = _comparisonMode;
-                UpdateComparisonModeLabel();
-                SaveUiSettings();
-            }
-
             _flickerConfiguration = configuration with
             {
                 InjectionPolarity = _flickerPolarityToggle?.IsChecked == true
-                    ? FlickerInjectionPolarity.Black
-                    : FlickerInjectionPolarity.White
+                    ? FlickerInjectionPolarity.White
+                    : FlickerInjectionPolarity.Black
             };
             _flickerDetector.UpdateConfiguration(_flickerConfiguration);
             _flickerDetector.Reset();
@@ -6089,14 +6173,22 @@ namespace VilsSharpX
 
             try
             {
-                a ??= new Frame(c.Width, c.Height, (byte[])c.Data.Clone(), c.TimestampUtc);
-                b ??= new Frame(c.Width, c.Height, (byte[])c.Data.Clone(), c.TimestampUtc);
+                lock (_frameLock)
+                {
+                    a ??= _latestA;
+                    b ??= _latestB;
+                }
+
+                a ??= new Frame(_currentWidth, _currentHeight, GetASourceBytes(), c.TimestampUtc);
+                b ??= new Frame(_currentWidth, _currentHeight, _noSignalGrayFrame, c.TimestampUtc);
                 var bPost = ApplyBPostProcessing(a, b);
-                var dCopy = _flickerCandidateD ?? (byte[])_diffBgr.Clone();
+                byte[] cameraData = FrameDownscaler.DownscaleBlockAverage(
+                    c.Data, c.Width, c.Height, _currentWidth, _currentHeight);
+                var dCopy = _flickerCandidateD ?? CreateFlickerEvidenceDiff(bPost.Data, cameraData);
                 byte[] reportReference = _flickerCandidateReportReference
-                    ?? (_comparisonMode == 1 ? b.Data : a.Data);
-                byte[] reportMeasured = _flickerCandidateReportMeasured
                     ?? bPost.Data;
+                byte[] reportMeasured = _flickerCandidateReportMeasured
+                    ?? cameraData;
                 string outputDirectory = await FlickerEvidenceExporter.ExportAsync(
                     snapshot.EventId ?? $"FLK-{DateTime.UtcNow:yyyyMMdd-HHmmssfff}",
                     a, bPost, c, dCopy, reportReference, reportMeasured,
@@ -6112,21 +6204,33 @@ namespace VilsSharpX
         }
 
         private void CaptureFlickerCandidateFrames(
-            Frame a, Frame b, byte[] reportReference, byte[] reportMeasured,
-            int maxDiff, int minDiff, int deviatedPixels)
+            Frame a, Frame b)
         {
             if (_flickerDetector.Snapshot.Status != FlickerDetectionStatus.Candidate
-                || _comparisonMode is not (1 or 2)
-                || Math.Max(Math.Abs(maxDiff), Math.Abs(minDiff)) < _flickerConfiguration.DeviationTrigger
-                || deviatedPixels < 3
                 || _flickerCandidateC == null)
                 return;
 
+            byte[] cameraData = FrameDownscaler.DownscaleBlockAverage(
+                _flickerCandidateC.Data,
+                _flickerCandidateC.Width,
+                _flickerCandidateC.Height,
+                _currentWidth,
+                _currentHeight);
             _flickerCandidateA = new Frame(a.Width, a.Height, (byte[])a.Data.Clone(), a.TimestampUtc);
             _flickerCandidateB = new Frame(b.Width, b.Height, (byte[])b.Data.Clone(), b.TimestampUtc);
-            _flickerCandidateD = (byte[])_diffBgr.Clone();
-            _flickerCandidateReportReference = (byte[])reportReference.Clone();
-            _flickerCandidateReportMeasured = (byte[])reportMeasured.Clone();
+            _flickerCandidateD = CreateFlickerEvidenceDiff(b.Data, cameraData);
+            _flickerCandidateReportReference = (byte[])b.Data.Clone();
+            _flickerCandidateReportMeasured = cameraData;
+        }
+
+        private byte[] CreateFlickerEvidenceDiff(byte[] reference, byte[] measured)
+        {
+            var diff = new byte[_currentWidth * _currentHeight * 3];
+            DiffRenderer.RenderCompareToBgr(
+                diff, reference, measured, _currentWidth, _currentHeight, _diffThreshold,
+                _zeroZeroIsWhite,
+                out _, out _, out _, out _, out _, out _, out _, (byte)5);
+            return diff;
         }
 
         private void ClearFlickerCandidateFrames()
@@ -6162,11 +6266,68 @@ namespace VilsSharpX
                 return;
 
             bool isBlack = _flickerPolarityToggle.IsChecked == true;
-            _flickerPolarityToggle.Content = isBlack ? "Black" : "White";
+            _flickerPolarityToggle.Content = isBlack ? "Dark" : "Bright";
             _flickerPolarityToggle.Background = isBlack
-                ? new SolidColorBrush(Color.FromRgb(0x22, 0x22, 0x22))
+                ? Brushes.Black
                 : Brushes.White;
             _flickerPolarityToggle.Foreground = isBlack ? Brushes.White : Brushes.Black;
+            _flickerConfiguration = _flickerConfiguration with
+            {
+                InjectionPolarity = isBlack
+                    ? FlickerInjectionPolarity.Black
+                    : FlickerInjectionPolarity.White
+            };
+            _flickerDetector.UpdateConfiguration(_flickerConfiguration);
+        }
+
+        private void FlickerEnableToggle_Changed(object sender, RoutedEventArgs e)
+        {
+            _flickerDetectionEnabled = sender is ToggleButton toggle && toggle.IsChecked == true;
+            if (!_flickerDetectionEnabled)
+            {
+                _flickerInjection.Cancel();
+                _flickerDetector.Reset(notifyStatus: false);
+                ClearFlickerCandidateFrames();
+            }
+
+            UpdateFlickerInjectionButton();
+            if (_flickerControlWindow != null)
+                UpdateFlickerFeatureEnabledState(_flickerControlWindow);
+        }
+
+        private void UpdateFlickerFeatureEnabledState(FlickerControlWindow window)
+        {
+            bool active = _flickerDetectionEnabled;
+            window.FlickerEnableStateText.Text = active ? "Enabled" : "Disabled";
+            window.FlickerEnableStateText.Foreground = active ? Brushes.DarkBlue : Brushes.Gray;
+            if (_flickerInjectButton != null)
+                _flickerInjectButton.IsEnabled = active;
+            if (_flickerFrameCountTextBox != null)
+                _flickerFrameCountTextBox.IsEnabled = active && !_flickerInjection.IsActive;
+            if (_flickerThresholdTextBox != null)
+                _flickerThresholdTextBox.IsEnabled = active && !_flickerInjection.IsActive;
+            if (_flickerPolarityToggle != null)
+                _flickerPolarityToggle.IsEnabled = active && !_flickerInjection.IsActive;
+            window.FlickerClearLogButton.IsEnabled = active;
+            window.FlickerSaveLogButton.IsEnabled = active;
+            window.FlickerOpenFolderButton.IsEnabled = active;
+            Brush controlBackground = active ? Brushes.White : new SolidColorBrush(Color.FromRgb(0xE3, 0xE6, 0xE8));
+            Brush controlBorder = active ? new SolidColorBrush(Color.FromRgb(0xAB, 0xAD, 0xB3)) : new SolidColorBrush(Color.FromRgb(0xB8, 0xBD, 0xC2));
+            Brush controlForeground = active ? Brushes.Black : new SolidColorBrush(Color.FromRgb(0x8A, 0x90, 0x96));
+            if (_flickerFrameCountBorder != null)
+            {
+                _flickerFrameCountBorder.IsEnabled = active && !_flickerInjection.IsActive;
+                _flickerFrameCountBorder.Background = controlBackground;
+                _flickerFrameCountBorder.BorderBrush = controlBorder;
+                _flickerFrameCountTextBox!.Foreground = controlForeground;
+            }
+            if (_flickerThresholdBorder != null)
+            {
+                _flickerThresholdBorder.IsEnabled = active && !_flickerInjection.IsActive;
+                _flickerThresholdBorder.Background = controlBackground;
+                _flickerThresholdBorder.BorderBrush = controlBorder;
+                _flickerThresholdTextBox!.Foreground = controlForeground;
+            }
         }
 
         private void FlickerConfigurationTextChanged(object sender, TextChangedEventArgs e)
@@ -6177,8 +6338,8 @@ namespace VilsSharpX
             _flickerConfiguration = configuration with
             {
                 InjectionPolarity = _flickerPolarityToggle?.IsChecked == true
-                    ? FlickerInjectionPolarity.Black
-                    : FlickerInjectionPolarity.White
+                    ? FlickerInjectionPolarity.White
+                    : FlickerInjectionPolarity.Black
             };
             _flickerDetector.UpdateConfiguration(_flickerConfiguration);
         }
@@ -6210,6 +6371,8 @@ namespace VilsSharpX
 
         private void SetFlickerInfo(string message, Brush foreground, int? clearAfterSeconds = null)
         {
+            _flickerInfoMessage = message;
+            _flickerInfoForeground = foreground;
             if (_flickerInfoText == null || _flickerInfoClearTimer == null)
                 return;
 

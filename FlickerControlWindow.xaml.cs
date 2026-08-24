@@ -23,9 +23,15 @@ namespace VilsSharpX
         public TextBlock FlickerStatusHeaderText => StatusHeaderText;
         public Button FlickerInjectButton { get; set; } = null!;
         public ToggleButton FlickerPolarityToggle { get; set; } = null!;
+        public ToggleButton FlickerEnableToggle { get; set; } = null!;
+        public TextBlock FlickerEnableStateText => (TextBlock)FindName("EnableStateText");
+        public Button FlickerClearLogButton => ClearFlickerLogButton;
+        public Button FlickerSaveLogButton => SaveFlickerLogButton;
+        public Button FlickerOpenFolderButton => OpenFlickerFolderButton;
         public TextBlock FlickerInfoText => InfoText;
         public ListView FlickerEventLogView => FlickerEventLog;
         public Grid FlickerInjectionControlsHost => InjectionControlsHost;
+        public Grid FlickerEnableControlHost => (Grid)FindName("EnableControlHost");
         private void FlickerEventLog_ColumnHeaderClick(object sender, RoutedEventArgs e)
             => FlickerLogColumnHeaderClicked?.Invoke(sender, e);
 

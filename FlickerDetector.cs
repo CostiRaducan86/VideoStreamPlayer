@@ -49,7 +49,7 @@ public sealed class FlickerDetector
         _configuration = configuration;
     }
 
-    public void Reset()
+    public void Reset(bool notifyStatus = true)
     {
         _baselineFrame = null;
         _baselineWidth = 0;
@@ -61,7 +61,8 @@ public sealed class FlickerDetector
         ResetEventState();
         _status = FlickerDetectionStatus.Idle;
         _snapshot = new FlickerDetectionStatusSnapshot { DeviationTrigger = _configuration.DeviationTrigger };
-        StatusChanged?.Invoke(_snapshot);
+        if (notifyStatus)
+            StatusChanged?.Invoke(_snapshot);
     }
 
     /// <summary>
