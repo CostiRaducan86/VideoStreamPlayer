@@ -42,7 +42,7 @@ public sealed class FlickerEvidenceExporter
             ImageUtils.SaveGray8Png(Path.Combine(outputDirectory, "B_LVDS.png"), b, frameB.Width, frameB.Height);
             ImageUtils.SaveGray8Png(Path.Combine(outputDirectory, "C_LSM.png"), c, frameC.Width, frameC.Height);
             ImageUtils.SaveBgr24Png(Path.Combine(outputDirectory, "D_Compare.png"), d, comparisonWidth, comparisonHeight);
-            AviTripletRecorder.SaveFlickerCompareXlsx(
+            FlickerReportWriter.SaveXlsx(
                 xlsxPath, eventId, snapshot.LastEventUtc ?? DateTime.UtcNow,
                 snapshot.Status, reportA, reportB,
                 comparisonWidth, comparisonHeight,

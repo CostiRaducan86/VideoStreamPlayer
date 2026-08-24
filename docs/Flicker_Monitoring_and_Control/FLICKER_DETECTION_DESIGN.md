@@ -24,7 +24,7 @@ The detector does not consume `Comparison Info` metrics. That panel describes th
 | --- | --- | --- |
 | `Flickering Frames Threshold` | Maximum duration of a flicker in camera frames | `1..250`, default `10` |
 | `Deviation Trigger` | Absolute deviation required for a candidate | `0..255` |
-| `Flickering Polarity` | Simulator-only text polarity | `White` or `Black` |
+| `Flickering Polarity` | Simulator-only text polarity | `Dark` or `Bright` |
 | `Inject Flicker` / `Stop` | Starts or cancels simulation | Stop is red while active |
 
 The old Duration control was removed. Both simulation and real detection are frame-based.
@@ -167,6 +167,10 @@ The directory contains:
 - `C_LSM.png` with the anomaly visible;
 - `D_Compare.png` for the anomalous sample;
 - one `flicker_report.xlsx` file.
+
+`FlickerEvidenceExporter` owns the asynchronous evidence-set export. `FlickerReportWriter` owns
+only the flicker XLSX layout and calculations, keeping flicker reporting separate from
+`AviTripletRecorder` and its generic AVI/snapshot-report responsibilities.
 
 The exported `C_LSM.png` is the frame with the largest deviated area inside the event, not the
 first frame of the event, so a ramped anomaly is captured at its worst point.

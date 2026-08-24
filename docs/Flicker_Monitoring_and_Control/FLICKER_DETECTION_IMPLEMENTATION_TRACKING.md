@@ -13,7 +13,7 @@
 | --- | --- | --- |
 | Flickering Frames Threshold | [x] | Configurable `1..250`, default `10`; used by simulation and real detection |
 | Deviation Trigger | [x] | Configurable `0..255`; applies symmetrically to positive and negative deviations |
-| Flickering Polarity | [x] | Simulator-only `White` / `Black` text fault |
+| Flickering Polarity | [x] | Simulator-only `Dark` / `Bright` text fault |
 | Duration control | [x] | Removed; flicker timing is frame-based |
 | Active comparison modes | [x] | Detector is independent of `LSM-LVDS` and `LSM-AVTP`; those modes remain contextual UI views |
 | Detector reset | [x] | Reset when a new injection starts |
@@ -80,6 +80,7 @@
 - [x] Clone frame buffers before background file I/O.
 - [x] Export `A_AVTP.png`, `B_LVDS.png`, `C_LSM.png`, and `D_Compare.png`.
 - [x] Generate one `flicker_report.xlsx` file.
+- [x] Keep flicker XLSX generation in the dedicated `FlickerReportWriter` source.
 - [x] Use one XLSX sheet named `FlickerEvent` for flicker evidence.
 - [x] Include event metadata, active comparison resolution, effective threshold, duration, peak values, and downscaled report statistics.
 - [x] Include only threshold-exceeding pixels with ID, coordinates, reference, measured, and deviation values.
