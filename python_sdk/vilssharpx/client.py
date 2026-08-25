@@ -12,7 +12,7 @@ from __future__ import annotations
 import base64
 import json
 import uuid
-from typing import Any, Dict, Optional
+from typing import Any
 from urllib import error, request
 
 from .exceptions import VilsApiError
@@ -24,14 +24,14 @@ DEFAULT_BASE_URL = "http://127.0.0.1:8420"
 class VilsClient:
     """Client for driving the VilsSharpX WPF application over REST."""
 
-    def __init__(self, base_url: str = DEFAULT_BASE_URL, timeout: float = 5.0, api_key: Optional[str] = None) -> None:
+    def __init__(self, base_url: str = DEFAULT_BASE_URL, timeout: float = 5.0, api_key: str | None = None) -> None:
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
         self.api_key = api_key
 
     # ---- core command transport ----
 
-    def send_command(self, command: str, payload: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    def send_command(self, command: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
         """Sends a raw command and returns the ``data`` block on success."""
         body = json.dumps(
             {
@@ -73,28 +73,28 @@ class VilsClient:
 
     # ---- v1 command wrappers ----
 
-    def ping(self) -> Dict[str, Any]:
+    def ping(self) -> dict[str, Any]:
         return self.send_command("Ping")
 
-    def start_simulation(self, fps: int = 100) -> Dict[str, Any]:
+    def start_simulation(self, fps: int = 100) -> dict[str, Any]:
         return self.send_command("StartSimulation", {"fps": fps})
 
-    def stop_simulation(self) -> Dict[str, Any]:
+    def stop_simulation(self) -> dict[str, Any]:
         return self.send_command("StopSimulation")
 
-    def pause_simulation(self) -> Dict[str, Any]:
+    def pause_simulation(self) -> dict[str, Any]:
         return self.send_command("PauseSimulation")
 
-    def resume_simulation(self) -> Dict[str, Any]:
+    def resume_simulation(self) -> dict[str, Any]:
         return self.send_command("ResumeSimulation")
 
     def set_comparison_settings(
         self,
-        mode: Optional[int] = None,
-        deadband: Optional[int] = None,
-        b_delta: Optional[int] = None,
-    ) -> Dict[str, Any]:
-        payload: Dict[str, Any] = {}
+        mode: int | None = None,
+        deadband: int | None = None,
+        b_delta: int | None = None,
+    ) -> dict[str, Any]:
+        payload: dict[str, Any] = {}
         if mode is not None:
             payload["mode"] = mode
         if deadband is not None:
@@ -117,7 +117,7 @@ class VilsClient:
         with open(path, "wb") as fh:
             fh.write(self.get_frame_snapshot(pane))
 
-    def _build_headers(self) -> Dict[str, str]:
+    def _build_headers(self) -> dict[str, str]:
         headers = {"Content-Type": "application/json"}
         if self.api_key:
             headers["X-Api-Key"] = self.api_key

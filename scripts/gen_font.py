@@ -12,9 +12,10 @@ Bit ordering: bit 0 = leftmost pixel, bit 15 = rightmost pixel.
 Row ordering: glyph[0] = top row, glyph[23] = bottom row.
 """
 
-from PIL import Image, ImageDraw, ImageFont, ImageFilter
 import os
 import sys
+
+from PIL import Image, ImageDraw, ImageFilter, ImageFont
 
 CELL_W = 16
 CELL_H = 24
@@ -51,7 +52,7 @@ def load_font(primary, fallback, size):
         if os.path.exists(p):
             try:
                 return ImageFont.truetype(p, size), os.path.basename(p)
-            except Exception:
+            except OSError:
                 continue
     return None, ""
 
@@ -64,8 +65,7 @@ def generate_glyphs(font, blur_sigma, threshold):
     for test_ch in 'MWN@#':
         bb = font.getbbox(test_ch)
         w = bb[2] - bb[0]
-        if w > max_w:
-            max_w = w
+        max_w = max(max_w, w)
 
     # Canvas width: character fills ~93% of cell
     hi_w = int(max_w / 0.93)

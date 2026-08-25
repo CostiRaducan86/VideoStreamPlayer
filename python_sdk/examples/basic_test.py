@@ -12,7 +12,7 @@ from pathlib import Path
 # Allow running the example without installing the package.
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from vilssharpx import VilsClient, VilsApiError
+from vilssharpx import VilsApiError, VilsClient
 
 
 def main() -> int:
@@ -32,7 +32,7 @@ def main() -> int:
             time.sleep(1.0)
             stats = client.get_comparison_stats()
             print(f"   total_pixels_dev={stats.total_pixels_dev} "
-                  f"avg={stats.average_dev:.1f} "
+                  f"avg={stats.avg_dev:.1f} "
                   f"max+={stats.max_positive_dev} max-={stats.max_negative_dev}")
 
         print("5) Save a snapshot of pane D")

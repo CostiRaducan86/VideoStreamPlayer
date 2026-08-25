@@ -222,7 +222,7 @@ namespace VilsSharpX
             string modeLabel = ComparisonModeLabels[Math.Clamp(_comparisonMode, 0, ComparisonModeLabels.Length - 1)];
             int brightPixels = GetInjectedBrightPixelCount();
             int detectedFlickers = GetDetectedFlickerCount();
-            return $"[{modeLabel}]: max_pos_dev={Math.Max(0, maxDiff)} | max_neg_dev={Math.Min(0, minDiff)} | average_dev={meanAbsDiff:F0} | total_pixels_dev={aboveDeadband} | dark_pixels={totalDarkPixels} | bright_pixels={brightPixels} | flickers = {detectedFlickers}";
+            return $"[{modeLabel}]: max_pos_dev={Math.Max(0, maxDiff)} | max_neg_dev={Math.Min(0, minDiff)} | avg_dev={meanAbsDiff:F0} | total_pixels_dev={aboveDeadband} | dark_pixels={totalDarkPixels} | bright_pixels={brightPixels} | flickers = {detectedFlickers}";
         }
 
         /// <summary>

@@ -88,7 +88,7 @@ namespace VilsSharpX.Api
         [JsonPropertyName("max_negative_dev")]
         public int MaxNegativeDev { get; set; }
 
-        [JsonPropertyName("average_dev")]
+        [JsonPropertyName("avg_dev")]
         public double AveragePixelsDev { get; set; }
 
         [JsonPropertyName("total_pixels_dev")]

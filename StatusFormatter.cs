@@ -53,7 +53,7 @@ public static class StatusFormatter
     public static string FormatDiffStats(int maxDiff, int minDiff, double meanAbsDiff, int aboveDeadband, int totalDarkPixels, double matchNcc = double.NaN)
     {
         string nccText = !double.IsNaN(matchNcc) ? $"  sync_ncc={matchNcc:F4}" : "";
-        return $"COMPARE (LVDS\u2212AVTP): max_positive_dev={Math.Max(0, maxDiff)}  max_negative_dev={Math.Min(0, minDiff)}  average_dev={meanAbsDiff:F0}  total_pixels_dev={aboveDeadband}  dark_pixels={totalDarkPixels}{nccText}";
+        return $"COMPARE (LVDS\u2212AVTP): max_positive_dev={Math.Max(0, maxDiff)}  max_negative_dev={Math.Min(0, minDiff)}  avg_dev={meanAbsDiff:F0}  total_pixels_dev={aboveDeadband}  dark_pixels={totalDarkPixels}{nccText}";
     }
 
     /// <summary>

@@ -5,8 +5,8 @@ VilsSharpX WPF application. Uses only the Python standard library.
 """
 
 from .client import VilsClient
-from .models import ComparisonStats
 from .exceptions import VilsApiError
+from .models import ComparisonStats
 
-__all__ = ["VilsClient", "ComparisonStats", "VilsApiError"]
+__all__ = ["ComparisonStats", "VilsApiError", "VilsClient"]
 __version__ = "1.0.0"

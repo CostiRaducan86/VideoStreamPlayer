@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import Any
 
 
 class VilsApiError(Exception):
@@ -12,7 +12,7 @@ class VilsApiError(Exception):
         self,
         message: str,
         code: str = "ERROR",
-        status_code: Optional[int] = None,
+        status_code: int | None = None,
         details: Any = None,
     ) -> None:
         super().__init__(message)

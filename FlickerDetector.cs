@@ -103,9 +103,10 @@ public sealed class FlickerDetector
     public void ProcessFrame(byte[] frame, int width, int height)
     {
         ArgumentNullException.ThrowIfNull(frame);
-        int pixelCount = width * height;
-        if (width <= 0 || height <= 0 || frame.Length < pixelCount)
+        long pixelCountLong = (long)width * height;
+        if (width <= 0 || height <= 0 || pixelCountLong > frame.Length)
             return;
+        int pixelCount = (int)pixelCountLong;
 
         if (_baselineFrame == null
             || _baselineWidth != width

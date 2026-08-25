@@ -18,10 +18,10 @@ import re
 FONT_H = os.path.join(os.path.dirname(__file__), "..", "Aurix_Firmware", "tft_font.h")
 
 LOWERCASE_CODES = set(range(ord("a"), ord("z") + 1))
-REGULAR_TUNE_CODES = set(ord(c) for c in "iftlOMNPH0")
+REGULAR_TUNE_CODES = {ord(c) for c in "iftlOMNPH0"}
 REGULAR_TOPCAP_CODES = set(LOWERCASE_CODES)
-REGULAR_STEM_BOOST_CODES = set(ord(c) for c in "fONPH0")
-REGULAR_LEFT_BALANCE_CODES = set(ord(c) for c in "H0")
+REGULAR_STEM_BOOST_CODES = {ord(c) for c in "fONPH0"}
+REGULAR_LEFT_BALANCE_CODES = {ord(c) for c in "H0"}
 GLYPH_COUNT = 95
 GLYPH_H = 24
 
@@ -108,10 +108,8 @@ def glyph_bit_bounds(rows):
             continue
         for b in range(16):
             if ((r >> b) & 1) != 0:
-                if b < min_b:
-                    min_b = b
-                if b > max_b:
-                    max_b = b
+                min_b = min(min_b, b)
+                max_b = max(max_b, b)
     if max_b < 0:
         return None
     return (min_b, max_b)
