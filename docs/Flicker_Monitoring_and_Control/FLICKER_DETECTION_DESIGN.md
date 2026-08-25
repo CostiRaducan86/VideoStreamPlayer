@@ -4,7 +4,7 @@
 
 Flicker Detection identifies short positive or negative visual anomalies on the LSM camera path in pane C. It is independent of the LVDS/AVTP comparison mode and supports both simulated and real camera events.
 
-The Flicker feature is exposed independently through the `Flicker Monitoring and Control` Tools menu. Its UI is defined in `FlickerControlWindow.xaml` and contains only the Flickering Monitor, Flicker Injection Control, and Info sections. The unrelated LVDS controls are opened from the separate `AVTP LVDS Simulation Control` menu and window.
+The Flicker feature is exposed independently through the `Flicker Monitoring and Control` Tools menu. Its UI is defined in `FlickerControlWindow.xaml` and contains only the Monitor, Configuration and Control, and Info sections. The unrelated LVDS controls are opened from the separate `AVTP LVDS Simulation Control` menu and window.
 
 A flicker must produce a sufficiently strong change in a local part of pane C and must last no longer than the configured frame threshold. Longer anomalies are treated as intentional light-function transitions, such as thermal derating.
 
@@ -22,10 +22,10 @@ The detector does not consume `Comparison Info` metrics. That panel describes th
 
 | Control | Meaning | Validation |
 | --- | --- | --- |
-| `Flickering Frames Threshold` | Maximum duration of a flicker in camera frames | `1..250`, default `10` |
+| `Detection Threshold` | Maximum duration of a flicker in camera frames | `1..250`, default `10` |
 | `Deviation Trigger` | Absolute deviation required for a candidate | `0..255` |
-| `Flickering Polarity` | Simulator-only text polarity | `Dark` or `Bright` |
-| `Inject Flicker` / `Stop` | Starts or cancels simulation | Stop is red while active |
+| `Injection Polarity` | Simulator-only text polarity | `Dark` or `Bright` |
+| `Inject Fault` / `Stop` | Starts or cancels simulation | Stop is red while active |
 
 The old Duration control was removed. Both simulation and real detection are frame-based.
 
@@ -105,7 +105,7 @@ The simulator clones the latest valid camera frame and overwrites only the cente
 - `White` writes `200`, producing a positive flash below the 8-bit maximum;
 - `Black` writes `0`, producing a negative dark event;
 - all other pixels remain unchanged;
-- the modified frame is replayed for exactly `Flickering Frames Threshold` camera frames;
+- the modified frame is replayed for exactly `Detection Threshold` camera frames;
 - Basler-owned buffers are never mutated.
 
 When an injection starts, the detector is reset and initialized with the same downscaled version of
@@ -130,7 +130,7 @@ report its measured duration, which makes an over-threshold transition auditable
 
 `Time` is the default ascending sort. Clicking any header toggles ascending/descending order for that column. A selected row can be copied with `Ctrl+C` or with the right-click `Copy` command. The copied row is tab-separated so it can be pasted directly into a text editor or spreadsheet.
 
-The `Clear`, `Save`, and Open Folder actions are placed inside the Flicker Monitoring group, directly below the table. `Clear` removes the current in-memory history. `Save` writes the visible history to:
+The `Clear`, `Save`, and Open Folder actions are placed inside the Monitor group, directly below the table. `Clear` removes the current in-memory history. `Save` writes the visible history to:
 
 ```text
 docs/outputs/flickerDetections/Logs/FLK_Log_yyyy_MM_dd_HHmmss.log

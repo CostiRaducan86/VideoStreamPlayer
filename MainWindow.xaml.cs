@@ -221,7 +221,8 @@ namespace VilsSharpX
 
             string modeLabel = ComparisonModeLabels[Math.Clamp(_comparisonMode, 0, ComparisonModeLabels.Length - 1)];
             int brightPixels = GetInjectedBrightPixelCount();
-            return $"[{modeLabel}]: max_pos_dev={Math.Max(0, maxDiff)} | max_neg_dev={Math.Min(0, minDiff)} | average_dev={meanAbsDiff:F0} | total_pixels_dev={aboveDeadband} | dark_pixels={totalDarkPixels} | bright_pixels={brightPixels}";
+            int detectedFlickers = GetDetectedFlickerCount();
+            return $"[{modeLabel}]: max_pos_dev={Math.Max(0, maxDiff)} | max_neg_dev={Math.Min(0, minDiff)} | average_dev={meanAbsDiff:F0} | total_pixels_dev={aboveDeadband} | dark_pixels={totalDarkPixels} | bright_pixels={brightPixels} | flickers = {detectedFlickers}";
         }
 
         /// <summary>
@@ -5522,6 +5523,8 @@ namespace VilsSharpX
         private Border? _flickerThresholdBorder;
         private Border? _flickerStatusBadge;
         private TextBlock? _flickerStatusHeaderText;
+        private TextBlock? _flickerDetectedCountText;
+        private Ellipse? _flickerDetectedIndicator;
         private Button? _flickerInjectButton;
         private ToggleButton? _flickerPolarityToggle;
         private TextBlock? _flickerInfoText;
@@ -5697,7 +5700,7 @@ namespace VilsSharpX
 
             _flickerInjectButton = new Button
             {
-                Content = "Inject Flicker",
+                Content = "Inject Fault",
                 Width = 96, Height = 28,
                 Background = Brushes.DodgerBlue,
                 Foreground = Brushes.White
@@ -5713,7 +5716,7 @@ namespace VilsSharpX
                 FlickerDetectionConfiguration.MinFrameCount, FlickerDetectionConfiguration.MaxFrameCount,
                 out _flickerFrameCountTextBox);
             _flickerFrameCountTextBox.TextChanged += FlickerConfigurationTextChanged;
-            AddFlickerLabel(flickerControls, "Flickering Threshold:", 2, 0);
+            AddFlickerLabel(flickerControls, "Detection Threshold:", 2, 0);
             AddFlickerControl(flickerControls, _flickerFrameCountBorder, 2, 1);
             AddFlickerUnit(flickerControls, "frames", 2, 2);
 
@@ -5726,7 +5729,7 @@ namespace VilsSharpX
             AddFlickerControl(flickerControls, _flickerThresholdBorder, 3, 1);
             AddFlickerUnit(flickerControls, "abs. dev", 3, 2);
 
-            AddFlickerLabel(flickerControls, "Flickering Polarity:", 4, 0);
+            AddFlickerLabel(flickerControls, "Injection Polarity:", 4, 0);
             _flickerPolarityToggle = CreateFlickerPolaritySwitch();
             _flickerPolarityToggle.IsChecked = _flickerConfiguration.InjectionPolarity == FlickerInjectionPolarity.White;
             _flickerPolarityToggle.Checked += FlickerPolarityToggle_Changed;
@@ -5768,6 +5771,9 @@ namespace VilsSharpX
             _flickerInfoText.Foreground = _flickerInfoForeground;
             _flickerStatusBadge = flickerWindow.FlickerStatusBadge;
             _flickerStatusHeaderText = flickerWindow.FlickerStatusHeaderText;
+            _flickerDetectedCountText = flickerWindow.FlickerDetectedCountTextBlock;
+            _flickerDetectedIndicator = flickerWindow.FlickerDetectedIndicatorEllipse;
+            UpdateFlickerDetectedCount();
             flickerWindow.FlickerLogColumnHeaderClicked += FlickerEventLog_ColumnHeaderClick;
             flickerWindow.FlickerLogCopyRequested += CopySelectedFlickerLogEntry;
             flickerWindow.FlickerLogClearRequested += ClearFlickerLog;
@@ -6023,6 +6029,7 @@ namespace VilsSharpX
                 _flickerLogEvents.Add(entry);
                 while (_flickerLogEvents.Count > 100)
                     _flickerLogEvents.RemoveAt(0);
+                UpdateFlickerDetectedCount();
                 _flickerEventLog?.ScrollIntoView(entry);
             }
 
@@ -6084,6 +6091,23 @@ namespace VilsSharpX
         private void ClearFlickerLog(object? sender, RoutedEventArgs e)
         {
             _flickerLogEvents?.Clear();
+            UpdateFlickerDetectedCount();
+        }
+
+        private void UpdateFlickerDetectedCount()
+        {
+            if (_flickerDetectedCountText == null || _flickerDetectedIndicator == null)
+                return;
+
+            int detectedCount = GetDetectedFlickerCount();
+            _flickerDetectedCountText.Text = detectedCount.ToString(CultureInfo.InvariantCulture);
+            _flickerDetectedIndicator.Fill = detectedCount > 0 ? Brushes.Red : new SolidColorBrush(Color.FromRgb(0xB8, 0xBD, 0xC2));
+        }
+
+        private int GetDetectedFlickerCount()
+        {
+            return _flickerLogEvents.Count(entry =>
+                string.Equals(entry.Status, FlickerDetectionStatus.Detected.ToString(), StringComparison.Ordinal));
         }
 
         private static string GetFlickerLogsDirectory()
@@ -6255,7 +6279,7 @@ namespace VilsSharpX
                 return;
 
             bool active = _flickerInjection.IsActive;
-            _flickerInjectButton.Content = active ? "⏹ Stop" : "Inject Flicker";
+            _flickerInjectButton.Content = active ? "⏹ Stop" : "Inject Fault";
             _flickerInjectButton.Background = active
                 ? new SolidColorBrush(Color.FromRgb(0xCC, 0x33, 0x33))
                 : Brushes.DodgerBlue;

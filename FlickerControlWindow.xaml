@@ -28,7 +28,7 @@
                     </Grid.ColumnDefinitions>
                     <StackPanel Orientation="Horizontal">
                         <TextBlock Text="▣" FontWeight="Bold" Foreground="DarkBlue" Margin="0,0,5,0" />
-                        <TextBlock Text="Flicker Monitoring" FontWeight="Bold" Foreground="Black" />
+                        <TextBlock Text="Monitor" FontWeight="Bold" Foreground="Black" />
                     </StackPanel>
                     <Border x:Name="StatusBadge" Grid.Column="1" Background="#EDEDED" CornerRadius="12" Padding="9,3">
                         <TextBlock x:Name="StatusHeaderText" Text="Idle" Foreground="#666666" FontWeight="SemiBold" />
@@ -62,14 +62,27 @@
                         </ContextMenu>
                     </ListView.ContextMenu>
                 </ListView>
-                <StackPanel Grid.Row="1" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,8,0,0">
-                    <Button x:Name="ClearFlickerLogButton" Content="Clear" Click="ClearFlickerLogButton_Click"
-                            Padding="12,4" Margin="0,0,6,0" />
-                    <Button x:Name="SaveFlickerLogButton" Content="💾 Save" Click="SaveFlickerLogButton_Click"
-                            Padding="10,4" Margin="0,0,6,0" />
+                <Grid Grid.Row="1" Margin="5,8,0,0">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                        <Ellipse x:Name="FlickerDetectedIndicator" Width="10" Height="10"
+                                 VerticalAlignment="Center" Fill="#B8BDC2" Margin="0,0,4,0" />
+                        <TextBlock Text="Flickers detected:" VerticalAlignment="Center" />
+                        <TextBlock x:Name="FlickerDetectedCountText" Text="0" Margin="4,0,4,0"
+                                   VerticalAlignment="Center" FontWeight="SemiBold" />
+                    </StackPanel>
+                    <StackPanel Grid.Column="1" Orientation="Horizontal">
+                        <Button x:Name="ClearFlickerLogButton" Content="Clear" Click="ClearFlickerLogButton_Click"
+                                Padding="12,4" Margin="0,0,6,0" />
+                        <Button x:Name="SaveFlickerLogButton" Content="💾 Save" Click="SaveFlickerLogButton_Click"
+                                Padding="10,4" Margin="0,0,6,0" />
                         <Button x:Name="OpenFlickerFolderButton" Content="📂" Click="OpenFlickerFolderButton_Click"
-                            Padding="8,4" ToolTip="Open Flicker detections folder" />
-                </StackPanel>
+                                Padding="8,4" ToolTip="Open Flicker detections folder" />
+                    </StackPanel>
+                </Grid>
             </Grid>
         </GroupBox>
 
@@ -77,7 +90,7 @@
             <GroupBox.Header>
                 <StackPanel Orientation="Horizontal">
                     <TextBlock Text="⚡" FontWeight="Bold" Foreground="DarkBlue" Margin="0,0,5,0" />
-                    <TextBlock Text="Flicker Control" FontWeight="Bold" Foreground="Black" />
+                    <TextBlock Text="Configuration and Control" FontWeight="Bold" Foreground="Black" />
                 </StackPanel>
             </GroupBox.Header>
             <Grid x:Name="InjectionControlsHost" Margin="0,4,0,0" />

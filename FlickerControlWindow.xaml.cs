@@ -2,6 +2,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
 using System.Windows.Media;
+using System.Windows.Shapes;
 using System;
 
 namespace VilsSharpX
@@ -28,6 +29,8 @@ namespace VilsSharpX
         public Button FlickerClearLogButton => ClearFlickerLogButton;
         public Button FlickerSaveLogButton => SaveFlickerLogButton;
         public Button FlickerOpenFolderButton => OpenFlickerFolderButton;
+        public TextBlock FlickerDetectedCountTextBlock => FlickerDetectedCountText;
+        public Ellipse FlickerDetectedIndicatorEllipse => FlickerDetectedIndicator;
         public TextBlock FlickerInfoText => InfoText;
         public ListView FlickerEventLogView => FlickerEventLog;
         public Grid FlickerInjectionControlsHost => InjectionControlsHost;

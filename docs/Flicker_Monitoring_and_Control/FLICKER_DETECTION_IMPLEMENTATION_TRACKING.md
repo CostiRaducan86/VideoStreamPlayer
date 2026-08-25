@@ -11,9 +11,9 @@
 
 | Item | Status | Current behavior |
 | --- | --- | --- |
-| Flickering Frames Threshold | [x] | Configurable `1..250`, default `10`; used by simulation and real detection |
+| Detection Threshold | [x] | Configurable `1..250`, default `10`; used by simulation and real detection |
 | Deviation Trigger | [x] | Configurable `0..255`; applies symmetrically to positive and negative deviations |
-| Flickering Polarity | [x] | Simulator-only `Dark` / `Bright` text fault |
+| Injection Polarity | [x] | Simulator-only `Dark` / `Bright` text fault |
 | Duration control | [x] | Removed; flicker timing is frame-based |
 | Active comparison modes | [x] | Detector is independent of `LSM-LVDS` and `LSM-AVTP`; those modes remain contextual UI views |
 | Detector reset | [x] | Reset when a new injection starts |
@@ -94,7 +94,7 @@
 - [x] Keep Flicker Monitoring and Control separate from the LVDS simulation controls.
 - [x] Define the independent `AVTP LVDS Simulation Control` window in `AvtpLvdsSimulationControlWindow.xaml`.
 - [x] Keep the Flicker window fixed at `620 x 580` pixels after removing the LVDS section.
-- [x] Place the `Clear` and `Save` log actions inside the Flickering Monitor group below the table.
+- [x] Place the `Clear` and `Save` log actions inside the Monitor group below the table.
 - [x] Place the Open Folder icon action immediately after Save in the monitor action row.
 - [x] Separate panel symbols from title text so symbols use `DarkBlue` and titles use `Black`.
 - [x] Add the horizontal separator between the injection description and its controls.
