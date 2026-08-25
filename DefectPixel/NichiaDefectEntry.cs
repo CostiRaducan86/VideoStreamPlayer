@@ -39,7 +39,7 @@ public sealed class NichiaDefectEntry : IEquatable<NichiaDefectEntry>
     public int PixelId0 { get; set; }
 
     /// <summary>1-based pixel ID for display, PixelId0 + 1.</summary>
-    public int PixelIdDisplay { get; set; }
+    public int PixelIdDisplay => PixelId0 + 1;
 
     /// <summary>Defect type (Dark or Bright).</summary>
     public NichiaDefectType DefectType { get; set; }
@@ -63,7 +63,6 @@ public sealed class NichiaDefectEntry : IEquatable<NichiaDefectEntry>
         X = x;
         Y = y;
         PixelId0 = y * 256 + x;
-        PixelIdDisplay = PixelId0 + 1;
         DefectType = defectType;
     }
 

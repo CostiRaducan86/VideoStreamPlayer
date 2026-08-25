@@ -105,14 +105,9 @@ public partial class OsramDefectControlWindow : Window
     {
         if (m_suppressCoordSync)
             return;
-        if (!int.TryParse(PixelIdInput.Text, out int pixelIdDisplay))
+        if (!int.TryParse(PixelIdInput.Text, out int pixelIdDisplay)
+            || !DefectPixelUiMath.TryGetCoordinatesFromDisplayId(pixelIdDisplay, PreviewW, PreviewH, out int x, out int y))
             return;
-        if (pixelIdDisplay < 1 || pixelIdDisplay > PreviewW * PreviewH)
-            return;
-
-        int pixelId0 = pixelIdDisplay - 1;
-        int x = pixelId0 % PreviewW;
-        int y = pixelId0 / PreviewW;
 
         m_suppressCoordSync = true;
         try
@@ -134,12 +129,10 @@ public partial class OsramDefectControlWindow : Window
     {
         if (m_suppressCoordSync)
             return;
-        if (!int.TryParse(XCoordInput.Text, out int x) || x < 0 || x >= PreviewW)
+        if (!int.TryParse(XCoordInput.Text, out int x)
+            || !int.TryParse(YCoordInput.Text, out int y)
+            || !DefectPixelUiMath.TryGetDisplayId(x, y, PreviewW, PreviewH, out int pixelIdDisplay))
             return;
-        if (!int.TryParse(YCoordInput.Text, out int y) || y < 0 || y >= PreviewH)
-            return;
-
-        int pixelIdDisplay = y * PreviewW + x + 1;
 
         m_suppressCoordSync = true;
         try
@@ -767,13 +760,7 @@ public partial class OsramDefectControlWindow : Window
     /// <summary>Smallest unused slot index (max used + 1, or 0 when the list is empty).</summary>
     private int NextFreeSlot()
     {
-        int max = -1;
-        foreach (var d in m_store.GetActiveDefects())
-        {
-            if (d.Slot > max)
-                max = d.Slot;
-        }
-        return max + 1;
+        return DefectPixelUiMath.GetNextFreeSlot(m_store.GetActiveDefects().Select(d => d.Slot));
     }
 
     /// <summary>Reads the Defect Type + Expected State currently selected in the form.</summary>

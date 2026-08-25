@@ -40,7 +40,7 @@ public sealed class OsramDefectEntry : IEquatable<OsramDefectEntry>
     public int PixelId0 { get; set; }
 
     /// <summary>1-based pixel ID for LVDS display (user-facing)</summary>
-    public int PixelIdDisplay { get; set; }
+    public int PixelIdDisplay => PixelId0 + 1;
 
     /// <summary>LED expected state: 0 = OFF, 1 = ON</summary>
     public int PxState { get; set; }
@@ -53,7 +53,7 @@ public sealed class OsramDefectEntry : IEquatable<OsramDefectEntry>
     /// PXSTATE == 1 (LED expected ON) AND PXDIAG != 0 (some defect).
     /// In this case, LED is ON but defective, making it appear dark.
     /// </summary>
-    public bool DarkVisibleCandidate { get; set; }
+    public bool DarkVisibleCandidate => (PxState == 1) && (DefectType != OsramDefectType.None);
 
     public OsramDefectEntry() { }
 
@@ -76,10 +76,8 @@ public sealed class OsramDefectEntry : IEquatable<OsramDefectEntry>
         X = x;
         Y = y;
         PixelId0 = pixelId0;
-        PixelIdDisplay = pixelId0 + 1;
         PxState = pxState;
         DefectType = defectType;
-        DarkVisibleCandidate = (pxState == 1) && (defectType != OsramDefectType.None);
     }
 
     public override bool Equals(object? obj) => Equals(obj as OsramDefectEntry);

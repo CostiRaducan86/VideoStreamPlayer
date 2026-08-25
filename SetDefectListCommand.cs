@@ -58,46 +58,7 @@ public static class SetDefectListCommand
         IReadOnlyList<OsramDefectEntry> defects,
         Action<string>? log = null)
     {
-        defects ??= [];
-        int count = Math.Min(defects.Count, MaxDefects);
-
-        int frameLen = Math.Max(MinFrameSize, HeaderOffset + count * BytesPerDefect);
-        var pkt = new byte[frameLen];
-
-        // Dst MAC: broadcast
-        pkt[0] = pkt[1] = pkt[2] = pkt[3] = pkt[4] = pkt[5] = 0xFF;
-
-        // Src MAC: locally-administered (same as other CM commands)
-        pkt[6] = 0x02; pkt[7] = 0x0A; pkt[8] = 0xF0;
-        pkt[9] = 0x4E; pkt[10] = 0x49; pkt[11] = 0x02;
-
-        // EtherType
-        pkt[12] = (byte)(Ethertype >> 8);
-        pkt[13] = (byte)(Ethertype & 0xFF);
-
-        // Command header
-        pkt[14] = (byte)(MagicCommand >> 8);
-        pkt[15] = (byte)(MagicCommand & 0xFF);
-        pkt[16] = CmdSetDefectList;
-        pkt[17] = enable ? (byte)0x01 : (byte)0x00;
-        pkt[18] = (byte)count;
-
-        for (int i = 0; i < count; i++)
-        {
-            var d = defects[i];
-            int slot = Math.Clamp(d.Slot, 0, 63);
-            int x = Math.Clamp(d.X, 0, 319);
-            int y = Math.Clamp(d.Y, 0, 79);
-            int pxState = d.PxState != 0 ? 1 : 0;
-            int pxDiag = (int)d.DefectType & 0x03;
-
-            int b = HeaderOffset + i * BytesPerDefect;
-            pkt[b + 0] = (byte)slot;
-            pkt[b + 1] = (byte)((x >> 8) & 0xFF);
-            pkt[b + 2] = (byte)(x & 0xFF);
-            pkt[b + 3] = (byte)y;
-            pkt[b + 4] = (byte)((pxState << 2) | pxDiag);
-        }
+        var pkt = SetDefectListPacketBuilder.BuildOsramPacket(enable, defects);
 
         var existing = CaptureDeviceList.Instance
             .OfType<LibPcapLiveDevice>()
@@ -117,7 +78,7 @@ public static class SetDefectListCommand
             for (int i = 0; i < 3; i++)
                 txDev.SendPacket(pkt);
 
-            log?.Invoke($"[cmd] Sent SET_DEFECT_LIST → enable={(enable ? 1 : 0)} count={count}");
+            log?.Invoke($"[cmd] Sent SET_DEFECT_LIST → enable={(enable ? 1 : 0)} count={pkt[18]}");
         }
         catch (Exception ex)
         {
@@ -150,43 +111,7 @@ public static class SetDefectListCommand
         IReadOnlyList<NichiaDefectEntry> defects,
         Action<string>? log = null)
     {
-        defects ??= [];
-        int count = Math.Min(defects.Count, MaxNichiaDefects);
-
-        int frameLen = Math.Max(MinFrameSize, HeaderOffset + count * NichiaBytesPerDefect);
-        var pkt = new byte[frameLen];
-
-        // Dst MAC: broadcast
-        pkt[0] = pkt[1] = pkt[2] = pkt[3] = pkt[4] = pkt[5] = 0xFF;
-
-        // Src MAC: locally-administered (same as other CM commands)
-        pkt[6] = 0x02; pkt[7] = 0x0A; pkt[8] = 0xF0;
-        pkt[9] = 0x4E; pkt[10] = 0x49; pkt[11] = 0x02;
-
-        // EtherType
-        pkt[12] = (byte)(Ethertype >> 8);
-        pkt[13] = (byte)(Ethertype & 0xFF);
-
-        // Command header
-        pkt[14] = (byte)(MagicCommand >> 8);
-        pkt[15] = (byte)(MagicCommand & 0xFF);
-        pkt[16] = CmdSetDefectListNichia;
-        pkt[17] = enable ? (byte)0x01 : (byte)0x00;
-        pkt[18] = (byte)count;
-
-        for (int i = 0; i < count; i++)
-        {
-            var d = defects[i];
-            int idx = Math.Clamp(d.PixelId0, 0, NichiaDefectEntry.TotalPixels - 1);
-            int type = d.DefectType == NichiaDefectType.Bright ? 1 : 0;
-            int segPair = d.SegmentPair & 0x01;
-
-            int b = HeaderOffset + i * NichiaBytesPerDefect;
-            pkt[b + 0] = (byte)((idx >> 8) & 0xFF);
-            pkt[b + 1] = (byte)(idx & 0xFF);
-            pkt[b + 2] = (byte)type;
-            pkt[b + 3] = (byte)segPair;
-        }
+        var pkt = SetDefectListPacketBuilder.BuildNichiaPacket(enable, defects);
 
         var existing = CaptureDeviceList.Instance
             .OfType<LibPcapLiveDevice>()
@@ -206,7 +131,7 @@ public static class SetDefectListCommand
             for (int i = 0; i < 3; i++)
                 txDev.SendPacket(pkt);
 
-            log?.Invoke($"[cmd] Sent SET_DEFECT_LIST (Nichia) → enable={(enable ? 1 : 0)} count={count}");
+            log?.Invoke($"[cmd] Sent SET_DEFECT_LIST (Nichia) → enable={(enable ? 1 : 0)} count={pkt[18]}");
         }
         catch (Exception ex)
         {
@@ -217,4 +142,5 @@ public static class SetDefectListCommand
             txDev.Close();
         }
     }
+
 }

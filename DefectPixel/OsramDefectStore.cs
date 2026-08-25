@@ -13,6 +13,8 @@ namespace VilsSharpX.DefectPixel;
 /// </summary>
 public class OsramDefectStore
 {
+    public const int MaxDefects = 64;
+
     /// <summary>Active defects (key: pixelId0, value: defect entry).</summary>
     private readonly Dictionary<int, OsramDefectEntry> m_activeDefects = [];
 
@@ -32,6 +34,11 @@ public class OsramDefectStore
             throw new ArgumentException($"Invalid Y coordinate: {defect.Y}", nameof(defect));
         if (defect.Slot < 0 || defect.Slot > 63)
             throw new ArgumentException($"Invalid slot: {defect.Slot}", nameof(defect));
+        if (defect.PixelId0 != defect.Y * 320 + defect.X)
+            throw new ArgumentException($"Pixel ID does not match coordinates: {defect.PixelId0}", nameof(defect));
+
+        if (!m_activeDefects.ContainsKey(defect.PixelId0) && m_activeDefects.Count >= MaxDefects)
+            throw new InvalidOperationException($"Defect table full (max {MaxDefects} defects)");
 
         m_activeDefects[defect.PixelId0] = defect;
         DiagnosticLogger.Log($"[DefectStore] Added OSRAM defect: {defect}");

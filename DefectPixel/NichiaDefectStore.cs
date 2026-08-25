@@ -12,6 +12,8 @@ namespace VilsSharpX.DefectPixel;
 /// </summary>
 public class NichiaDefectStore
 {
+    public const int MaxDefects = 64;
+
     /// <summary>Active defects, keyed by 0-based pixel index.</summary>
     private readonly Dictionary<int, NichiaDefectEntry> m_activeDefects = [];
 
@@ -27,6 +29,11 @@ public class NichiaDefectStore
             throw new System.ArgumentException($"Invalid X coordinate: {defect.X}", nameof(defect));
         if (defect.Y < 0 || defect.Y > NichiaDefectEntry.MaxY)
             throw new System.ArgumentException($"Invalid Y coordinate: {defect.Y}", nameof(defect));
+        if (defect.PixelId0 != defect.Y * 256 + defect.X)
+            throw new System.ArgumentException($"Pixel ID does not match coordinates: {defect.PixelId0}", nameof(defect));
+
+        if (!m_activeDefects.ContainsKey(defect.PixelId0) && m_activeDefects.Count >= MaxDefects)
+            throw new System.InvalidOperationException($"Defect table full (max {MaxDefects} defects)");
 
         m_activeDefects[defect.PixelId0] = defect;
         DiagnosticLogger.Log($"[NichiaDefectStore] Added defect: {defect}");
