@@ -135,9 +135,12 @@ public sealed class FlickerDetector
 
             absoluteDeviationSum += absoluteDeviation;
             deviatedPixelCount++;
+            // Use two independent comparisons so that both extremes are tracked correctly.
+            // The previous else-if caused maxNegativeDeviation to be skipped whenever the
+            // same pixel also updated maxPositiveDeviation.
             if (deviation > maxPositiveDeviation)
                 maxPositiveDeviation = deviation;
-            else if (deviation < maxNegativeDeviation)
+            if (deviation < maxNegativeDeviation)
                 maxNegativeDeviation = deviation;
         }
 
@@ -216,6 +219,8 @@ public sealed class FlickerDetector
         {
             _cooldownFrames = Math.Max(1, (int)Math.Round(
                 _configuration.CooldownMilliseconds * AssumedCameraFrameRate / 1000.0));
+            // Capture a single timestamp so that LastEventUtc and the EventId suffix are
+            // always in sync, regardless of scheduling jitter between the two DateTime.UtcNow calls.
             SetStatus(FlickerDetectionStatus.Detected, peak, eventFrames, DateTime.UtcNow);
             return false;
         }
@@ -277,8 +282,10 @@ public sealed class FlickerDetector
             LastEventUtc = eventUtc ?? _snapshot.LastEventUtc,
             LastMeasuredMetric = sample.MaxAbsoluteDeviation,
             DeviationTrigger = _configuration.DeviationTrigger,
+            // Derive the EventId from eventUtc (passed by the caller) rather than a second
+            // DateTime.UtcNow call, so the ID suffix always matches LastEventUtc exactly.
             EventId = status == FlickerDetectionStatus.Detected
-                ? $"FLK-{DateTime.UtcNow:yyyyMMdd-HHmmssfff}"
+                ? $"FLK-{(eventUtc ?? DateTime.UtcNow):yyyyMMdd-HHmmssfff}"
                 : _snapshot.EventId,
             MaxPositiveDeviation = sample.MaxPositiveDeviation,
             MaxNegativeDeviation = sample.MaxNegativeDeviation,
