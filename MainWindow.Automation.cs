@@ -22,9 +22,11 @@ namespace VilsSharpX
         private double _statMeanAbsDiff;
         private int _statAboveDeadband;   // == total_pixels_dev
         private int _statTotalDarkPixels;
+        private int _statBrightPixels;
+        private int _statFlickers;
 
         /// <summary>Stores the most recent comparison statistics for the automation API.</summary>
-        private void StoreComparisonStats(int maxDiff, int minDiff, double meanAbsDiff, int aboveDeadband, int totalDarkPixels)
+        private void StoreComparisonStats(int maxDiff, int minDiff, double meanAbsDiff, int aboveDeadband, int totalDarkPixels, int brightPixels, int flickers)
         {
             lock (_statsLock)
             {
@@ -33,6 +35,8 @@ namespace VilsSharpX
                 _statMeanAbsDiff = meanAbsDiff;
                 _statAboveDeadband = aboveDeadband;
                 _statTotalDarkPixels = totalDarkPixels;
+                _statBrightPixels = brightPixels;
+                _statFlickers = flickers;
             }
         }
 
@@ -154,7 +158,9 @@ namespace VilsSharpX
                     MaxNegativeDev = Math.Min(0, _statMinDiff),
                     AveragePixelsDev = _statMeanAbsDiff,
                     TotalPixelsDev = _statAboveDeadband,
-                    TotalDarkPixels = _statTotalDarkPixels
+                    TotalDarkPixels = _statTotalDarkPixels,
+                    BrightPixels = _statBrightPixels,
+                    Flickers = _statFlickers
                 };
             }
         }

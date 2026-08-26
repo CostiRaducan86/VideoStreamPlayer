@@ -96,6 +96,12 @@ namespace VilsSharpX.Api
 
         [JsonPropertyName("dark_pixels")]
         public int TotalDarkPixels { get; set; }
+
+        [JsonPropertyName("bright_pixels")]
+        public int BrightPixels { get; set; }
+
+        [JsonPropertyName("flickers")]
+        public int Flickers { get; set; }
     }
 
     /// <summary>

@@ -216,13 +216,34 @@ namespace VilsSharpX
         /// </summary>
         private string FormatComparisonStats(int maxDiff, int minDiff, double meanAbsDiff, int aboveDeadband, int totalDarkPixels)
         {
-            // Capture the latest stats so the automation API can read them off-thread.
-            StoreComparisonStats(maxDiff, minDiff, meanAbsDiff, aboveDeadband, totalDarkPixels);
-
             string modeLabel = ComparisonModeLabels[Math.Clamp(_comparisonMode, 0, ComparisonModeLabels.Length - 1)];
             int brightPixels = GetInjectedBrightPixelCount();
             int detectedFlickers = GetDetectedFlickerCount();
-            return $"[{modeLabel}]: max_pos_dev={Math.Max(0, maxDiff)} | max_neg_dev={Math.Min(0, minDiff)} | avg_dev={meanAbsDiff:F0} | total_pixels_dev={aboveDeadband} | dark_pixels={totalDarkPixels} | bright_pixels={brightPixels} | flickers = {detectedFlickers}";
+            // Capture the latest stats so the automation API can read them off-thread.
+            StoreComparisonStats(maxDiff, minDiff, meanAbsDiff, aboveDeadband, totalDarkPixels, brightPixels, detectedFlickers);
+
+            LblDiffMode.Text = $"[{modeLabel}]";
+            LblMaxPositiveDev.Text = $"max_pos_dev={Math.Max(0, maxDiff)}";
+            LblMaxNegativeDev.Text = $"max_neg_dev={Math.Min(0, minDiff)}";
+            LblAverageDev.Text = $"avg_dev={meanAbsDiff:F0}";
+            LblTotalPixelsDev.Text = $"total_pixels_dev={aboveDeadband}";
+            LblDarkPixels.Text = $"dark_pixels={totalDarkPixels}";
+            LblBrightPixels.Text = $"bright_pixels={brightPixels}";
+            LblFlickers.Text = $"flickers={detectedFlickers}";
+            return string.Empty;
+        }
+
+        private void ResetComparisonStatsDisplay()
+        {
+            string modeLabel = ComparisonModeLabels[Math.Clamp(_comparisonMode, 0, ComparisonModeLabels.Length - 1)];
+            LblDiffMode.Text = $"[{modeLabel}]";
+            LblMaxPositiveDev.Text = "max_pos_dev=0";
+            LblMaxNegativeDev.Text = "max_neg_dev=0";
+            LblAverageDev.Text = "avg_dev=0";
+            LblTotalPixelsDev.Text = "total_pixels_dev=0";
+            LblDarkPixels.Text = "dark_pixels=0";
+            LblBrightPixels.Text = "bright_pixels=0";
+            LblFlickers.Text = "flickers=0";
         }
 
         /// <summary>
@@ -409,6 +430,7 @@ namespace VilsSharpX
 
             // Apply hardware constraints after settings are loaded
             ApplyModeConstraints();
+            ResetComparisonStatsDisplay();
         }
 
         /// <summary>
@@ -594,7 +616,7 @@ namespace VilsSharpX
                 if (LblB != null) LblB.Text = "";
                 if (LblC != null) LblC.Text = "";
                 if (LblD != null) LblD.Text = "";
-                if (LblDiffStats != null) LblDiffStats.Text = "";
+                ResetComparisonStatsDisplay();
                 if (LblRunInfoC != null) LblRunInfoC.Text = "";
             }
         }
@@ -3188,8 +3210,8 @@ namespace VilsSharpX
             {
                 Array.Clear(_diffBgr);
                 BitmapUtils.Blit(_wbD, _diffBgr, w * 3);
-                if (LblDiffStats != null)
-                    LblDiffStats.Text = "Comparison warming up...";
+                if (LblDiffMode != null)
+                    LblDiffMode.Text = "Comparison warming up...";
                 ApplyNoSignalUiState(noSignal: false);
                 return;
             }
@@ -3201,8 +3223,8 @@ namespace VilsSharpX
                 out var totalDarkPixels);
             BitmapUtils.Blit(_wbD, _diffBgr, w * 3);
 
-            if (LblDiffStats != null)
-                LblDiffStats.Text = FormatComparisonStats(maxDiff, minDiff, meanAbsDiff, aboveDeadband, totalDarkPixels);
+            if (LblDiffMode != null)
+                FormatComparisonStats(maxDiff, minDiff, meanAbsDiff, aboveDeadband, totalDarkPixels);
 
             ApplyNoSignalUiState(noSignal: false);
         }
@@ -3481,6 +3503,7 @@ namespace VilsSharpX
         private void BtnStop_Click(object sender, RoutedEventArgs e)
         {
             SendBlackAndStop("STOP");
+            ResetLvdsStatusForNewSession();
         }
 
         private void ChkLoopPlaying_Changed(object sender, RoutedEventArgs e)
@@ -4790,12 +4813,13 @@ namespace VilsSharpX
                 _recordingManager.TryEnqueueFrame(a.Data, b.Data, dCopy);
             }
 
-            if (LblDiffStats != null)
+            if (LblDiffMode != null)
             {
                 CaptureFlickerCandidateFrames(a, b);
-                LblDiffStats.Text = comparisonReady
-                    ? FormatComparisonStats(maxDiff, minDiff, meanAbsDiff, aboveDeadband, totalDarkPixels)
-                    : "Comparison warming up...";
+                if (comparisonReady)
+                    FormatComparisonStats(maxDiff, minDiff, meanAbsDiff, aboveDeadband, totalDarkPixels);
+                else
+                    LblDiffMode.Text = "Comparison warming up...";
             }
 
             // Per-pane no-signal visibility.
