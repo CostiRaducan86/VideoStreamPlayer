@@ -6361,9 +6361,6 @@ namespace VilsSharpX
                 _flickerThresholdTextBox.IsEnabled = active && !_flickerInjection.IsActive;
             if (_flickerPolarityToggle != null)
                 _flickerPolarityToggle.IsEnabled = active && !_flickerInjection.IsActive;
-            window.FlickerClearLogButton.IsEnabled = active;
-            window.FlickerSaveLogButton.IsEnabled = active;
-            window.FlickerOpenFolderButton.IsEnabled = active;
             Brush controlBackground = active ? Brushes.White : new SolidColorBrush(Color.FromRgb(0xE3, 0xE6, 0xE8));
             Brush controlBorder = active ? new SolidColorBrush(Color.FromRgb(0xAB, 0xAD, 0xB3)) : new SolidColorBrush(Color.FromRgb(0xB8, 0xBD, 0xC2));
             Brush controlForeground = active ? Brushes.Black : new SolidColorBrush(Color.FromRgb(0x8A, 0x90, 0x96));

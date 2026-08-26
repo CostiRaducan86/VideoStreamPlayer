@@ -2,7 +2,7 @@
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="Flicker Monitoring and Control"
-        Width="620" Height="600"
+        Width="580" Height="600"
         WindowStartupLocation="CenterScreen"
         ResizeMode="NoResize">
     <Grid Margin="10">
