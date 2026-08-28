@@ -29,6 +29,7 @@
 #include "IfxScuWdt.h"
 #include "Ifx_Cfg_Ssw.h"
 #include "can_uart_bridge.h"
+#include "can_uart_master.h"
 
 extern IfxCpu_syncEvent cpuSyncEvent;
 
@@ -55,5 +56,6 @@ void core2_main(void)
     while(1)
     {
         can_uart_bridge_tick();
+        can_uart_master_tick();
     }
 }

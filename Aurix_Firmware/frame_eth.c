@@ -23,6 +23,15 @@
 #include "Stm/Std/IfxStm.h"
 #include <string.h>  /* memcpy, memset */
 
+/* The receive buffer array and the tail-pointer wrap logic both assume the ring
+ * depth iLLD was compiled with.  A mismatch would corrupt memory silently. */
+#if (FE_RX_DESCRIPTORS != IFXGETH_MAX_RX_DESCRIPTORS)
+#error "FE_RX_DESCRIPTORS must match IFXGETH_MAX_RX_DESCRIPTORS (see Configurations/Ifx_Cfg.h)"
+#endif
+#if (FE_TX_DESCRIPTORS != IFXGETH_MAX_TX_DESCRIPTORS)
+#error "FE_TX_DESCRIPTORS must match IFXGETH_MAX_TX_DESCRIPTORS"
+#endif
+
 /* ==================== MAC addresses ==================== */
 static const uint8 s_srcMac[6] = { 0x02, 0x0A, 0xF0, 0x4E, 0x49, 0x01 };  /* locally-administered */
 static const uint8 s_dstMac[6] = { 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF };  /* broadcast */
@@ -101,7 +110,7 @@ FeStats g_feStats;
  * full ring re-init is required (same effect as a winIDEA reset+run).
  * On a genuinely silent link RBU never re-latches, so this never false-fires. */
 #define FE_DMA_STATUS_RBU            (1u << 7)
-#define FE_RX_STALL_MS               2000u
+#define FE_RX_STALL_MS               200u
 /* CAN-diag Ethernet TX pacing. In ECU↔SmartVisio↔LSM + Recording the monitor
  * produces a high record rate; unpaced TX floods the single GETH TX channel
  * and keeps CPU0 busy in the TX spin, so the LVDS RX DMA ping-pong buffers are
@@ -715,7 +724,12 @@ void frame_eth_init(FrameEthDevice device)
     config.mtl.txQueue[0].txQueueSize    = IfxGeth_QueueSize_2560Bytes;
     config.mtl.rxQueue[0].queueEnable    = TRUE;
     config.mtl.rxQueue[0].storeAndForward = TRUE;
-    config.mtl.rxQueue[0].rxQueueSize    = IfxGeth_QueueSize_2560Bytes;
+    /* Full 8 KB to the single RX queue.  In store-and-forward the MAC holds a
+     * complete packet in the FIFO before the DMA moves it, so 2560 bytes buffer
+     * less than two 1330-byte AVTP packets: a 20-packet burst then overflows the
+     * FIFO even though descriptors are still free (RBU never sets, but
+     * GETH_RX_FIFO_OVERFLOW_PACKETS climbs).  8192 bytes hold six packets. */
+    config.mtl.rxQueue[0].rxQueueSize    = IfxGeth_QueueSize_8192Bytes;
     config.mtl.rxQueue[0].rxDmaChannelMap = IfxGeth_RxDmaChannel_0;
 
     /* DMA: 1 TX channel, 1 RX channel */
@@ -864,6 +878,12 @@ void frame_eth_init(FrameEthDevice device)
 
 /* ==================== Device switching ==================== */
 
+void frame_eth_set_pass_all_multicast(boolean enable)
+{
+    GETH_MAC_PACKET_FILTER.B.PM = enable ? 1u : 0u;
+    g_feStats.macPassAllMulticast = GETH_MAC_PACKET_FILTER.B.PM;
+}
+
 void frame_eth_set_device(FrameEthDevice device)
 {
     apply_device_params(device);
@@ -961,6 +981,16 @@ void frame_eth_push_osram_frame(const uint8 *pixels, uint32 len)
 {
     if (len > FE_MAX_FRAME_BYTES)
         len = FE_MAX_FRAME_BYTES;
+
+    /* An OSRAM frame is larger than s_txFrameBuf, so the transmitter fragments
+     * straight out of the assembly buffer over several main-loop passes.
+     * Writing the buffer it is still reading would put a torn frame on the
+     * wire, so skip this push instead. */
+    if ((s_txActive != 0u) && (s_txPixels == s_framePtr[s_assembleIdx]))
+    {
+        g_feStats.pushSkippedTxBusy++;
+        return;
+    }
 
     /* Copy into assembly buffer and mark ready immediately */
     memcpy(s_framePtr[s_assembleIdx], pixels, len);
@@ -1321,6 +1351,9 @@ boolean frame_eth_send_can_diag_pending(void)
 #include "lvds_fault_inject.h"
 #include "defect_inject.h" /* defect_inject_set_list() */
 #include "nichia_defect_inject.h" /* nichia_defect_inject_set_list() */
+#include "lvds_tx.h"        /* lvds_tx_enable/disable() */
+#include "avtp_rx.h"        /* avtp_rx_handle_packet() */
+#include "can_uart_master.h" /* Direct Control Mode LSM master */
 
 void frame_eth_poll_rx(void)
 {
@@ -1347,6 +1380,18 @@ void frame_eth_poll_rx(void)
 
         processedThisPass = 1u;   /* RX ring is making progress */
 
+        /* The packet length lives in the descriptor write-back format and must
+         * be read before the buffer is handed over, so a short packet can never
+         * be parsed together with stale bytes left in the ring buffer. */
+        uint32 rxLen;
+        {
+            volatile IfxGeth_RxDescr *descr =
+                IfxGeth_Eth_getActualRxDescriptor(&s_geth, IfxGeth_RxDmaChannel_0);
+            rxLen = (uint32)descr->RDES3.W.PL;
+            if (rxLen > FE_RX_BUF_SIZE)
+                rxLen = FE_RX_BUF_SIZE;
+        }
+
         uint8 *pRxBuf = (uint8 *)IfxGeth_Eth_getReceiveBuffer(&s_geth, IfxGeth_RxDmaChannel_0);
         if (pRxBuf == NULL_PTR)
         {
@@ -1359,7 +1404,16 @@ void frame_eth_poll_rx(void)
         /* Ethernet header: [12..13] = EtherType */
         uint16 etherType = ((uint16)pRxBuf[12] << 8) | pRxBuf[13];
 
-        if (etherType == FE_ETHERTYPE)
+        /* AVTP pixel stream for the Direct Control Mode generator.  VLAN tags
+         * are handled inside the reassembler, so both tagged and untagged
+         * frames reach it. */
+        if ((etherType == AVTP_ETHERTYPE) ||
+            (etherType == AVTP_VLAN_TPID) ||
+            (etherType == AVTP_VLAN_TPID_STACKED))
+        {
+            (void)avtp_rx_handle_packet(pRxBuf, rxLen);
+        }
+        else if (etherType == FE_ETHERTYPE)
         {
             /* Protocol header: [14..15] = Magic */
             uint16 magic = ((uint16)pRxBuf[14] << 8) | pRxBuf[15];
@@ -1440,12 +1494,49 @@ void frame_eth_poll_rx(void)
                         if (lvds_fault_is_active())
                             lvds_fault_clear();
 
+                        /* Leaving Direct Control Mode: stop the local LVDS
+                         * generator and give P02.2 back to the GPIO idle level
+                         * BEFORE the TTL selector returns to the ECU source. */
+                        if (ctrlEnum != ADAPTER_MODE_DIRECT)
+                        {
+                            can_uart_master_stop();
+                            /* The PC repeats SET_ADAPTER_MODE, so the receive
+                             * path is only rebuilt on the actual transition. */
+                            if (lvds_tx_is_enabled())
+                            {
+                                lvds_tx_disable();
+                                device_mode_restore_rx_path();
+                            }
+                            frame_eth_set_pass_all_multicast(FALSE);
+                        }
+
                         /* Route the bus FIRST (set CAN_SEL), then start or
                          * stop the active forwarding bridge. */
                         adapter_ctrl_apply(ctrlEnum, canEnum);
                         can_uart_fault_clear();
                         can_uart_bridge_set_active(
                             (canEnum == CAN_UART_ECU_SMARTVISIO_LSM) ? TRUE : FALSE);
+
+                        /* Entering Direct Control Mode: the selector already
+                         * points at the local source and P02.2 still idles
+                         * HIGH, so ASCLIN1 can safely take the pin over. */
+                        if (ctrlEnum == ADAPTER_MODE_DIRECT)
+                        {
+                            if (lvds_tx_enable(device_mode_get()))
+                            {
+                                avtp_rx_reset();
+                                /* The AVTP multicast destination is only
+                                 * accepted while the generator needs it. */
+                                frame_eth_set_pass_all_multicast(TRUE);
+                                lvds_tx_set_source(LVDS_TX_SOURCE_STREAM);
+                            }
+
+                            /* CAN_SEL already routes the bus through the AURIX
+                             * transceivers and the forwarding bridge is off, so
+                             * the master can drive the LSM side alone. */
+                            if (device_mode_get() == FE_DEVICE_OSRAM)
+                                can_uart_master_start();
+                        }
                     }
                 }
                 else if (cmdId == FE_CMD_CAN_UART_FAULT)
@@ -1551,6 +1642,30 @@ void frame_eth_poll_rx(void)
             adapter_ctrl_set_can_bridge(FALSE);
         else
             can_uart_bridge_set_active(TRUE);
+    }
+
+    /* ---- Publish the freed descriptors to the DMA ----
+     * IfxGeth_Eth_freeReceiveBuffer() only hands the descriptor back (OWN = 1)
+     * and advances the software pointer; it never moves RXDESC_TAIL_POINTER.
+     * The EQoS receive DMA stops when it reaches the tail, so on a busy ring it
+     * suspends and stays suspended: IfxGeth_Eth_wakeupReceiver() only restarts
+     * it when the receive-process-stopped flag is set, which an RBU suspend does
+     * not set.  The result was a complete receive stall every few seconds until
+     * the watchdog re-initialised the ring.
+     * Moving the tail to the last descriptor we returned keeps the whole ring
+     * minus one slot available to the DMA. */
+    if (processedThisPass != 0u)
+    {
+        volatile IfxGeth_RxDescr *base =
+            IfxGeth_Eth_getBaseRxDescriptor(&s_geth, IfxGeth_RxDmaChannel_0);
+        volatile IfxGeth_RxDescr *cur =
+            IfxGeth_Eth_getActualRxDescriptor(&s_geth, IfxGeth_RxDmaChannel_0);
+        volatile IfxGeth_RxDescr *tail =
+            (cur == base) ? &base[FE_RX_DESCRIPTORS - 1u] : (cur - 1);
+
+        IfxGeth_dma_setRxDescriptorTailPointer(s_geth.gethSFR,
+                                               IfxGeth_RxDmaChannel_0,
+                                               (uint32)tail);
     }
 
     /* ---- RX freeze watchdog (DMA hardware evidenced, traffic-independent) ----

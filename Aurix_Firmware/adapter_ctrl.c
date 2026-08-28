@@ -96,6 +96,17 @@ void adapter_ctrl_prepare_ttl_local_idle(void)
     pin_set(PIN_TTL_FROM_LOCAL, TRUE);
 }
 
+void adapter_ctrl_ttl_local_take_gpio(void)
+{
+    /* Drive the output latch HIGH first, so switching the pin away from the
+     * ASCLIN1 TX alternate function cannot produce a spurious start bit. */
+    pin_set(PIN_TTL_FROM_LOCAL, TRUE);
+    IfxPort_setPinModeOutput(PIN_TTL_FROM_LOCAL,
+                             IfxPort_OutputMode_pushPull,
+                             IfxPort_OutputIdx_general);
+    pin_set(PIN_TTL_FROM_LOCAL, TRUE);
+}
+
 void adapter_ctrl_set_ttl_source(adapter_ttl_source_t source)
 {
     if (source == ADAPTER_TTL_LOCAL)

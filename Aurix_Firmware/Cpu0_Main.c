@@ -43,12 +43,16 @@
 #include "can_diag.h"
 #include "can_hw.h"
 #include "can_uart_bridge.h"
+#include "can_uart_master.h"
 #include "rxmon.h"
 #include "osram_frame.h"
 #include "frame_eth.h"
 #include "device_mode.h"
 #include "adapter_ctrl.h"
 #include "lvds_fault_inject.h"
+#include "lvds_tx.h"
+#include "avtp_rx.h"
+#include "direct_mode.h"
 
 /* STM timing */
 #include "Stm/Std/IfxStm.h"
@@ -171,6 +175,11 @@ static void lvds_recovery_tick(void)
     uint32 progress = lvds_progress_counter(device);
     uint64 now = stm_now64();
 
+    /* In Direct Control Mode the AURIX is the LVDS source and ASCLIN1 is
+     * configured for transmit, so there is no receive path to recover. */
+    if (lvds_tx_is_enabled())
+        return;
+
     if (device != s_lvdsLastDevice)
     {
         s_lvdsLastDevice       = device;
@@ -255,6 +264,13 @@ void core0_main(void)
      * from the ECU to the LSM and vice versa. */
     adapter_ctrl_init();
 
+    /* Direct Control Mode LVDS generator (ASCLIN1 TX on P02.2).
+     * Stays disarmed until a SET_ADAPTER_MODE command selects Direct control. */
+    lvds_tx_init();
+    avtp_rx_init();
+    direct_mode_init();
+    can_uart_master_init();
+
     /* Boot default: forwarding bridge inactive so Direct ECU↔LSM
      * has CAN-UART communication without waiting for a UI command.*/
     can_uart_bridge_set_active(FALSE);
@@ -285,6 +301,8 @@ void core0_main(void)
          * DMA descriptor ring exhaustion. */
         frame_eth_poll_rx();
         lvds_fault_tick();
+        direct_mode_tick();
+        lvds_tx_tick();
 
         /* Drain ALL completed DMA buffers before sending Ethernet.
          * This prevents data loss when frame_eth_send_pending() takes

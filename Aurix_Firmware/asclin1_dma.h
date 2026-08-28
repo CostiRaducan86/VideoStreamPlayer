@@ -87,6 +87,16 @@ void asclin1_dma_init(uint32 baud_bps, LvdsFrameMode frameMode);
 void asclin1_dma_poll_health(void);
 
 /**
+ * @brief Stop the LVDS receive path so ASCLIN1 can be reconfigured.
+ *
+ * Disables the RX DMA channel and the RX service request, then flushes the
+ * FIFO and clears the flags.  Required before switching ASCLIN1 to transmit
+ * for Direct Control Mode: the module must never be reset while a DMA channel
+ * is still armed on it.
+ */
+void asclin1_dma_stop(void);
+
+/**
  * @brief Check if a DMA buffer is ready for the parser to consume.
  * @return Pointer to completed buffer (ASCLIN1_DMA_BUFFER_SIZE bytes),
  *         or NULL_PTR if no data yet.  Resets the ready flag.

@@ -53,6 +53,13 @@ void device_mode_init(FrameEthDevice device);
  */
 void device_mode_set(FrameEthDevice device);
 
+/**
+ * Rebuild the ASCLIN1 receive path for the current device.
+ * Call when leaving Direct Control Mode: the LVDS generator reconfigured
+ * ASCLIN1 for transmit and disarmed the receive DMA channel.
+ */
+void device_mode_restore_rx_path(void);
+
 /* Queue a device change from a non-owner core. CPU0 applies it safely. */
 void device_mode_request(FrameEthDevice device);
 

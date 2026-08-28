@@ -310,6 +310,25 @@ void asclin1_dma_init(uint32 baud_bps, LvdsFrameMode frameMode)
     IfxCpu_enableInterrupts();
 }
 
+void asclin1_dma_stop(void)
+{
+    volatile Ifx_SRC_SRCR *rxSrc = IfxAsclin_getSrcPointerRx(&MODULE_ASCLIN1);
+    Ifx_DMA_TSR tsr;
+
+    /* Disable the DMA channel before touching the ASCLIN, so no pending
+     * request can write into a buffer that is about to be reconfigured. */
+    tsr.U     = 0;
+    tsr.B.DCH = 1;
+    MODULE_DMA.TSR[ASCLIN1_DMA_CHANNEL_ID].U = tsr.U;
+
+    IfxSrc_disable(rxSrc);
+    MODULE_ASCLIN1.FLAGSENABLE.U = 0u;
+    IfxAsclin_flushRxFifo(&MODULE_ASCLIN1);
+    IfxAsclin_clearAllFlags(&MODULE_ASCLIN1);
+
+    g_asclin1_dma.pCompletedBuffer = NULL_PTR;
+}
+
 void asclin1_dma_poll_health(void)
 {
     Ifx_ASCLIN *asclin = &MODULE_ASCLIN1;

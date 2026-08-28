@@ -17,6 +17,7 @@
 #include "lvds_fault_inject.h"
 #include "rxmon.h"
 #include "osram_frame.h"
+#include "lvds_tx.h"
 
 /* ==================== Internal state ==================== */
 
@@ -75,10 +76,15 @@ void device_mode_set(FrameEthDevice device)
     /* 1. Drain any pending DMA buffer (ignore it) */
     g_asclin1_dma.pCompletedBuffer = NULL_PTR;
 
-    /* 2. Reconfigure ASCLIN1 (baudrate + parity).
-     *    asclin1_dma_init() disables interrupts, reprograms ASCLIN + DMA,
-     *    then re-enables interrupts.  Safe to call again. */
-    if (device == FE_DEVICE_OSRAM)
+    /* 2. Reconfigure ASCLIN1 for the new device.
+     *    In Direct Control Mode the AURIX drives LVDS, so ASCLIN1 must stay in
+     *    transmit mode and only change baud rate and framing.  Re-arming the
+     *    receive DMA here would silently kill the generator. */
+    if (lvds_tx_is_enabled())
+    {
+        lvds_tx_enable(device);
+    }
+    else if (device == FE_DEVICE_OSRAM)
     {
         asclin1_dma_init(DM_OSRAM_BAUD, Frame_8Odd1);
     }
@@ -109,6 +115,28 @@ void device_mode_set(FrameEthDevice device)
     }
 
     s_currentDevice = device;
+}
+
+void device_mode_restore_rx_path(void)
+{
+    FrameEthDevice device = s_currentDevice;
+
+    /* lvds_tx_enable() left ASCLIN1 in transmit-only configuration with the RX
+     * DMA channel disarmed, so the receive path has to be rebuilt from zero. */
+    g_asclin1_dma.pCompletedBuffer = NULL_PTR;
+
+    if (device == FE_DEVICE_OSRAM)
+    {
+        osram_frame_init();
+        asclin1_dma_init(DM_OSRAM_BAUD, Frame_8Odd1);
+    }
+    else
+    {
+        rxmon_reset();
+        asclin1_dma_init(DM_NICHIA_BAUD, Frame_8N1);
+    }
+
+    frame_eth_reset_frame_state();
 }
 
 void device_mode_request(FrameEthDevice device)

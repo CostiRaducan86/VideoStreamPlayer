@@ -72,7 +72,7 @@
  */
 #define FE_TX_BUF_SIZE            2576u       /* match Infineon lwIP examples: 2560 + 14 + 2 */
 #define FE_TX_DESCRIPTORS         8u          /* must match IFXGETH_MAX_TX_DESCRIPTORS */
-#define FE_RX_DESCRIPTORS         8u          /* must match IFXGETH_MAX_RX_DESCRIPTORS */
+#define FE_RX_DESCRIPTORS         32u         /* must match IFXGETH_MAX_RX_DESCRIPTORS (Ifx_Cfg.h) */
 #define FE_RX_BUF_SIZE            1536u       /* must hold a full Ethernet frame (up to 1518 + alignment) */
 
 /* TX diagnostic reason codes exposed through g_feStats.txLastFailReason. */
@@ -185,6 +185,8 @@ typedef struct
     volatile uint32 macDebugRpeSts;        /* MAC_DEBUG.RPESTS (0=idle)      */
     volatile uint32 macDebugRfcfcSts;      /* MAC_DEBUG.RFCFCSTS (0=idle)    */
     volatile uint32 rxFifoOverflowPackets; /* GETH_RX_FIFO_OVERFLOW_PACKETS  */
+    volatile uint32 macPassAllMulticast;   /* MAC_PACKET_FILTER.PM mirror    */
+    volatile uint32 pushSkippedTxBusy;     /* push skipped: buffer in flight */
 } FeStats;
 
 extern FeStats g_feStats;
@@ -241,6 +243,17 @@ boolean frame_eth_send_can_diag_pending(void);
  * Reset frame assembly state (for device mode switch).
  */
 void frame_eth_reset_frame_state(void);
+
+/**
+ * Enable or disable pass-all-multicast in the MAC receive filter.
+ *
+ * The AVTP pixel stream uses the multicast destination 01:00:5E:16:00:12.
+ * With the reset filter value the MAC accepts only its own unicast address and
+ * broadcast, so the stream would be dropped.  Direct Control Mode enables this
+ * while it is armed and restores the default on exit.  Promiscuous mode is not
+ * used: it would also admit unicast traffic of other stations.
+ */
+void frame_eth_set_pass_all_multicast(boolean enable);
 
 /**
  * Poll for incoming Ethernet command packets.

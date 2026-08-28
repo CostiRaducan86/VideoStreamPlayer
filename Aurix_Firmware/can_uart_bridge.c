@@ -37,6 +37,7 @@
 #include "can_uart_fault_inject.h"
 #include "defect_inject.h"   /* in-flight ELEDERP/ELEDERS injection (LSM->ECU) */
 #include "nichia_defect_inject.h" /* in-flight PIXEL_ID/counter/flag injection (Nichia) */
+#include "can_uart_master.h" /* Direct Control Mode master consumes the LSM bytes */
 
 /* ======================== Configuration ======================== */
 
@@ -252,6 +253,24 @@ static void bridge_drain_rx(Ifx_ASCLIN *asc)
         (void)IfxAsclin_readRxData(asc);
 }
 
+/* In Direct Control Mode nothing drives the ECU segment, so its RX pin can
+ * float and flood CPU2 with noise interrupts that delay the LSM channel. */
+static void bridge_set_ecu_rx_enabled(boolean on)
+{
+    volatile Ifx_SRC_SRCR *src = IfxAsclin_getSrcPointerRx(s_ascEcu.asclin);
+
+    if (on)
+    {
+        IfxSrc_enable(src);
+    }
+    else
+    {
+        IfxSrc_disable(src);
+        bridge_drain_rx(s_ascEcu.asclin);
+        s_ascEcu.asclin->FLAGSCLEAR.U = 0xFFFu;
+    }
+}
+
 /* Re-entrancy guard so the two RX ISRs never run the pump body concurrently and
  * race on the shared relay state.  It is set/cleared with only a 2-instruction
  * interrupt disable (NOT around the whole pump). */
@@ -283,18 +302,40 @@ static void bridge_relay_pump(void)
     s_pumpBusy = 1u;
     IfxCpu_restoreInterrupts(is);
 
+    /* Clear the fill-level flags BEFORE draining.  Clearing them afterwards
+     * discards the flag that a byte arriving during the drain had just set, so
+     * that byte waits for the next one to be serviced and the tail of a burst
+     * can sit in the FIFO until it overflows. */
+    if (s_bridgeActive != 0u)
+        IfxAsclin_clearRxFifoFillLevelFlag(ecu);
+    IfxAsclin_clearRxFifoFillLevelFlag(lsm);
+
     /* RX-FIFO overflow forces a resync: a lost echo would otherwise desync the
-     * echo counters and stall the lock until the idle timeout.  Clear the
-     * sticky overflow flags, drop the polluted FIFOs and unlock. */
+     * echo counters and stall the lock until the idle timeout.  Each channel is
+     * recovered on its own; dropping the other one's FIFO as well would discard
+     * a response that is still arriving on it. */
     {
-        uint32 ecuFl = ecu->FLAGS.U;
-        uint32 lsmFl = lsm->FLAGS.U;
-        if (((ecuFl | lsmFl) & (1u << 8)) != 0u)   /* RFO on either channel */
+        uint32  ecuFl  = (s_bridgeActive != 0u) ? ecu->FLAGS.U : 0u;
+        uint32  lsmFl  = lsm->FLAGS.U;
+        boolean resync = FALSE;
+
+        if ((ecuFl & (1u << 8)) != 0u)   /* RFO on the ECU channel */
         {
             bridge_drain_rx(ecu);
-            bridge_drain_rx(lsm);
             ecu->FLAGSCLEAR.U = ecuFl & 0xFFFu;
+            resync = TRUE;
+        }
+        if ((lsmFl & (1u << 8)) != 0u)   /* RFO on the LSM channel */
+        {
+            bridge_drain_rx(lsm);
             lsm->FLAGSCLEAR.U = lsmFl & 0xFFFu;
+            resync = TRUE;
+            /* In Direct Control Mode the drained bytes belonged to the master's
+             * transaction, so the loss must be visible in its telemetry. */
+            can_uart_master_note_rx_overflow();
+        }
+        if (resync)
+        {
             s_relay     = BRIDGE_RELAY_IDLE;
             s_fwdCount  = 0u;
             s_echoCount = 0u;
@@ -321,7 +362,7 @@ static void bridge_relay_pump(void)
         }
 
         /* ---------------- ECU channel (RX from ECU) ---------------- */
-        if (ecu->RXFIFOCON.B.FILL > 0u)
+        if (s_bridgeActive != 0u && ecu->RXFIFOCON.B.FILL > 0u)
         {
             uint8 b = (uint8)IfxAsclin_readRxData(ecu);
             uint32 byteStm = IfxStm_getLower(&MODULE_STM0);
@@ -369,6 +410,14 @@ static void bridge_relay_pump(void)
             uint32 byteStm = IfxStm_getLower(&MODULE_STM0);
             s_lsmDir.rxBytes++;
             more = TRUE;
+
+            /* Direct Control Mode: no ECU to forward to.  This pump stays the
+             * single reader of the RX FIFO and hands the byte to the master,
+             * which does its own echo filtering. */
+            if (s_bridgeActive == 0u)
+            {
+                can_uart_master_feed_rx(b, byteStm);
+            }
 
             if (s_bridgeActive != 0u)
             {
@@ -450,9 +499,6 @@ static void bridge_relay_pump(void)
             }
         }
     }
-
-    IfxAsclin_clearRxFifoFillLevelFlag(ecu);
-    IfxAsclin_clearRxFifoFillLevelFlag(lsm);
 
     s_pumpBusy = 0u;
 }
@@ -1044,6 +1090,23 @@ void can_uart_bridge_tick(void)
 {
     if (g_canUartBridgeStats.initOk == 0u)
         return;
+
+    /* Safety net for a lost RX interrupt: the pump is re-entrancy guarded and
+     * returns at once when both FIFOs are empty, and the CPU2 loop is far
+     * faster than the 96 us a full 16-byte FIFO takes at 2 Mbaud. */
+    bridge_relay_pump();
+
+    /* Keep the ECU channel serviced only while it is actually bridged. */
+    {
+        static uint8 s_ecuRxOn = 0xFFu;
+        uint8        want      = (s_bridgeActive != 0u) ? 1u : 0u;
+
+        if (s_ecuRxOn != want)
+        {
+            bridge_set_ecu_rx_enabled(want != 0u);
+            s_ecuRxOn = want;
+        }
+    }
 
     can_uart_fault_tick();
 

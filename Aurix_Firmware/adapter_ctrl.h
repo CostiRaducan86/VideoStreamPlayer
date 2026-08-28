@@ -90,6 +90,11 @@ adapter_can_uart_mode_t adapter_ctrl_get_can_uart(void);
 void adapter_ctrl_prepare_ttl_local_idle(void);
 void adapter_ctrl_set_ttl_source(adapter_ttl_source_t source);
 
+/* Re-claim P02.2 as a GPIO driven HIGH (UART idle).
+ * Called after the Direct Control Mode LVDS transmitter releases the pin, so
+ * the adapter keeps seeing a stable idle level on TTL_FROM_LOCAL. */
+void adapter_ctrl_ttl_local_take_gpio(void);
+
 /* Apply the CAN UART Mode (independent of control mode). */
 void adapter_ctrl_set_can_uart(adapter_can_uart_mode_t mode);
 
