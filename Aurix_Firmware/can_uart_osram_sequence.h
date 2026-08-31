@@ -20,7 +20,7 @@
 
 typedef struct
 {
-    uint16 gapUs;          /* idle time before this request            */
+    uint32 gapUs;          /* idle time before this request            */
     uint8  len;            /* request length in bytes                  */
     uint8  expectResponse; /* 1 for reads, 0 for writes                */
     uint8  data[10];       /* request bytes, MSB first on the wire     */
@@ -28,7 +28,7 @@ typedef struct
 
 static const CanUartMasterStep s_osramStartup[] =
 {
-    { 65535u, 8u, 0u, { 0x80u, 0xA5u, 0x20u, 0x01u, 0x00u, 0x01u, 0xE5u, 0xCBu } },   /* W 0x0001 */
+    {     0u, 8u, 0u, { 0x80u, 0xA5u, 0x20u, 0x01u, 0x00u, 0x01u, 0xE5u, 0xCBu } },   /* W 0x0001 */
     { 12648u, 8u, 0u, { 0x80u, 0xA5u, 0x20u, 0x01u, 0x00u, 0x01u, 0xE5u, 0xCBu } },   /* W 0x0001 */
     {  7566u, 8u, 0u, { 0x80u, 0xA5u, 0x20u, 0x01u, 0x00u, 0x01u, 0xE5u, 0xCBu } },   /* W 0x0001 */
     {  8853u, 8u, 0u, { 0x80u, 0xA5u, 0x20u, 0x01u, 0x00u, 0x01u, 0xE5u, 0xCBu } },   /* W 0x0001 */
@@ -36,7 +36,12 @@ static const CanUartMasterStep s_osramStartup[] =
     {  9988u, 8u, 0u, { 0x80u, 0xA5u, 0x20u, 0x01u, 0x00u, 0x01u, 0xE5u, 0xCBu } },   /* W 0x0001 */
     {  9965u, 8u, 0u, { 0x80u, 0xA5u, 0x20u, 0x01u, 0x00u, 0x01u, 0xE5u, 0xCBu } },   /* W 0x0001 */
     { 10033u, 8u, 0u, { 0x80u, 0xA5u, 0x20u, 0x01u, 0x00u, 0x01u, 0xE5u, 0xCBu } },   /* W 0x0001 */
-    { 65535u, 8u, 0u, { 0x80u, 0xA5u, 0x20u, 0x00u, 0x60u, 0xF5u, 0x76u, 0x4Au } },   /* W 0x0000 */
+    /* The ECU repeats this write nine times, and the Saleae capture of the ECU
+     * bus shows a 650 ms pause before the configuration phase.  Both were lost
+     * in the generated sequence: the ninth write was missing and the pause was
+     * clipped by the former uint16 gapUs. */
+    { 10002u, 8u, 0u, { 0x80u, 0xA5u, 0x20u, 0x01u, 0x00u, 0x01u, 0xE5u, 0xCBu } },   /* W 0x0001 */
+    {649961u, 8u, 0u, { 0x80u, 0xA5u, 0x20u, 0x00u, 0x60u, 0xF5u, 0x76u, 0x4Au } },   /* W 0x0000 */
     {  1137u, 8u, 0u, { 0x80u, 0xA5u, 0x20u, 0xFCu, 0xCCu, 0xFAu, 0x49u, 0x85u } },   /* W 0x00FC */
     {  1137u, 8u, 0u, { 0x80u, 0xA5u, 0x20u, 0xFBu, 0x00u, 0xA2u, 0x44u, 0xD1u } },   /* W 0x00FB */
     {  1137u, 4u, 1u, { 0x80u, 0xA5u, 0xBEu, 0x00u } },   /* R 0x0000 */
@@ -1356,7 +1361,7 @@ static const CanUartMasterStep s_osramCycle[] =
     {   313u, 4u, 1u, { 0x80u, 0xA5u, 0xBEu, 0x10u } },   /* R 0x0010 */
 };
 
-#define CAN_UART_OSRAM_STARTUP_STEPS   1290u
+#define CAN_UART_OSRAM_STARTUP_STEPS   1291u
 #define CAN_UART_OSRAM_CYCLE_STEPS     32u
 
 #endif /* CAN_UART_OSRAM_SEQUENCE_H */

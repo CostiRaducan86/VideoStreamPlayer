@@ -1528,7 +1528,11 @@ void frame_eth_poll_rx(void)
                                 /* The AVTP multicast destination is only
                                  * accepted while the generator needs it. */
                                 frame_eth_set_pass_all_multicast(TRUE);
-                                lvds_tx_set_source(LVDS_TX_SOURCE_STREAM);
+                                /* The LSM rejects video while it is still
+                                 * booting, so the line stays idle until the
+                                 * CAN-UART start-up sequence has finished.
+                                 * direct_mode_tick() switches to the stream. */
+                                lvds_tx_set_source(LVDS_TX_SOURCE_IDLE);
                             }
 
                             /* CAN_SEL already routes the bus through the AURIX

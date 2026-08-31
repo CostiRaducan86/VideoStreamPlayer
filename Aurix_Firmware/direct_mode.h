@@ -38,6 +38,7 @@ typedef struct
     volatile uint32 mirrorSkipped;     /* mirrors skipped by the pacing policy */
     volatile uint32 submitFailed;      /* generator rejected the frame         */
     volatile uint32 cameraTriggers;    /* trigger pulses from frame-complete   */
+    volatile uint32 streamReleases;    /* video started after LSM start-up     */
 } DirectModeStats;
 
 extern DirectModeStats g_directModeStats;

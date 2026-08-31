@@ -444,11 +444,14 @@ Byte stream produced per frame (`osram_frame.h` is the authoritative reference):
 [25604..25607] CRC-32, seed 0xDEADAFFE, MSB-first, bswap32 on output
 ```
 
-- UART framing: 20 Mbaud, 8O1 (odd parity), LSB first;
+- UART framing: 20 Mbaud, **8O2** (odd parity, two stop bits), LSB first.  The ECU
+  drives the pixel line with 12-bit characters; a Saleae capture of the ECU shows a
+  600 ns byte period, 50 ns more than 8O1 would give.  Transmitting 8O1 makes the LSM
+  report `Wrong Stop Bit` and discard every frame;
 - the CRC must be computed with the existing `osram_crc32.c` implementation, so the
   transmitted stream is bit-identical to what the ECU would send;
-- serialisation time: 25608 bytes x 11 bits / 20 Mbaud = **14.08 ms**, i.e. a hard
-  ceiling of ~71 fps; at the nominal 50 fps the line is busy ~70 % of the time.
+- serialisation time: 25608 bytes x 12 bits / 20 Mbaud = **15.37 ms**, i.e. a hard
+  ceiling of ~65 fps; at the nominal 50 fps the line is busy ~77 % of the time.
 
 ### 6.6 NICHIA LVDS frame encoding
 

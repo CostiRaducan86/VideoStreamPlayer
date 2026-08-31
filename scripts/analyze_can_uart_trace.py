@@ -119,7 +119,7 @@ def emit_header(path: str, startup: list[Record], cycle: list[Record], source: s
         "",
         "typedef struct",
         "{",
-        "    uint16 gapUs;          /* idle time before this request            */",
+        "    uint32 gapUs;          /* idle time before this request            */",
         "    uint8  len;            /* request length in bytes                  */",
         "    uint8  expectResponse; /* 1 for reads, 0 for writes                */",
         f"    uint8  data[{max_len}];       /* request bytes, MSB first on the wire     */",

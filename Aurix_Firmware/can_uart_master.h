@@ -129,6 +129,13 @@ void can_uart_master_stop(void);
 /** TRUE while the master owns the LSM bus. */
 boolean can_uart_master_is_active(void);
 
+/**
+ * TRUE once the LSM has been taken through the start-up sequence, or when no
+ * master is running at all.  The ECU only starts the video stream after this
+ * point, so the LVDS generator must wait for it too.
+ */
+boolean can_uart_master_startup_done(void);
+
 /** Report that the LSM RX FIFO overflowed and its content was discarded. */
 void can_uart_master_note_rx_overflow(void);
 

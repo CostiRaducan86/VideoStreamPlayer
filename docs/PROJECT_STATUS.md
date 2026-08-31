@@ -31,7 +31,7 @@ This section is the current source of truth for session recovery. Some older sec
 ### AURIX / Firmware Baseline
 
 - Platform: AURIX TC397 TFT board.
-- LVDS pixel capture: ASCLIN1/P14.8, DMA channel 1 (Osram 20 Mbaud 8O1 / Nichia 12.5 Mbaud 8N1).
+- LVDS pixel capture: ASCLIN1/P14.8, DMA channel 1 (Osram 20 Mbaud 8O2 on the wire, received with an 8O1 configuration / Nichia 12.5 Mbaud 8N1).
 - Diagnostic UART bridge: ASCLIN5/ASCLIN4 on X103-28/29/31/34 (2 Mbaud 8O2 through Adapter_V2 transceivers; CPU2 byte relay).
 - Camera trigger: STM0 timer on P23.1 (free-run or frame-synced modes).
 - SmartVisio Adapter GPIO control: `adapter_ctrl.c/h` (ECU mode / direct mode switching).

@@ -282,6 +282,14 @@ boolean can_uart_master_is_active(void)
     return s_active;
 }
 
+boolean can_uart_master_startup_done(void)
+{
+    if (!s_active)
+        return TRUE;
+
+    return (s_phase == (uint8)CUM_PHASE_CYCLE) ? TRUE : FALSE;
+}
+
 void can_uart_master_note_rx_overflow(void)
 {
     if (s_active)

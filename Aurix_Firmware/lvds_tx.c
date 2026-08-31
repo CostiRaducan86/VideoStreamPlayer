@@ -135,7 +135,6 @@ static void asclin1_tx_configure(uint32 baud, LvdsFrameMode frameMode)
     cfg.bitTiming.medianFilter        = IfxAsclin_SamplesPerBit_three;
 
     cfg.frame.dataLength = IfxAsclin_DataLength_8;
-    cfg.frame.stopBit    = IfxAsclin_StopBit_1;
     cfg.frame.frameMode  = IfxAsclin_FrameMode_asc;
     cfg.frame.shiftDir   = IfxAsclin_ShiftDirection_lsbFirst;
 
@@ -143,18 +142,25 @@ static void asclin1_tx_configure(uint32 baud, LvdsFrameMode frameMode)
     {
         cfg.frame.parityBit  = TRUE;
         cfg.frame.parityType = IfxAsclin_ParityType_odd;
+        /* The ECU drives the Osram pixel line with 12 bit characters: the
+         * Saleae capture shows a 600 ns byte period at 20 Mbaud, 50 ns more
+         * than 8O1.  A single stop bit makes the LSM report a stop bit error
+         * and discard every frame. */
+        cfg.frame.stopBit    = IfxAsclin_StopBit_2;
     }
     else
     {
         cfg.frame.parityBit  = FALSE;
         cfg.frame.parityType = IfxAsclin_ParityType_even;
+        cfg.frame.stopBit    = IfxAsclin_StopBit_1;
     }
 
-    /* One byte per FIFO entry; request a refill once 8 of the 16 entries are
-     * free, which matches the 8-move DMA block. */
+    /* One byte per FIFO entry.  The refill threshold must leave more free
+     * entries than one DMA block carries, otherwise a block can be written
+     * into a FIFO that cannot hold it and the surplus bytes are dropped. */
     cfg.fifo.inWidth              = IfxAsclin_TxFifoInletWidth_1;
     cfg.fifo.outWidth             = IfxAsclin_RxFifoOutletWidth_1;
-    cfg.fifo.txFifoInterruptLevel = IfxAsclin_TxFifoInterruptLevel_8;
+    cfg.fifo.txFifoInterruptLevel = IfxAsclin_TxFifoInterruptLevel_4;
     cfg.fifo.rxFifoInterruptLevel = IfxAsclin_RxFifoInterruptLevel_1;
     cfg.fifo.buffMode             = IfxAsclin_ReceiveBufferMode_rxFifo;
 
