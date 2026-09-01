@@ -5,11 +5,11 @@
 SmartVisioSys / VilsSharpX is an automotive lighting investigation and visualization platform.
 It combines:
 
-* C# / WPF `.NET 8` desktop visualization and tooling
-* AURIX TC397 embedded C firmware
-* LVDS acquisition/injection and Ethernet frame transport
-* CAN-UART monitoring/injection through CAN transceiver physical layer
-* Basler/pylon camera integration and Python tooling
+* C# / WPF `.NET 8` desktop visualization and tooling.
+* AURIX TC397 embedded C firmware.
+* LVDS acquisition/injection and Ethernet frame transport.
+* CAN-UART monitoring/injection through CAN transceiver physical layer.
+* Basler/pylon camera integration and Python tooling.
 
 The developer is still building software-development experience. Prefer clear, incremental, well-explained changes.
 
