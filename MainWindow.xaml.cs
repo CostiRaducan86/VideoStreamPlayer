@@ -190,6 +190,12 @@ namespace VilsSharpX
         private int _canDiagCurrentPage = 1;
         private int _canDiagTotalPages = 1;
         private DateTime _canDiagLastRefresh = DateTime.MinValue;
+        private static readonly TimeSpan CanUartMonitoringGrayDuration = TimeSpan.FromSeconds(2);
+        private static readonly TimeSpan CanUartMonitoringGreenDuration = TimeSpan.FromMilliseconds(500);
+        private static readonly Color StatusLedRunningGreen = Color.FromRgb(0x81, 0xC7, 0x84);
+        private static readonly Color StatusLedRunningGreenStroke = Color.FromRgb(0x4C, 0xAF, 0x50);
+        private DateTime _canUartLedPhaseStartUtc = DateTime.UtcNow;
+        private bool _canUartLedPhaseGreen;
         private volatile bool _canDiagRecording;  // starts false — user presses Record to begin
         private bool _canDiagTraceLoaded;
         private DateTime _canRecordSessionStart = DateTime.MinValue; // filters stale Dispatcher-queued records
@@ -998,7 +1004,7 @@ namespace VilsSharpX
             ShowIdleGradient();
             int w = GetCurrentWidth();
             int h = GetCurrentHeight();
-            LblStatus.Text = $"Ready. Load an image (PGM/BMP/PNG; BMP/PNG are converted to Gray8 u8; will crop top-left to {w}×{h}) and press Start to begin rendering.";
+            LblStatus.Text = $"Load an image (PGM/BMP/PNG are converted to Gray8 u8; will crop top-left to {w}×{h}). Press Start to begin rendering.";
 
             LoadUiSettings();
 
@@ -1310,7 +1316,7 @@ namespace VilsSharpX
                 // Update status text with the correct (possibly reinitialized) resolution
                 int w = GetCurrentWidth();
                 int h = GetCurrentHeight();
-                LblStatus.Text = $"Ready. Load an image (PGM/BMP/PNG; BMP/PNG are converted to Gray8 u8; will crop top-left to {w}×{h}) and press Start to begin rendering.";
+                LblStatus.Text = $"Load an image (PGM/BMP/PNG are converted to Gray8 u8; will crop top-left to {w}×{h}). Press Start to begin rendering.";
             }
             finally
             {
@@ -1467,6 +1473,8 @@ namespace VilsSharpX
         {
             if (_settingsManager.IsLoading || !IsLoaded) return;
             _canUartMode = CmbCanUartMode?.SelectedIndex ?? 0;
+            _canUartLedPhaseStartUtc = DateTime.UtcNow;
+            _canUartLedPhaseGreen = false;
             if (_canUartMode == 0 && _canDiagRecording)
                 StopCanUartRecordingInternal();
             ClearActiveLvdsFaultForExternalChange();
@@ -1475,6 +1483,7 @@ namespace VilsSharpX
             SendAdapterModeCommand();
             UpdateCanDiagRecordingButtons();
             UpdateCommunicationFaultAvailability();
+            UpdateCanDiagStatusText();
         }
 
         private void ApplyDeviceTypeConstraints()
@@ -2199,20 +2208,46 @@ namespace VilsSharpX
 
         private void UpdateCanDiagStatusText()
         {
-            if (LblCanMonitorStatus == null)
+            if (CanUartStateLed == null)
                 return;
 
-            int stored = _canDiagStore.Count;
-            long packets = _canDiagCapture?.TotalPackets ?? 0;
-            long parserErrors = _canDiagCapture?.ParserErrors ?? 0;
-            string state = _canDiagCapture?.IsCapturing == true
-                ? (_canDiagRecording ? "recording" : "monitoring")
-                : "stopped";
+            if (_canUartMode == 0)
+            {
+                SetCanUartLed(System.Windows.Media.Brushes.Gray, "CAN/UART offline in ECU↔LSM mode");
+                return;
+            }
 
-            long cdMatches = _canDiagCapture?.DiagMagicMatches ?? 0;
-            string health = _canDiagWatchdogRecovering ? "recovering" : "ok";
+            if (_canDiagRecording)
+            {
+                SetCanUartLed(System.Windows.Media.Brushes.Red, "CAN/UART recording");
+                return;
+            }
 
-            LblCanMonitorStatus.Text = $"State: {state} | Stored: {stored} | Rx: {packets} | CD: {cdMatches} | ParseErr: {parserErrors} | Health: {health}";
+            if (_canDiagCapture?.IsCapturing != true)
+            {
+                SetCanUartLed(System.Windows.Media.Brushes.Gray, "CAN/UART offline");
+                return;
+            }
+
+            TimeSpan phaseDuration = _canUartLedPhaseGreen
+                ? CanUartMonitoringGreenDuration
+                : CanUartMonitoringGrayDuration;
+            if (DateTime.UtcNow - _canUartLedPhaseStartUtc >= phaseDuration)
+            {
+                _canUartLedPhaseGreen = !_canUartLedPhaseGreen;
+                _canUartLedPhaseStartUtc = DateTime.UtcNow;
+            }
+
+            SetCanUartLed(_canUartLedPhaseGreen
+                    ? new SolidColorBrush(StatusLedRunningGreen)
+                    : System.Windows.Media.Brushes.Gray,
+                "CAN/UART monitoring");
+        }
+
+        private void SetCanUartLed(System.Windows.Media.Brush brush, string toolTip)
+        {
+            CanUartStateLed.Fill = brush;
+            CanUartStateLed.ToolTip = toolTip;
         }
 
         private static string GetSelectedComboContent(System.Windows.Controls.ComboBox? combo)
@@ -2438,6 +2473,8 @@ namespace VilsSharpX
 
             _canDiagCurrentPage = 1;
             _canDiagRecording = true;
+            _canUartLedPhaseStartUtc = DateTime.UtcNow;
+            _canUartLedPhaseGreen = false;
             Interlocked.Exchange(ref _canDiagStopRequested, 0);
 
             UpdateCanDiagRecordingButtons();
@@ -2746,8 +2783,6 @@ namespace VilsSharpX
                 }
 
                 AppendDiagLog($"[trace] Saved {ordered.Count} records to {dlg.FileName}");
-                if (LblCanMonitorStatus != null)
-                    LblCanMonitorStatus.Text = $"Trace saved: {System.IO.Path.GetFileName(dlg.FileName)} ({ordered.Count} records)";
             }
             catch (Exception ex)
             {
@@ -2796,8 +2831,6 @@ namespace VilsSharpX
                 RefreshCanDiagView();
 
                 AppendDiagLog($"[trace] Loaded {records.Count} records from {dlg.FileName}");
-                if (LblCanMonitorStatus != null)
-                    LblCanMonitorStatus.Text = $"Trace loaded: {System.IO.Path.GetFileName(dlg.FileName)} ({records.Count} records)";
             }
             catch (Exception ex)
             {
@@ -3166,10 +3199,10 @@ namespace VilsSharpX
 
             bool running = lvdsFps > 0.0;
             MainEcuStateLed.Fill = new SolidColorBrush(running
-                ? Color.FromRgb(46, 125, 50)
+                ? StatusLedRunningGreen
                 : Color.FromRgb(198, 40, 40));
             MainEcuStateLed.Stroke = new SolidColorBrush(running
-                ? Color.FromRgb(27, 94, 32)
+                ? StatusLedRunningGreenStroke
                 : Color.FromRgb(142, 0, 0));
             MainEcuStateText.Text = running ? "Running" : "Stop/Failsafe";
         }
