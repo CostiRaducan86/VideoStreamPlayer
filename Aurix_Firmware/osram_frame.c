@@ -12,9 +12,8 @@
  * via frame_eth_get_assembly_buffer(). No local frame buffers are needed.
  * This saves ~51 KB of static RAM.
  *
- * Frames are forwarded to Ethernet regardless of CRC result — the CRC
- * algorithm may not be perfectly validated yet, and pixel data on the short
- * LVDS link is almost certainly correct.
+ * Frames are forwarded to Ethernet regardless of CRC result so Pane B shows
+ * the same raw behavior observed on the LVDS receiver.
  ******************************************************************************/
 
 #include "osram_frame.h"

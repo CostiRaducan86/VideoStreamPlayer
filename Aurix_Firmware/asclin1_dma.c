@@ -159,10 +159,12 @@ static void asclin1_dma_configure(uint32 baud, LvdsFrameMode frameMode)
         cfg.frame.parityType = IfxAsclin_ParityType_even;
     }
 
-    /* FIFO: trigger SRC every byte for DMA */
+    /* Request the DMA once 4 bytes are queued; one request then drains 4.
+     * At one byte per request the DMA can only match the arrival rate, so any
+     * backlog in the 16-entry FIFO is permanent and ends in an overflow. */
     cfg.fifo.inWidth              = IfxAsclin_TxFifoInletWidth_1;
     cfg.fifo.outWidth             = IfxAsclin_RxFifoOutletWidth_1;
-    cfg.fifo.rxFifoInterruptLevel = IfxAsclin_RxFifoInterruptLevel_1;
+    cfg.fifo.rxFifoInterruptLevel = IfxAsclin_RxFifoInterruptLevel_4;
     cfg.fifo.txFifoInterruptLevel = IfxAsclin_TxFifoInterruptLevel_0;
     cfg.fifo.buffMode             = IfxAsclin_ReceiveBufferMode_rxFifo;
 
@@ -239,10 +241,10 @@ static void asclin1_dma_configure_channel(void)
     chnCfg.destinationAddressIncrementDirection  = IfxDma_ChannelIncrementDirection_positive;
     chnCfg.destinationCircularBufferEnabled      = FALSE;
 
-    /* 8-bit moves */
+    /* 8-bit moves, 4 per transfer: transferCount counts transfers, not bytes. */
     chnCfg.moveSize      = IfxDma_ChannelMoveSize_8bit;
-    chnCfg.blockMode     = IfxDma_ChannelMove_1;
-    chnCfg.transferCount = ASCLIN1_DMA_BUFFER_SIZE;
+    chnCfg.blockMode     = IfxDma_ChannelMove_4;
+    chnCfg.transferCount = ASCLIN1_DMA_BUFFER_SIZE / ASCLIN1_DMA_MOVES_PER_REQUEST;
 
     /* Hardware request from ASCLIN RX */
     chnCfg.requestMode            = IfxDma_ChannelRequestMode_oneTransferPerRequest;

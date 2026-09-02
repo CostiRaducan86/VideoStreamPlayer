@@ -18,10 +18,7 @@
  * State machine:
  *   HUNT_H0 → HUNT_H1 → HUNT_H2 → HUNT_H3 → READ_PIXELS → READ_CRC → emit
  *
- * On valid frame: pushes pixel data to frame_eth for Ethernet TX.
- * Frames with CRC mismatch are ALSO forwarded (CRC algorithm may not be
- * perfectly validated yet; pixel data is almost certainly correct on the
- * short shielded LVDS link).
+ * Frames are pushed to frame_eth for Ethernet TX regardless of CRC result.
  ******************************************************************************/
 
 #include "Ifx_Types.h"

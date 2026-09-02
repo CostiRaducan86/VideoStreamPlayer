@@ -28,6 +28,9 @@
  */
 #define ASCLIN1_DMA_BUFFER_SIZE   (8192u)
 
+/** Bytes drained per ASCLIN RX FIFO request; must divide the buffer size. */
+#define ASCLIN1_DMA_MOVES_PER_REQUEST (4u)
+
 /** DMA ISR priority for LVDS channel completion. */
 #define ASCLIN1_DMA_ISR_PRIO      (14u)
 
