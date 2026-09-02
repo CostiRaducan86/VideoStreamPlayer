@@ -334,6 +334,7 @@ void core0_main(void)
          * the cross-core ring into the (single-core) can_diag queue, which is
          * then sent to the PC by frame_eth_send_can_diag_pending() below. */
         can_uart_bridge_poll_out();
+        can_uart_master_poll_out();
 
         /* Send assembled frame over Ethernet (if ready) */
         frame_eth_send_pending();

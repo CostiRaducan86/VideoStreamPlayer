@@ -26,6 +26,7 @@
  ******************************************************************************/
 
 #include "Ifx_Types.h"
+#include "can_diag.h"
 
 /* Once the answer has started, a gap this long means the frame ended.  It only
  * applies between answer bytes: the LSM turnaround is far longer than one byte
@@ -149,5 +150,8 @@ void can_uart_master_tick(void);
  * Called from the bridge relay pump, which is the single RX FIFO reader.
  */
 void can_uart_master_feed_rx(uint8 b, uint32 stm);
+
+/** Drain completed Direct Control transactions into the CPU0 diagnostic queue. */
+void can_uart_master_poll_out(void);
 
 #endif /* CAN_UART_MASTER_H */

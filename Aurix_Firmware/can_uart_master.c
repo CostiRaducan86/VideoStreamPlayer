@@ -22,6 +22,8 @@
 #include "IfxCpu.h"
 #include "Asclin/Std/IfxAsclin.h"
 #include "Stm/Std/IfxStm.h"
+#include "can_hw.h"
+#include <string.h>
 
 /* ASCLIN4 is the LSM-side channel; see can_uart_bridge.c for the pin mapping. */
 #define CUM_LSM_ASCLIN      (&MODULE_ASCLIN4)
@@ -81,6 +83,13 @@ static boolean s_tailValid    = FALSE;
 
 /* STM of the first byte that is answer rather than transmit echo. */
 static uint32  s_rspFirstStm = 0u;
+
+/* Completed master transactions are produced on CPU2 and consumed on CPU0,
+ * where can_diag_push_record() is single-core owned. */
+#define CUM_OUT_RING_LEN 16u
+static volatile DiagUartFrame s_outRing[CUM_OUT_RING_LEN];
+static volatile uint16 s_outHead;
+static volatile uint16 s_outTail;
 
 /* Request of the step whose bytes are still in s_rawBuf. */
 static uint8   s_prevReq[10];
@@ -245,6 +254,8 @@ void can_uart_master_init(void)
     s_phase     = (uint8)CUM_PHASE_IDLE;
     s_stepIndex = 0u;
     s_stepState = (uint8)CUM_STEP_GAP;
+    s_outHead   = 0u;
+    s_outTail   = 0u;
 }
 
 void can_uart_master_start(void)
@@ -316,6 +327,23 @@ void can_uart_master_feed_rx(uint8 b, uint32 stm)
     s_busLastByteStm = stm;
 }
 
+void can_uart_master_poll_out(void)
+{
+    uint8 drained = 0u;
+
+    while (s_outTail != s_outHead && drained < 8u)
+    {
+        DiagUartFrame frame;
+        uint16 tail = s_outTail;
+
+        memcpy(&frame, (const void *)&s_outRing[tail], sizeof(frame));
+        __dsync();
+        s_outTail = (uint16)((tail + 1u) % CUM_OUT_RING_LEN);
+        (void)can_diag_bridge_uart_frame(&frame, CAN_DIAG_DEVICE_OSRAM);
+        drained++;
+    }
+}
+
 /* Number of leading bytes that are this step's transmit echo.
  * The adapter transceiver may or may not loop the transmission back, so it is
  * decided per transaction by comparing the captured head with the request.
@@ -335,11 +363,46 @@ static uint8 echo_offset(const CanUartMasterStep *step)
     return n;
 }
 
+static void publish_transaction(const CanUartMasterStep *step, uint8 offset, uint8 responseLen)
+{
+    DiagUartFrame frame;
+    uint8 frameLen = 0u;
+    uint8 i;
+    uint16 next;
+    uint32 firstStm = (s_rawFirstStm != 0u) ? s_rawFirstStm : s_stateEnterStm;
+
+    if (g_diagSniffEnabled == 0u)
+        return;
+
+    for (i = 0u; i < step->len && frameLen < CAN_DIAG_RAW_MAX; i++)
+        frame.data[frameLen++] = step->data[i];
+    for (i = 0u; i < responseLen && frameLen < CAN_DIAG_RAW_MAX; i++)
+        frame.data[frameLen++] = s_rawBuf[offset + i];
+
+    frame.len = frameLen;
+    frame.timestampUs = firstStm / s_ticksPerUs;
+    frame.responseDelayUs = (s_rspFirstStm != 0u)
+        ? (uint16)(((uint32)(s_rspFirstStm - s_stateEnterStm) / s_ticksPerUs) > 0xFFFFu
+            ? 0xFFFFu : (uint16)((s_rspFirstStm - s_stateEnterStm) / s_ticksPerUs))
+        : 0u;
+    frame.interFrameDelayUs = 0u;
+
+    next = (uint16)((s_outHead + 1u) % CUM_OUT_RING_LEN);
+    if (next == s_outTail)
+        return;
+
+    memcpy((void *)&s_outRing[s_outHead], &frame, sizeof(frame));
+    __dsync();
+    s_outHead = next;
+}
+
 static void finish_response(const CanUartMasterStep *step)
 {
     uint8 offset = echo_offset(step);
     uint8 len    = (uint8)(s_rawLen - offset);
     uint8 i;
+
+    publish_transaction(step, offset, (s_rspExpected != 0u) ? len : 0u);
 
     if (offset == step->len)
         g_canUartMasterStats.echoSeenCount++;
