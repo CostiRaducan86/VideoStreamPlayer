@@ -60,9 +60,9 @@ static uint32  s_gapTicks = 0u;
  * comparing the head of this buffer with the request, so the master works in
  * both cases instead of assuming one. */
 static volatile uint8  s_rawBuf[CAN_UART_MASTER_RAW_MAX];
+static volatile uint32 s_rawStm[CAN_UART_MASTER_RAW_MAX];
 static volatile uint8  s_rawLen = 0u;
 static volatile uint32 s_rawLastStm  = 0u;
-static volatile uint32 s_rawFirstStm = 0u;
 
 /* Last byte seen on the bus.  The trace gap is measured from the end of the
  * previous frame, and a request is only sent once the bus has been quiet. */
@@ -83,6 +83,9 @@ static boolean s_tailValid    = FALSE;
 
 /* STM of the first byte that is answer rather than transmit echo. */
 static uint32  s_rspFirstStm = 0u;
+static uint32  s_txFirstStm = 0u;
+static uint32  s_txEndStm = 0u;
+static uint32  s_prevPublishedEndStm = 0u;
 
 /* Completed master transactions are produced on CPU2 and consumed on CPU0,
  * where can_diag_push_record() is single-core owned. */
@@ -209,10 +212,11 @@ static void transmit_request(const CanUartMasterStep *step)
     /* Arm the capture before the first byte can come back. */
     is = IfxCpu_disableInterrupts();
     s_rawLen       = 0u;
-    s_rawFirstStm  = 0u;
     s_closedRawLen = 0u;
     s_rspFirstStm  = 0u;
     s_rspExpected  = expected_response_len(step);
+    s_txFirstStm   = txStm;
+    s_txEndStm     = txStm + us_to_ticks((uint32)step->len * CUM_BYTE_US);
     IfxCpu_restoreInterrupts(is);
 
     s_frameEndStm = txStm + us_to_ticks(
@@ -256,6 +260,7 @@ void can_uart_master_init(void)
     s_stepState = (uint8)CUM_STEP_GAP;
     s_outHead   = 0u;
     s_outTail   = 0u;
+    s_prevPublishedEndStm = 0u;
 }
 
 void can_uart_master_start(void)
@@ -273,6 +278,7 @@ void can_uart_master_start(void)
     s_closedRawLen   = 0u;
     s_rspFirstStm    = 0u;
     s_tailValid      = FALSE;
+    s_prevPublishedEndStm = 0u;
     g_canUartMasterStats.lastFullRawLen = 0u;
     s_busLastByteStm = stm_now();
     s_frameEndStm    = s_busLastByteStm;
@@ -314,8 +320,7 @@ void can_uart_master_feed_rx(uint8 b, uint32 stm)
 
     if (s_rawLen < CAN_UART_MASTER_RAW_MAX)
     {
-        if (s_rawLen == 0u)
-            s_rawFirstStm = stm;
+        s_rawStm[s_rawLen] = stm;
         s_rawBuf[s_rawLen++] = b;
     }
     else
@@ -369,7 +374,10 @@ static void publish_transaction(const CanUartMasterStep *step, uint8 offset, uin
     uint8 frameLen = 0u;
     uint8 i;
     uint16 next;
-    uint32 firstStm = (s_rawFirstStm != 0u) ? s_rawFirstStm : s_stateEnterStm;
+    uint32 firstStm = s_txFirstStm;
+    uint32 responseDelayUs = 0u;
+    uint32 interFrameDelayUs = 0u;
+    uint32 transactionEndStm;
 
     if (g_diagSniffEnabled == 0u)
         return;
@@ -381,11 +389,22 @@ static void publish_transaction(const CanUartMasterStep *step, uint8 offset, uin
 
     frame.len = frameLen;
     frame.timestampUs = firstStm / s_ticksPerUs;
-    frame.responseDelayUs = (s_rspFirstStm != 0u)
-        ? (uint16)(((uint32)(s_rspFirstStm - s_stateEnterStm) / s_ticksPerUs) > 0xFFFFu
-            ? 0xFFFFu : (uint16)((s_rspFirstStm - s_stateEnterStm) / s_ticksPerUs))
-        : 0u;
-    frame.interFrameDelayUs = 0u;
+    if (responseLen != 0u)
+    {
+        if (offset >= step->len)
+            responseDelayUs = (uint32)(s_rawStm[offset] - s_rawStm[offset - 1u]);
+        else
+            responseDelayUs = (uint32)(s_rawStm[offset] - s_txEndStm);
+        responseDelayUs /= s_ticksPerUs;
+    }
+    if (s_prevPublishedEndStm != 0u)
+    {
+        interFrameDelayUs = (uint32)(s_txFirstStm - s_prevPublishedEndStm);
+        interFrameDelayUs /= s_ticksPerUs;
+    }
+    frame.responseDelayUs = (responseDelayUs > 0xFFFFu) ? 0xFFFFu : (uint16)responseDelayUs;
+    frame.interFrameDelayUs = (interFrameDelayUs > 0xFFFFu)
+        ? 0xFFFFu : (uint16)interFrameDelayUs;
 
     next = (uint16)((s_outHead + 1u) % CUM_OUT_RING_LEN);
     if (next == s_outTail)
@@ -394,6 +413,10 @@ static void publish_transaction(const CanUartMasterStep *step, uint8 offset, uin
     memcpy((void *)&s_outRing[s_outHead], &frame, sizeof(frame));
     __dsync();
     s_outHead = next;
+    transactionEndStm = (responseLen != 0u)
+        ? s_rawStm[offset + responseLen - 1u]
+        : ((s_rawLen != 0u) ? s_rawLastStm : s_txEndStm);
+    s_prevPublishedEndStm = transactionEndStm;
 }
 
 static void finish_response(const CanUartMasterStep *step)
@@ -402,7 +425,8 @@ static void finish_response(const CanUartMasterStep *step)
     uint8 len    = (uint8)(s_rawLen - offset);
     uint8 i;
 
-    publish_transaction(step, offset, (s_rspExpected != 0u) ? len : 0u);
+    if ((s_rspExpected == 0u) || (len == s_rspExpected))
+        publish_transaction(step, offset, (s_rspExpected != 0u) ? len : 0u);
 
     if (offset == step->len)
         g_canUartMasterStats.echoSeenCount++;
@@ -414,10 +438,12 @@ static void finish_response(const CanUartMasterStep *step)
     g_canUartMasterStats.lastRspLen      = len;
     g_canUartMasterStats.lastRspExpected = s_rspExpected;
 
-    if (s_rspFirstStm != 0u)
+    if ((s_rspExpected != 0u) && (len != 0u))
     {
+        s_rspFirstStm = s_rawStm[offset];
         g_canUartMasterStats.lastRspDelayUs =
-            (uint32)(s_rspFirstStm - s_stateEnterStm) / s_ticksPerUs;
+            (uint32)(s_rspFirstStm - ((offset >= step->len)
+                ? s_rawStm[offset - 1u] : s_txEndStm)) / s_ticksPerUs;
     }
 
     for (i = 0u; i < 10u; i++)
@@ -496,7 +522,10 @@ void can_uart_master_tick(void)
                 /* A write is only echoed, if at all.  Give the bus a short
                  * moment, then move on. */
                 if ((uint32)(now - s_stateEnterStm) > us_to_ticks(CAN_UART_MASTER_QUIET_US * 2u))
+                {
+                    publish_transaction(step, 0u, 0u);
                     advance_step();
+                }
             }
             else
             {
