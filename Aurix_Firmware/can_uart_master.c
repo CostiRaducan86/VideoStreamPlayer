@@ -550,12 +550,8 @@ void can_uart_master_tick(void)
             }
             else if (got > 0u)
             {
-                /* The answer is on the wire; a gap now means it was truncated. */
-                if ((uint32)(now - s_rawLastStm) > us_to_ticks(CAN_UART_MASTER_RSP_IDLE_US))
-                {
-                    finish_response(step);
-                    advance_step();
-                }
+                /* Keep the transaction open across byte gaps until the
+                 * protocol-defined response length has arrived. */
             }
             else if ((uint32)(now - s_stateEnterStm) >
                      us_to_ticks(CAN_UART_MASTER_RSP_START_US))
