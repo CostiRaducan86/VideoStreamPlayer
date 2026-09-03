@@ -117,7 +117,7 @@ FeStats g_feStats;
  * not drained in time -> LVDS CRC errors and pane-B/TFT flicker. Pace the diag
  * TX so LVDS transport keeps priority. ECU mode has almost no monitor traffic,
  * so it is unaffected. */
-#define FE_DIAG_TX_INTERVAL_US       250u
+#define FE_DIAG_TX_INTERVAL_US       100u
 
 #define PHY_BMSR_LINK_STATUS         0x0004u
 #define PHY_BMSR_AUTONEG_COMPLETE    0x0020u

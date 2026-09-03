@@ -80,6 +80,8 @@ typedef struct
     volatile uint32 quietWaits;        /* transmissions held back for a quiet bus */
     volatile uint32 echoSeenCount;     /* transactions whose echo was on the bus */
     volatile uint32 echoAbsentCount;   /* transactions with no echo on the bus   */
+    volatile uint32 outRingDrops;      /* completed frames dropped before CPU0  */
+    volatile uint32 outRingHighWater;  /* highest number of queued output frames */
 
     volatile uint32 rxOverflows;       /* LSM RX FIFO overflows, bytes lost   */
     volatile uint32 tailBytes;         /* bytes still arriving after a closed answer */

@@ -556,7 +556,9 @@ support.
 1. Run the cyclic diagnostic requests (status/error registers) at the same cadence the
    ECU used, so watchdog-like LSM behaviour is satisfied.
 1. Publish every transaction on the existing `CD` (`0x4344`) Ethernet record path, so the
-   CAN/UART monitor UI works identically.
+  CAN/UART monitor UI works identically in ECU Mode and Direct Control Mode. In Direct
+  Control Mode the record is generated locally from the master request and the LSM
+  response; the ECU-side relay is not required.
 1. Keep the defect-injection filters usable by feeding them the LSM response bytes.
 
 ### 7.3 Frame construction
@@ -572,7 +574,9 @@ OSRAM (KEWGBXXD1U) request format is already documented in repo memory:
 [end-2..] : CRC-16, seed 0xDEAD, over bytes [2..end-2], MSB first
 ```
 
-Read requests are 4 bytes; write commands and read responses carry data plus CRC-16.
+Read requests are 4 bytes; write commands carry data plus CRC-16. The LSM response to
+an `nRegs` read contains `nRegs * 2 + 2` bytes: the register data followed by CRC-16;
+it does not repeat the four-byte request header.
 
 ### 7.4 Sequence source
 
@@ -646,10 +650,18 @@ Two timing properties drive the state machine:
 
 The end of a response is found by **counting bytes, not by waiting for bus idle**. The
 length follows from the request header: HCTRL bits 4:1 hold `nRegs - 1`, so the answer is
-`4 + nRegs * 2 + 2` bytes. The formula was checked against all 6554 read responses in the
+`nRegs * 2 + 2` bytes. The formula was checked against all 6554 read responses in the
 captured trace with no mismatch. Idle detection remains only as the fallback for a
 truncated answer, because using it as the primary rule cut long answers short and shifted
 every following step.
+
+The master captures the raw RX bytes from the moment the request is queued. At each tick,
+the raw length and the first-response timestamp are sampled atomically against the RX
+handler. This prevents a response from being closed using an intermediate length while
+the final byte is arriving. A response that starts but is incomplete remains open until
+the protocol length arrives or the absolute response timeout expires; an empty response
+is classified as a timeout. Completed transactions are copied into the CPU2-to-CPU0
+output ring and published as `CD` records by the existing diagnostic Ethernet path.
 
 Both rules matter for more than data quality: a step that waits needlessly delays the
 `W 0x0006 = 0x3100` keep-alive that the LSM expects roughly every 8.4 ms, and the device
@@ -686,7 +698,7 @@ C# senders.
 | `lvds_frame_build.c/.h` | added | Convert a Gray8 frame into the OSRAM or NICHIA byte stream (header, CRC, row framing) and render the built-in test patterns. |
 | `avtp_rx.c/.h` | added | AVTP/RVF parsing and frame reassembly from GETH RX buffers, buffers in `dsram5`. |
 | `direct_mode.c/.h` | added | Direct Control Mode pixel path: AVTP frame to generator hand-off, pane B loopback policy, camera trigger source and telemetry. |
-| `can_uart_master.c/.h` | added | Replays the ECU diagnostic sequence on ASCLIN4 from CPU2: gap, request, echo filtering, response window, timeouts. |
+| `can_uart_master.c/.h` | added | Replays the ECU diagnostic sequence on ASCLIN4 from CPU2: gap, request, echo filtering, response window, timeouts and locally generated `CD` records. |
 | `adapter_ctrl.c/.h` | changed | `adapter_ctrl_ttl_local_take_gpio()` re-claims `P02.2` as a GPIO driven HIGH when the transmitter releases it. |
 | `asclin1_dma.c/.h` | changed | `asclin1_dma_stop()` disarms the receive DMA and service request before the direction switch. |
 | `device_mode.c` | changed | A device switch while the transmitter is active reconfigures the transmitter instead of re-arming the receive DMA. |

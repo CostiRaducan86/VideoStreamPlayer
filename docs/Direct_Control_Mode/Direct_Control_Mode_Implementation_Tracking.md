@@ -1,6 +1,6 @@
 ﻿# Direct Control Mode â€” Implementation Tracking
 
-**Last updated:** 2026-08-27
+**Last updated:** 2026-09-03
 **Design reference:** [Direct_Control_Mode_Architecture.md](Direct_Control_Mode_Architecture.md)
 **Active phase:** Phase 2 closed; Phase 4 (CAN-UART master) in progress
 
@@ -25,10 +25,10 @@
 | LVDS frame generation (OSRAM) | Complete | Byte stream and CRC verified against the ECU algorithm on captured frames. |
 | LVDS frame generation (NICHIA) | Partial | Builder implemented; transmit path untested with a Nichia module. |
 | AVTP ingest on AURIX | Partial | `avtp_rx.c` implemented; hardware validation pending. |
-| CAN-UART master | Open | New `can_uart_master` module; today only a relay exists. |
-| LSM start-up sequence | Open | Must be extracted from the captured ECU traces. |
+| CAN-UART master | Complete | CPU2 replays the OSRAM sequence, captures LSM responses and exposes master telemetry. |
+| LSM start-up sequence | Complete | Extracted from the ECU trace and validated against the LSM 2.0 start-up conversation. |
 | Loopback to pane B | Partial | OSRAM path implemented; NICHIA in Phase 6. |
-| Direct Mode telemetry to PC | Open | New status record and UI consumer. |
+| Direct Mode telemetry to PC | Partial | The existing `CD` transaction record path is functional; dedicated `DS` status consumer remains open. |
 | CAN replay from `.rply` | Open | `BtnCanReplay_Click` is a stub. |
 
 ## Decisions
@@ -157,18 +157,18 @@ Measurement phase, completed. No firmware or application code was changed during
 | 4.2 | Extract the cyclic run pattern and its period | Complete | 32 transactions per super-cycle, about 33.7 ms; keep-alive `W 0x0006 = 0x3100` per group. |
 | 4.3 | Generate the replay table | Complete | `Aurix_Firmware/can_uart_osram_sequence.h`, about 12 KB of request payload. |
 | 4.4 | Add `can_uart_master.c/.h` with request scheduling on ASCLIN4 | Complete | Runs on CPU2, fed by the bridge relay pump, own echo filtering. |
-| 4.5 | Add response capture, timeout and retry handling | Complete | Idle-based response end, echo and response timeouts, telemetry in `g_canUartMasterStats`. |
-| 4.6 | Feed master transactions into the existing `CD` record path | Open | The monitor UI still shows nothing while the master drives the bus. |
+| 4.5 | Add response capture, timeout and retry handling | Complete | Response length is protocol-derived, with idle fallback for truncated answers, echo classification and response timeout telemetry in `g_canUartMasterStats`. |
+| 4.6 | Feed master transactions into the existing `CD` record path | Complete | Direct Control Record is visible in the CAN/UART monitor; requests and LSM responses are generated locally and published through Ethernet. |
 | 4.7 | Keep the defect-injection filters working on master responses | Open | OSRAM and Nichia filters. |
 | 4.8 | Implement `FE_CMD_DIRECT_CAN_SEQ` and the `.rply` replay in the UI | Open | Enables `BtnCanReplay_Click`. |
 | 4.9 | Validate the start-up sequence against the ECU trace on Saleae | Open | Byte and timing comparison. |
 | 4.10 | Re-capture an LSM 2.0 trace and diff it against the OSRAM 2.05 table | Complete | Functionally identical: 1289 versus 1290 start-up steps, the only difference being one extra initial `W 0x0001 = 0x0001` poll, and the same 32-step cycle. |
 | 4.11 | Fix the echo desynchronisation and timing fidelity | Complete | Gap measured from the last bus byte, quiet-bus gate before transmitting, response timeout cut from 5 ms to 600 us, sync validation counter. |
 | 4.12 | Re-test whether the LSM leaves failsafe | Partial | The LSM lit the grid for about two seconds after start-up, then fell back to failsafe. |
-| 4.13 | Derive the response length from the request header | Complete | `4 + nRegs * 2 + 2` from HCTRL bits 4:1, validated against all 6554 reads in the trace. |
-| 4.14 | Resynchronise on the response sync byte | Complete | A response must start with `0x80`; anything else is dropped and counted. |
+| 4.13 | Derive the response length from the request header | Complete | `nRegs * 2 + 2` from HCTRL bits 4:1, because the LSM response contains register data plus CRC and does not repeat the four-byte request header; validated against all 6554 reads in the trace. |
+| 4.14 | Classify response framing without assuming a response sync header | Complete | The request header is excluded from the LSM response; exact protocol length counts as valid, shorter data as truncated, empty data as timeout and excess data as a framing slip. |
 | 4.15 | Stop assuming the transmit echo is present | Complete | The raw stream is captured per step and the echo detected by comparing with the request. |
-| 4.16 | Re-test the cyclic keep-alive cadence | Open | Watch `responsesOk` rising, `shortResponses` and `strayBytes` near zero, and `echoAbsentCount`. |
+| 4.16 | Re-test the cyclic keep-alive cadence | Complete | Fix6 trace has 274/274 complete `HWSTAT W` blocks with 7 reads; `responseTimeouts`, `shortResponses`, `tailBytes` and output-ring drops remained zero in the corresponding Watch capture. |
 
 ## Phase 5 â€” System integration and mode transitions
 
@@ -198,7 +198,7 @@ Measurement phase, completed. No firmware or application code was changed during
 | 7.1 | Bench validation without the LSM (scope only) | Open | Architecture section 15, step 1. |
 | 7.2 | Loopback validation (pane B mirrors the generated image) | Open | Step 2. |
 | 7.3 | LSM powered, LVDS only | Open | Step 3. |
-| 7.4 | LSM full Direct Control Mode with the CAN-UART master | Open | Step 4. |
+| 7.4 | LSM full Direct Control Mode with the CAN-UART master | Complete | Fix6 trace and Watch capture confirm the LSM running with locally generated CAN-UART traffic and visible Direct Control Record output. |
 | 7.5 | 30-minute stability run with flat counters | Open | Step 5. |
 | 7.6 | Verify ECU Mode is unaffected after repeated mode switching | Open | Regression guard. |
 | 7.7 | Verify the LVDS RX/CRC counters are unaffected in ECU Mode | Open | SRI contention regression guard. |
@@ -331,3 +331,4 @@ zero bytes, which independently confirms the generated stream is byte-compatible
 | 2026-08-31 | Start order aligned with the ECU. The ECU begins the video stream about 25 ms after the LSM reaches run state, while Direct Control Mode was transmitting 1.11 s before the device was configured. The generator is now armed with source `IDLE` and `direct_mode_tick()` releases the stream only once `can_uart_master_startup_done()` reports the sequence complete. |
 | 2026-08-31 | Final root cause: the OSRAM pixel line is 8O2, not 8O1. The ECU byte period is 600 ns at 20 Mbaud, one bit more than 8O1, so the LSM was reporting `Wrong Stop Bit` and discarding every frame even after the CRC and length were correct. `asclin1_tx_configure()` now selects `IfxAsclin_StopBit_2` for OSRAM; Nichia stays at one stop bit pending its own measurement. |
 | 2026-08-31 | Validated on hardware. Byte period 600.0 ns and frame duration 15.3659 ms against the ECU reference of 15.3651 ms, all frames 25608 bytes with a valid CRC, `MASTER_STATE` stable at 0x0003 and FWC flat after the truncated frame at the start of the recording. The LSM stays lit in Direct Control Mode. |
+| 2026-09-03 | Direct Control CAN-UART Record validated. Fix6 published every locally generated request and LSM response through the existing `CD` Ethernet path: 274 of 274 complete `HWSTAT W` blocks contained exactly seven reads (100.00%), compared with 181 of 271 blocks (66.79%) in the Fix4 debug trace. The corresponding Watch capture showed `responseTimeouts=0`, `shortResponses=0`, `tailBytes=0`, `outRingDrops=0` and `queueOverruns=0`. |

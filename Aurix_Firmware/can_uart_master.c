@@ -90,6 +90,7 @@ static uint32  s_prevPublishedEndStm = 0u;
 /* Completed master transactions are produced on CPU2 and consumed on CPU0,
  * where can_diag_push_record() is single-core owned. */
 #define CUM_OUT_RING_LEN 16u
+#define CUM_OUT_DRAIN_BUDGET 15u
 static volatile DiagUartFrame s_outRing[CUM_OUT_RING_LEN];
 static volatile uint16 s_outHead;
 static volatile uint16 s_outTail;
@@ -336,7 +337,7 @@ void can_uart_master_poll_out(void)
 {
     uint8 drained = 0u;
 
-    while (s_outTail != s_outHead && drained < 8u)
+    while (s_outTail != s_outHead && drained < CUM_OUT_DRAIN_BUDGET)
     {
         DiagUartFrame frame;
         uint16 tail = s_outTail;
@@ -354,9 +355,9 @@ void can_uart_master_poll_out(void)
  * decided per transaction by comparing the captured head with the request.
  * A still-incomplete echo returns a shorter prefix, so its bytes are never
  * mistaken for the answer while the transmission is still coming back. */
-static uint8 echo_offset(const CanUartMasterStep *step)
+static uint8 echo_offset(const CanUartMasterStep *step, uint8 rawLen)
 {
-    uint8 n = (s_rawLen < step->len) ? s_rawLen : step->len;
+    uint8 n = (rawLen < step->len) ? rawLen : step->len;
     uint8 i;
 
     for (i = 0u; i < n; i++)
@@ -408,11 +409,21 @@ static void publish_transaction(const CanUartMasterStep *step, uint8 offset, uin
 
     next = (uint16)((s_outHead + 1u) % CUM_OUT_RING_LEN);
     if (next == s_outTail)
+    {
+        g_canUartMasterStats.outRingDrops++;
         return;
+    }
 
     memcpy((void *)&s_outRing[s_outHead], &frame, sizeof(frame));
     __dsync();
     s_outHead = next;
+    {
+        uint16 depth = (s_outHead >= s_outTail)
+                     ? (uint16)(s_outHead - s_outTail)
+                     : (uint16)(CUM_OUT_RING_LEN - s_outTail + s_outHead);
+        if ((uint32)depth > g_canUartMasterStats.outRingHighWater)
+            g_canUartMasterStats.outRingHighWater = depth;
+    }
     transactionEndStm = (responseLen != 0u)
         ? s_rawStm[offset + responseLen - 1u]
         : ((s_rawLen != 0u) ? s_rawLastStm : s_txEndStm);
@@ -421,9 +432,17 @@ static void publish_transaction(const CanUartMasterStep *step, uint8 offset, uin
 
 static void finish_response(const CanUartMasterStep *step)
 {
-    uint8 offset = echo_offset(step);
-    uint8 len    = (uint8)(s_rawLen - offset);
+    boolean is;
+    uint8 rawLen;
+    uint8 offset;
+    uint8 len;
     uint8 i;
+
+    is = IfxCpu_disableInterrupts();
+    rawLen = s_rawLen;
+    offset = echo_offset(step, rawLen);
+    len    = (uint8)(rawLen - offset);
+    IfxCpu_restoreInterrupts(is);
 
     if ((s_rspExpected == 0u) || (len == s_rspExpected))
         publish_transaction(step, offset, (s_rspExpected != 0u) ? len : 0u);
@@ -454,7 +473,7 @@ static void finish_response(const CanUartMasterStep *step)
 
     g_canUartMasterStats.lastRspSerial++;
 
-    s_closedRawLen = s_rawLen;
+    s_closedRawLen = rawLen;
     s_tailValid    = (s_rspExpected != 0u) ? TRUE : FALSE;
 
     if (s_rspExpected == 0u)
@@ -538,10 +557,19 @@ void can_uart_master_tick(void)
         {
             /* Only bytes past the transmit echo count towards the answer, whose
              * length follows from the request header. */
-            uint8 got = (uint8)(s_rawLen - echo_offset(step));
+            boolean is;
+            uint8 rawLen;
+            uint8 offset;
+            uint8 got;
+
+            is = IfxCpu_disableInterrupts();
+            rawLen = s_rawLen;
+            offset = echo_offset(step, rawLen);
+            got    = (uint8)(rawLen - offset);
 
             if ((got > 0u) && (s_rspFirstStm == 0u))
-                s_rspFirstStm = s_rawLastStm;
+                s_rspFirstStm = s_rawStm[offset];
+            IfxCpu_restoreInterrupts(is);
 
             if (got >= s_rspExpected)
             {
