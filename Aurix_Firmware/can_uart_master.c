@@ -87,6 +87,14 @@ static uint32  s_txFirstStm = 0u;
 static uint32  s_txEndStm = 0u;
 static uint32  s_prevPublishedEndStm = 0u;
 
+/* Keep the uploaded trace out of vtc:linear; CPU2 owns and services this table. */
+__attribute__((section(".bss.bss_cpu2")))
+static CanUartMasterStep s_uploadedStartup[CAN_UART_MASTER_UPLOADED_MAX];
+static uint16 s_uploadedStartupCount = 0u;
+static uint16 s_uploadedExpectedCount = 0u;
+static boolean s_uploadedStartupValid = FALSE;
+static boolean s_waitingForUploadedStart = FALSE;
+
 /* Completed master transactions are produced on CPU2 and consumed on CPU0,
  * where can_diag_push_record() is single-core owned. */
 #define CUM_OUT_RING_LEN 16u
@@ -120,12 +128,66 @@ static const CanUartMasterStep *current_sequence(uint32 *count)
 {
     if (s_phase == (uint8)CUM_PHASE_STARTUP)
     {
+        if (s_uploadedStartupValid)
+        {
+            *count = s_uploadedStartupCount;
+            return s_uploadedStartup;
+        }
         *count = CAN_UART_OSRAM_STARTUP_STEPS;
         return s_osramStartup;
     }
 
     *count = CAN_UART_OSRAM_CYCLE_STEPS;
     return s_osramCycle;
+}
+
+boolean can_uart_master_stage_step(uint16 index, uint16 total, uint32 gapUs,
+                                   uint8 len, uint8 expectResponse,
+                                   const uint8 *data)
+{
+    uint8 i;
+
+    if ((data == NULL_PTR) || (total == 0u) ||
+        (total > CAN_UART_MASTER_UPLOADED_MAX) || (index >= total) ||
+        (len == 0u) || (len > CAN_UART_MASTER_MAX_REQUEST_LEN))
+        return FALSE;
+
+    if ((index == 0u) || (s_uploadedExpectedCount != total))
+    {
+        s_uploadedExpectedCount = total;
+        s_uploadedStartupCount = 0u;
+        s_uploadedStartupValid = FALSE;
+    }
+
+    s_uploadedStartup[index].gapUs = gapUs;
+    s_uploadedStartup[index].len = len;
+    s_uploadedStartup[index].expectResponse = (expectResponse != 0u) ? 1u : 0u;
+    for (i = 0u; i < CAN_UART_MASTER_MAX_REQUEST_LEN; i++)
+        s_uploadedStartup[index].data[i] = (i < len) ? data[i] : 0u;
+    if ((uint16)(index + 1u) > s_uploadedStartupCount)
+        s_uploadedStartupCount = (uint16)(index + 1u);
+    return TRUE;
+}
+
+boolean can_uart_master_commit_staged(uint16 total)
+{
+    if ((total == 0u) || (total != s_uploadedExpectedCount) ||
+        (s_uploadedStartupCount != total))
+        return FALSE;
+
+    s_uploadedStartupValid = TRUE;
+    if (s_waitingForUploadedStart)
+    {
+        s_waitingForUploadedStart = FALSE;
+        can_uart_master_start();
+        return TRUE;
+    }
+    if (s_active)
+    {
+        can_uart_master_stop();
+        can_uart_master_start();
+    }
+    return TRUE;
 }
 
 static uint32 stm_now(void)
@@ -173,6 +235,8 @@ static void advance_step(void)
         if (s_phase == (uint8)CUM_PHASE_STARTUP)
         {
             s_phase = (uint8)CUM_PHASE_CYCLE;
+            /* An uploaded trace applies to one replay session only. */
+            s_uploadedStartupValid = FALSE;
             g_canUartMasterStats.startupDone++;
         }
         else
@@ -269,6 +333,8 @@ void can_uart_master_start(void)
     if (s_active)
         return;
 
+    s_waitingForUploadedStart = FALSE;
+
     s_phase     = (uint8)CUM_PHASE_STARTUP;
     s_stepIndex = 0u;
     s_active    = TRUE;
@@ -287,9 +353,23 @@ void can_uart_master_start(void)
     begin_step();
 }
 
+void can_uart_master_wait_for_uploaded_start(void)
+{
+    if (s_active)
+        can_uart_master_stop();
+
+    s_waitingForUploadedStart = TRUE;
+    s_phase = (uint8)CUM_PHASE_STARTUP;
+    s_stepIndex = 0u;
+    g_canUartMasterStats.active = 0u;
+    g_canUartMasterStats.startupDone = 0u;
+    publish_step();
+}
+
 void can_uart_master_stop(void)
 {
     s_active = FALSE;
+    s_waitingForUploadedStart = FALSE;
     s_phase  = (uint8)CUM_PHASE_IDLE;
     g_canUartMasterStats.active = 0u;
     publish_step();
@@ -302,6 +382,9 @@ boolean can_uart_master_is_active(void)
 
 boolean can_uart_master_startup_done(void)
 {
+    if (s_waitingForUploadedStart)
+        return FALSE;
+
     if (!s_active)
         return TRUE;
 

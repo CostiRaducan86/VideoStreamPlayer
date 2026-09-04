@@ -51,6 +51,8 @@
 #define FE_CMD_SET_DEFECT_LIST_NICHIA 0x05u   /* Command: set Nichia defect injection list */
 #define FE_CMD_CAN_UART_FAULT     0x06u       /* Command: CAN-UART DROP fault */
 #define FE_CMD_LVDS_FAULT         0x07u       /* Command: physical LVDS fault */
+#define FE_CMD_OSRAM_SEQ_STEP     0x08u       /* Stage one Direct Control step */
+#define FE_CMD_OSRAM_SEQ_COMMIT   0x09u       /* Activate staged startup steps */
 #define FE_HDR_LEN                18u
 #define FE_DIAG_HDR_LEN           8u
 /* v2 payload: 22 fixed bytes + 72 raw UART bytes = 94 bytes

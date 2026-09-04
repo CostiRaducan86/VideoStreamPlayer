@@ -609,7 +609,19 @@ the request bytes verbatim together with the idle gap observed before them, so t
 reproduces the ECU byte for byte instead of re-deriving CRCs and timing.
 
 PC-driven replay of a `.rply` trace remains available and overrides the built-in table
-while it runs.
+while it runs. On entry to Direct Control, the AURIX master now waits idle instead of
+starting the built-in startup table. The C# Replay command uploads one request per
+Ethernet `CM` command (`0x08`), followed by a commit command (`0x09`). A valid commit
+starts the uploaded startup sequence; after it completes, the existing 32-step cycle
+is used. This keeps the built-in table available for a future standalone AURIX/TFT
+Direct Control workflow without using it during the PC replay test.
+
+The PC-side loader rejects a trace unless it contains the OSRAM startup signature:
+the initial `W 0x0001 = 0x0001` polling prefix, the initial `W 0x0000 = 0x60F5`
+configuration write and the first `0xBE` status read. It also requires the complete
+startup boundary (1291 valid OSRAM transactions for the current OSRAM 2.0 trace).
+NormalRun-only traces, such as Fix6, are therefore rejected before any Ethernet
+sequence command is sent.
 
 Half-duplex arbitration must be preserved: the master transmits a request, then waits for
 the response window before sending the next request. Response timeout, retry count and

@@ -54,6 +54,7 @@
 /* Raw capture window: a transaction may or may not put the transmit echo on the
  * bus, so room is reserved for the longest request plus the longest response. */
 #define CAN_UART_MASTER_RAW_MAX         (10u + CAN_UART_MASTER_RSP_MAX)
+#define CAN_UART_MASTER_UPLOADED_MAX    1400u
 
 typedef enum
 {
@@ -125,6 +126,14 @@ void can_uart_master_init(void);
  * The caller must have stopped the bridge forwarding first.
  */
 void can_uart_master_start(void);
+
+/** Hold Direct Control startup until an uploaded trace is committed. */
+void can_uart_master_wait_for_uploaded_start(void);
+
+boolean can_uart_master_stage_step(uint16 index, uint16 total, uint32 gapUs,
+                                   uint8 len, uint8 expectResponse,
+                                   const uint8 *data);
+boolean can_uart_master_commit_staged(uint16 total);
 
 /** Stop driving the bus and leave the TX line idle. */
 void can_uart_master_stop(void);

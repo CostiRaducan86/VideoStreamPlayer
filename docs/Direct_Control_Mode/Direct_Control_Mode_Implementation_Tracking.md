@@ -1,4 +1,4 @@
-﻿# Direct Control Mode â€” Implementation Tracking
+﻿# Direct Control Mode Implementation Tracking
 
 **Last updated:** 2026-09-03
 **Design reference:** [Direct_Control_Mode_Architecture.md](Direct_Control_Mode_Architecture.md)
@@ -78,7 +78,7 @@ Measurement phase, completed. No firmware or application code was changed during
 - The LVDS output chain is documented end to end in architecture section 4.5.
 - The AVTP addressing is fixed and confirms the pass-all-multicast decision.
 
-## Phase 1 â€” LVDS transmit path (OSRAM first)
+## Phase 1 -> LVDS transmit path (OSRAM first)
 
 | # | Task | Status | Notes |
 | --- | --- | --- | --- |
@@ -111,7 +111,7 @@ Measurement phase, completed. No firmware or application code was changed during
 1. Switch back to ECU control and confirm `P02.2` returns to a stable HIGH and the LVDS
    receive counters resume.
 
-## Phase 2 â€” AVTP ingest on AURIX
+## Phase 2 -> AVTP ingest on AURIX
 
 | # | Task | Status | Notes |
 | --- | --- | --- | --- |
@@ -136,7 +136,7 @@ Measurement phase, completed. No firmware or application code was changed during
 | 2.19 | Raise the RX descriptor ring to hold a full burst | Complete | 32 descriptors through `IFXGETH_MAX_RX_DESCRIPTORS` in `Ifx_Cfg.h`, with a compile-time match check. |
 | 2.20 | Re-measure the residual FIFO overflow | Complete | Counters stay flat; Saleae confirms the stream is identical and correctly delayed at all four probe points. |
 
-## Phase 3 â€” Loopback and PC integration
+## Phase 3 -> Loopback and PC integration
 
 | # | Task | Status | Notes |
 | --- | --- | --- | --- |
@@ -149,7 +149,7 @@ Measurement phase, completed. No firmware or application code was changed during
 | 3.7 | Add UI interlocks (no fault injection active, AVTP source running) | Open | Blocks unsafe entry. |
 | 3.8 | Run `dotnet build` and fix warnings after the C# changes | Open | Required by the project build rules. |
 
-## Phase 4 â€” CAN-UART master
+## Phase 4 -> CAN-UART master
 
 | # | Task | Status | Notes |
 | --- | --- | --- | --- |
@@ -160,7 +160,7 @@ Measurement phase, completed. No firmware or application code was changed during
 | 4.5 | Add response capture, timeout and retry handling | Complete | Response length is protocol-derived, with idle fallback for truncated answers, echo classification and response timeout telemetry in `g_canUartMasterStats`. |
 | 4.6 | Feed master transactions into the existing `CD` record path | Complete | Direct Control Record is visible in the CAN/UART monitor; requests and LSM responses are generated locally and published through Ethernet. |
 | 4.7 | Keep the defect-injection filters working on master responses | Open | OSRAM and Nichia filters. |
-| 4.8 | Implement `FE_CMD_DIRECT_CAN_SEQ` and the `.rply` replay in the UI | Open | Enables `BtnCanReplay_Click`. |
+| 4.8 | Implement OSRAM startup upload and `.rply` replay in the UI | Complete | `BtnCanReplay_Click` sends `CM` step `0x08` packets and commit `0x09`; NormalRun-only traces are rejected. |
 | 4.9 | Validate the start-up sequence against the ECU trace on Saleae | Open | Byte and timing comparison. |
 | 4.10 | Re-capture an LSM 2.0 trace and diff it against the OSRAM 2.05 table | Complete | Functionally identical: 1289 versus 1290 start-up steps, the only difference being one extra initial `W 0x0001 = 0x0001` poll, and the same 32-step cycle. |
 | 4.11 | Fix the echo desynchronisation and timing fidelity | Complete | Gap measured from the last bus byte, quiet-bus gate before transmitting, response timeout cut from 5 ms to 600 us, sync validation counter. |
@@ -169,8 +169,10 @@ Measurement phase, completed. No firmware or application code was changed during
 | 4.14 | Classify response framing without assuming a response sync header | Complete | The request header is excluded from the LSM response; exact protocol length counts as valid, shorter data as truncated, empty data as timeout and excess data as a framing slip. |
 | 4.15 | Stop assuming the transmit echo is present | Complete | The raw stream is captured per step and the echo detected by comparing with the request. |
 | 4.16 | Re-test the cyclic keep-alive cadence | Complete | Fix6 trace has 274/274 complete `HWSTAT W` blocks with 7 reads; `responseTimeouts`, `shortResponses`, `tailBytes` and output-ring drops remained zero in the corresponding Watch capture. |
+| 4.17 | Hold the default startup during PC-driven Direct entry | Complete | AURIX waits in Direct Control until a valid uploaded trace is committed; the built-in table remains reserved for future standalone TFT operation. |
+| 4.18 | Validate startup detection for loaded traces | Complete | Requires the initial OSRAM polling/configuration signature and a complete 1291-step startup boundary; NormalRun-only traces are rejected. |
 
-## Phase 5 â€” System integration and mode transitions
+## Phase 5 -> System integration and mode transitions
 
 | # | Task | Status | Notes |
 | --- | --- | --- | --- |
@@ -181,7 +183,7 @@ Measurement phase, completed. No firmware or application code was changed during
 | 5.5 | Show Direct Mode state on the TFT UI | Open | Preserve uppercase `OSRAM` / `NICHIA`. |
 | 5.6 | Keep `Cpu0_Main.c` as a list of API calls | Open | Project firmware rule. |
 
-## Phase 6 â€” Nichia support
+## Phase 6 -> Nichia support
 
 | # | Task | Status | Notes |
 | --- | --- | --- | --- |
@@ -191,7 +193,7 @@ Measurement phase, completed. No firmware or application code was changed during
 | 6.4 | Add the Nichia CAN-UART master sequence | Open | From `trace_Nichia_StartUp_Run_*.txt`. |
 | 6.5 | Validate the Nichia Direct Mode on hardware | Open | Requires the Nichia module. |
 
-## Phase 7 â€” Validation and hardening
+## Phase 7 -> Validation and hardening
 
 | # | Task | Status | Notes |
 | --- | --- | --- | --- |

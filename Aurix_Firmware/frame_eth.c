@@ -1537,10 +1537,44 @@ void frame_eth_poll_rx(void)
 
                             /* CAN_SEL already routes the bus through the AURIX
                              * transceivers and the forwarding bridge is off, so
-                             * the master can drive the LSM side alone. */
+                             * the master can drive the LSM side alone.  In the
+                             * uploaded-trace test mode, hold the bus idle until
+                             * the PC commits the new startup sequence. */
                             if (device_mode_get() == FE_DEVICE_OSRAM)
-                                can_uart_master_start();
+                                can_uart_master_wait_for_uploaded_start();
                         }
+                    }
+                }
+                else if (cmdId == FE_CMD_OSRAM_SEQ_STEP)
+                {
+                    /* Payload: index(2), total(2), gapUs(4), len(1), read(1), data(10). */
+                    uint16 index;
+                    uint16 total;
+                    uint32 gapUs;
+                    uint8 len;
+                    uint8 expectResponse;
+
+                    if (rxLen >= 37u)
+                    {
+                        index = (uint16)(((uint16)pRxBuf[17] << 8u) | pRxBuf[18]);
+                        total = (uint16)(((uint16)pRxBuf[19] << 8u) | pRxBuf[20]);
+                        gapUs = ((uint32)pRxBuf[21] << 24u) |
+                                ((uint32)pRxBuf[22] << 16u) |
+                                ((uint32)pRxBuf[23] << 8u) | pRxBuf[24];
+                        len = pRxBuf[25];
+                        expectResponse = pRxBuf[26];
+                        (void)can_uart_master_stage_step(index, total, gapUs, len,
+                                                          expectResponse, &pRxBuf[27]);
+                    }
+                }
+                else if (cmdId == FE_CMD_OSRAM_SEQ_COMMIT)
+                {
+                    uint16 total;
+
+                    if (rxLen >= 19u)
+                    {
+                        total = (uint16)(((uint16)pRxBuf[17] << 8u) | pRxBuf[18]);
+                        (void)can_uart_master_commit_staged(total);
                     }
                 }
                 else if (cmdId == FE_CMD_CAN_UART_FAULT)

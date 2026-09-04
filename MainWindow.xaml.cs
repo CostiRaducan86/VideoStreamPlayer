@@ -2651,7 +2651,28 @@ namespace VilsSharpX
 
         private void BtnCanReplay_Click(object sender, RoutedEventArgs e)
         {
-            // Replay execution will be implemented in a later iteration.
+            if (_controlMode != 1 || !_canDiagTraceLoaded || _canDiagRecording)
+                return;
+
+            var trace = _canDiagStore.SnapshotOldestFirst(0, _canDiagStore.Count);
+            try
+            {
+                string? txDev = GetTxPcapDeviceNameOrNull();
+                if (string.IsNullOrWhiteSpace(txDev))
+                {
+                    MessageBox.Show("No Ethernet adapter selected.", "Replay", MessageBoxButton.OK, MessageBoxImage.Warning);
+                    return;
+                }
+
+                OsramStartupSequenceCommand.Send(txDev, trace, AppendDiagLog);
+                MessageBox.Show("The OSRAM start-up sequence was uploaded to AURIX.",
+                    "Replay", MessageBoxButton.OK, MessageBoxImage.Information);
+            }
+            catch (Exception ex)
+            {
+                AppendDiagLog($"[cmd] Startup replay failed: {ex.Message}");
+                MessageBox.Show(ex.Message, "Replay failed", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
         }
 
         private void SyncCanUartPageJumpText()
