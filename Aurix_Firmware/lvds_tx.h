@@ -38,6 +38,12 @@
 /** DMA moves per ASCLIN TX FIFO request; both stream sizes divide by this. */
 #define LVDS_TX_DMA_BLOCK_BYTES    8u
 
+/** Nichia rows are 260 bytes, so use four-byte DMA moves per request. */
+#define LVDS_TX_NICHIA_DMA_BLOCK_BYTES 4u
+
+/** ECU-measured idle between consecutive Nichia row packets. */
+#define LVDS_TX_NICHIA_ROW_GAP_US 10u
+
 /** Default transmit period: 20 ms = 50 fps. */
 #define LVDS_TX_DEFAULT_PERIOD_US  20000u
 
@@ -172,5 +178,21 @@ void lvds_tx_tick(void);
  * @return TRUE exactly once per completed transmission
  */
 boolean lvds_tx_take_frame_complete(void);
+
+/**
+ * Consume the frame-complete notification and return the exact UART stream
+ * transmitted for the completed LVDS frame.
+ *
+ * The returned pointer remains valid until the next transmit start.  The
+ * caller must consume it immediately and must not modify the buffer.
+ *
+ * @param[out] stream      Pointer to the completed LVDS UART stream
+ * @param[out] streamBytes Number of valid bytes in the stream
+ * @param[out] device      Device geometry used to build the stream
+ * @return TRUE exactly once per completed transmission
+ */
+boolean lvds_tx_take_completed_stream(const uint8 **stream,
+                                      uint32 *streamBytes,
+                                      FrameEthDevice *device);
 
 #endif /* LVDS_TX_H */

@@ -53,6 +53,9 @@
 #define FE_CMD_LVDS_FAULT         0x07u       /* Command: physical LVDS fault */
 #define FE_CMD_OSRAM_SEQ_STEP     0x08u       /* Stage one Direct Control step */
 #define FE_CMD_OSRAM_SEQ_COMMIT   0x09u       /* Activate staged startup steps */
+#define FE_CMD_NICHIA_SEQ_STEP    0x0Au       /* Stage one Nichia Direct Control step */
+#define FE_CMD_NICHIA_SEQ_COMMIT  0x0Bu       /* Activate staged Nichia startup steps */
+#define FE_CMD_NICHIA_SEQ_HARDCODED 0x0Cu     /* Start built-in Nichia startup table */
 #define FE_HDR_LEN                18u
 #define FE_DIAG_HDR_LEN           8u
 /* v2 payload: 22 fixed bytes + 72 raw UART bytes = 94 bytes
@@ -218,6 +221,14 @@ void frame_eth_set_device(FrameEthDevice device);
 void frame_eth_push_nichia_row(uint8 row, const uint8 *pixels);
 
 /**
+ * Push a complete Nichia frame for Direct Control loopback/display.
+ * Does not trigger the camera; Direct Mode synchronizes the camera to LVDS TX.
+ *
+ * @param pixels 256x64 Gray8 pixels, row-major
+ */
+void frame_eth_push_nichia_frame(const uint8 *pixels);
+
+/**
  * Push a complete Osram frame (320×80 pixels) for Ethernet TX.
  * Called from osram_frame.c when a valid/complete frame is parsed.
  *
@@ -225,6 +236,18 @@ void frame_eth_push_nichia_row(uint8 row, const uint8 *pixels);
  * @param len     Pixel data length (must be 25600)
  */
 void frame_eth_push_osram_frame(const uint8 *pixels, uint32 len);
+
+/**
+ * Decode a completed Direct Control LVDS UART stream and publish its pixels.
+ * The stream is copied into the normal Ethernet/display assembly buffer.
+ *
+ * @param device Target LSM geometry used by the stream
+ * @param stream Completed LVDS UART stream from lvds_tx
+ * @param len    Number of valid bytes in stream
+ */
+void frame_eth_push_lvds_stream(FrameEthDevice device,
+                                const uint8 *stream,
+                                uint32 len);
 
 /**
  * If a frame is ready, fragment and send it over Ethernet.

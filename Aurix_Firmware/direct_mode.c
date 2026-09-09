@@ -18,6 +18,7 @@
 #include "camera_trigger.h"
 #include "can_uart_master.h"
 #include "Stm/Std/IfxStm.h"
+#include <string.h>
 
 DirectModeStats g_directModeStats;
 
@@ -26,6 +27,11 @@ volatile uint8 g_directLoopbackMode = (uint8)DM_LOOPBACK_EVERY_FRAME;
 static uint32  s_lastMirrorTick = 0u;
 static uint32  s_mirrorInterval = 0u;
 static boolean s_streamReleased = FALSE;
+
+/* Keep the Direct Nichia crop out of CPU0 DSPR, which is shared with the
+ * Ethernet and UI state.  CPU0 and GETH can both access the CPU0 LMU buffer. */
+__attribute__((section(".bss.lmubss_cpu0")))
+static uint8 s_nichiaFrame[FE_NICHIA_FRAME_BYTES];
 
 void direct_mode_init(void)
 {
@@ -52,6 +58,10 @@ static boolean mirror_due(uint32 now)
 void direct_mode_tick(void)
 {
     const uint8 *frame;
+    const uint8 *lvdsFrame;
+    const uint8 *completedStream;
+    uint32 completedStreamBytes;
+    FrameEthDevice completedDevice;
     uint32 now;
 
     if (!lvds_tx_is_enabled())
@@ -75,11 +85,27 @@ void direct_mode_tick(void)
 
     /* No ECU frame arrives on ASCLIN1 here, so the camera is synchronised to
      * the frame the AURIX itself put on the wire. */
-    if (lvds_tx_take_frame_complete())
+    if (lvds_tx_take_completed_stream(&completedStream,
+                                      &completedStreamBytes,
+                                      &completedDevice))
     {
         camera_trigger_set_mode(CAM_TRIG_SYNC);
         camera_trigger_fire_sync();
         g_directModeStats.cameraTriggers++;
+
+        now = (uint32)IfxStm_getLower(&MODULE_STM0);
+        if (mirror_due(now))
+        {
+            frame_eth_push_lvds_stream(completedDevice,
+                                       completedStream,
+                                       completedStreamBytes);
+            s_lastMirrorTick = now;
+            g_directModeStats.framesMirrored++;
+        }
+        else
+        {
+            g_directModeStats.mirrorSkipped++;
+        }
     }
 
     if (!lvds_tx_needs_frame())
@@ -89,23 +115,23 @@ void direct_mode_tick(void)
     if (frame == NULL_PTR)
         return;
 
-    if (!lvds_tx_submit_frame(frame, AVTP_RVF_FRAME_BYTES))
+    lvdsFrame = frame;
+    if (device_mode_get() == FE_DEVICE_NICHIA)
+    {
+        /* AVTP carries 320x80 pixels; Nichia uses the first 256x64 pixels
+         * with the same linear padding convention as the PC monitor. */
+        memcpy(s_nichiaFrame, frame, FE_NICHIA_FRAME_BYTES);
+        lvdsFrame = s_nichiaFrame;
+    }
+
+    if (!lvds_tx_submit_frame(lvdsFrame,
+                              (device_mode_get() == FE_DEVICE_NICHIA)
+                              ? FE_NICHIA_FRAME_BYTES
+                              : AVTP_RVF_FRAME_BYTES))
     {
         g_directModeStats.submitFailed++;
         return;
     }
 
     g_directModeStats.framesForwarded++;
-
-    now = (uint32)IfxStm_getLower(&MODULE_STM0);
-    if (mirror_due(now) && (device_mode_get() == FE_DEVICE_OSRAM))
-    {
-        frame_eth_push_osram_frame(frame, AVTP_RVF_FRAME_BYTES);
-        s_lastMirrorTick = now;
-        g_directModeStats.framesMirrored++;
-    }
-    else
-    {
-        g_directModeStats.mirrorSkipped++;
-    }
 }

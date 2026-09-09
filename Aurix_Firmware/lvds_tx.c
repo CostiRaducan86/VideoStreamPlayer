@@ -19,6 +19,7 @@
 
 #include "Ifx_Types.h"
 #include "IfxCpu.h"
+#include "IfxCpu_Irq.h"
 #include "Dma/Dma/IfxDma_Dma.h"
 #include "Asclin/Asc/IfxAsclin_Asc.h"
 #include "Asclin/Std/IfxAsclin.h"
@@ -33,12 +34,16 @@
 #include "adapter_ctrl.h"     /* adapter_ctrl_ttl_local_take_gpio() */
 #include "device_mode.h"      /* DM_OSRAM_BAUD / DM_NICHIA_BAUD */
 
+#define LVDS_TX_NICHIA_ROW_WIRE_US 208u
+#define LVDS_TX_NICHIA_ROW_TIMER_COMPARATOR IfxStm_Comparator_0
+#define LVDS_TX_NICHIA_ROW_TIMER_PRIO 15u
+
 /* ===================== Module state ===================== */
 
 LvdsTxStats g_lvdsTxStats;
 
 /* Debugger-writable pattern selector; see lvds_tx.h. */
-volatile uint8 g_lvdsTxTestPattern = (uint8)LVDS_TEST_PATTERN_BLACK;
+volatile uint8 g_lvdsTxTestPattern = (uint8)LVDS_TEST_PATTERN_GRID4;
 volatile uint8 g_lvdsTxForceTestPattern = 0u;
 
 /* Ping-pong stream buffers on CPU4's DSPR: no other master accesses that bank,
@@ -51,6 +56,7 @@ uint8 g_lvdsTxStream[2][LVDS_BUILD_MAX_STREAM_BYTES];
 static IfxAsclin_Asc      s_asc1Tx;
 static IfxDma_Dma         s_dmaHandle;
 static IfxDma_Dma_Channel s_dmaChannel;
+static IfxStm_CompareConfig s_rowTimerConfig;
 
 static boolean        s_enabled     = FALSE;
 static FrameEthDevice s_device      = FE_DEVICE_OSRAM;
@@ -75,6 +81,11 @@ static uint32 s_stallGuardTicks = 0u;
 static uint32 s_lastSubmitTick = 0u;
 static uint32 s_starvationTicks = 0u;
 static boolean s_starved = FALSE;
+static volatile uint16 s_txRowIndex = 0u;
+static volatile boolean s_txRowTimerActive = FALSE;
+static void lvds_tx_start_dma(const uint8 *stream);
+
+IFX_INTERRUPT(lvds_tx_row_timer_isr, 0, LVDS_TX_NICHIA_ROW_TIMER_PRIO);
 
 /* ===================== Helpers ===================== */
 
@@ -96,6 +107,48 @@ static void refresh_period_ticks(void)
 
     s_starvationTicks =
         (uint32)IfxStm_getTicksFromMilliseconds(&MODULE_STM0, LVDS_TX_STARVATION_MS);
+}
+
+static void lvds_tx_arm_row_timer(void)
+{
+    s_rowTimerConfig.ticks =
+        (LVDS_TX_NICHIA_ROW_WIRE_US + LVDS_TX_NICHIA_ROW_GAP_US) * s_ticksPerUs;
+    IfxStm_initCompare(&MODULE_STM0, &s_rowTimerConfig);
+    s_txRowTimerActive = TRUE;
+}
+
+static void lvds_tx_stop_row_timer(void)
+{
+    IfxSrc_disable(IfxStm_getSrcPointer(&MODULE_STM0,
+                                        LVDS_TX_NICHIA_ROW_TIMER_COMPARATOR));
+    s_txRowTimerActive = FALSE;
+}
+
+void lvds_tx_row_timer_isr(void)
+{
+    if (!s_txRowTimerActive || !s_txBusy || (s_device != FE_DEVICE_NICHIA))
+        return;
+
+    if (s_txRowIndex + 1u >= FE_NICHIA_H)
+    {
+        s_txRowTimerActive = FALSE;
+        return;
+    }
+
+    s_txRowIndex++;
+    lvds_tx_start_dma(&g_lvdsTxStream[s_txIdx][s_txRowIndex *
+                             LVDS_BUILD_NICHIA_ROW_BYTES]);
+
+    if (s_txRowIndex + 1u < FE_NICHIA_H)
+    {
+        IfxStm_increaseCompare(&MODULE_STM0,
+                               LVDS_TX_NICHIA_ROW_TIMER_COMPARATOR,
+                               s_rowTimerConfig.ticks);
+    }
+    else
+    {
+        s_txRowTimerActive = FALSE;
+    }
 }
 
 static void publish_static_stats(void)
@@ -204,7 +257,7 @@ static void asclin1_tx_configure(uint32 baud, LvdsFrameMode frameMode)
 
 /* ===================== DMA channel configuration ===================== */
 
-static void lvds_tx_configure_dma(uint32 streamBytes)
+static void lvds_tx_configure_dma(uint32 transferBytes, uint32 dmaBlockBytes)
 {
     IfxDma_Dma_Config dmaCfg;
     IfxDma_Dma_ChannelConfig chnCfg;
@@ -228,8 +281,10 @@ static void lvds_tx_configure_dma(uint32 streamBytes)
     chnCfg.destinationAddressCircularRange  = IfxDma_ChannelIncrementCircular_none;
 
     chnCfg.moveSize      = IfxDma_ChannelMoveSize_8bit;
-    chnCfg.blockMode     = IfxDma_ChannelMove_8;
-    chnCfg.transferCount = (uint16)(streamBytes / LVDS_TX_DMA_BLOCK_BYTES);
+    chnCfg.blockMode     = (dmaBlockBytes == LVDS_TX_NICHIA_DMA_BLOCK_BYTES)
+                          ? IfxDma_ChannelMove_4
+                          : IfxDma_ChannelMove_8;
+    chnCfg.transferCount = (uint16)(transferBytes / dmaBlockBytes);
 
     chnCfg.requestMode            = IfxDma_ChannelRequestMode_oneTransferPerRequest;
     chnCfg.operationMode          = IfxDma_ChannelOperationMode_single;
@@ -347,6 +402,12 @@ void lvds_tx_init(void)
 {
     lvds_frame_build_init();
 
+    IfxStm_initCompareConfig(&s_rowTimerConfig);
+    s_rowTimerConfig.comparator = LVDS_TX_NICHIA_ROW_TIMER_COMPARATOR;
+    s_rowTimerConfig.comparatorInterrupt = IfxStm_ComparatorInterrupt_ir0;
+    s_rowTimerConfig.triggerPriority = LVDS_TX_NICHIA_ROW_TIMER_PRIO;
+    s_rowTimerConfig.typeOfService = IfxSrc_Tos_cpu0;
+
     s_enabled      = FALSE;
     s_source       = LVDS_TX_SOURCE_IDLE;
     s_haveFrame    = FALSE;
@@ -391,13 +452,19 @@ boolean lvds_tx_enable(FrameEthDevice device)
      * Never reset the ASCLIN module while a DMA channel is still armed on it. */
     asclin1_dma_stop();
     lvds_tx_stop_dma();
+    lvds_tx_stop_row_timer();
 
     IfxAsclin_enableModule(&MODULE_ASCLIN1);
     IfxAsclin_setSuspendMode(&MODULE_ASCLIN1, IfxAsclin_SuspendMode_none);
     asclin1_tx_reset_hardware();
 
     asclin1_tx_configure(baud, frameMode);
-    lvds_tx_configure_dma(s_streamBytes);
+    lvds_tx_configure_dma((device == FE_DEVICE_NICHIA)
+                          ? LVDS_BUILD_NICHIA_ROW_BYTES
+                          : s_streamBytes,
+                          (device == FE_DEVICE_NICHIA)
+                          ? LVDS_TX_NICHIA_DMA_BLOCK_BYTES
+                          : LVDS_TX_DMA_BLOCK_BYTES);
 
     /* initChannel arms the channel; keep it disarmed until the first frame. */
     lvds_tx_stop_dma();
@@ -413,6 +480,8 @@ boolean lvds_tx_enable(FrameEthDevice device)
     s_lastStartTick = stm_now();
     s_lastSubmitTick = s_lastStartTick;
     s_starved       = FALSE;
+    s_txRowIndex    = 0u;
+    s_txRowTimerActive = FALSE;
 
     IfxCpu_enableInterrupts();
 
@@ -429,6 +498,7 @@ void lvds_tx_disable(void)
         return;
 
     lvds_tx_stop_dma();
+    lvds_tx_stop_row_timer();
 
     /* Let the FIFO drain so the last frame is not truncated on the wire. */
     {
@@ -449,6 +519,7 @@ void lvds_tx_disable(void)
     s_haveFrame  = FALSE;
     s_freshFrame = FALSE;
     s_source     = LVDS_TX_SOURCE_IDLE;
+    s_txRowIndex = 0u;
 
     /* Hand P02.2 back to adapter_ctrl, which drives it HIGH (UART idle). */
     adapter_ctrl_ttl_local_take_gpio();
@@ -523,6 +594,21 @@ boolean lvds_tx_take_frame_complete(void)
     return result;
 }
 
+boolean lvds_tx_take_completed_stream(const uint8 **stream,
+                                      uint32 *streamBytes,
+                                      FrameEthDevice *device)
+{
+    if ((stream == NULL_PTR) || (streamBytes == NULL_PTR) || (device == NULL_PTR) ||
+        !s_frameComplete)
+        return FALSE;
+
+    *stream         = g_lvdsTxStream[s_txIdx];
+    *streamBytes    = s_streamBytes;
+    *device         = s_device;
+    s_frameComplete = FALSE;
+    return TRUE;
+}
+
 void lvds_tx_tick(void)
 {
     uint32 now;
@@ -542,16 +628,21 @@ void lvds_tx_tick(void)
     {
         if (lvds_tx_dma_done() && (MODULE_ASCLIN1.TXFIFOCON.B.FILL == 0u))
         {
-            s_txBusy        = FALSE;
-            s_frameComplete = TRUE;
-            g_lvdsTxStats.framesCompleted++;
-            g_lvdsTxStats.lastFrameUs = (uint32)(now - s_txStartTick) / s_ticksPerUs;
+            if ((s_device != FE_DEVICE_NICHIA) ||
+                (s_txRowIndex + 1u >= FE_NICHIA_H))
+            {
+                s_txBusy        = FALSE;
+                s_frameComplete = TRUE;
+                g_lvdsTxStats.framesCompleted++;
+                g_lvdsTxStats.lastFrameUs = (uint32)(now - s_txStartTick) / s_ticksPerUs;
+            }
         }
         else if ((uint32)(now - s_txStartTick) > s_stallGuardTicks)
         {
             /* The transaction outlived several periods: the FIFO request chain
              * was lost.  Drop it and let the next period start a fresh frame. */
             lvds_tx_stop_dma();
+            lvds_tx_stop_row_timer();
             IfxAsclin_flushTxFifo(&MODULE_ASCLIN1);
             IfxAsclin_clearAllFlags(&MODULE_ASCLIN1);
             s_txBusy = FALSE;
@@ -564,7 +655,8 @@ void lvds_tx_tick(void)
         return;
 
     {
-        LvdsTxSource source = (g_lvdsTxForceTestPattern != 0u)
+        LvdsTxSource source = ((g_lvdsTxForceTestPattern != 0u) &&
+                              (s_source != LVDS_TX_SOURCE_IDLE))
                             ? LVDS_TX_SOURCE_TEST_PATTERN
                             : s_source;
 
@@ -613,11 +705,14 @@ void lvds_tx_tick(void)
     s_txStartTick   = now;
     s_lastStartTick = now;
     s_txBusy        = TRUE;
+    s_txRowIndex    = 0u;
 
     if (!s_freshFrame)
         g_lvdsTxStats.framesRepeated++;
     s_freshFrame = FALSE;
 
     lvds_tx_start_dma(g_lvdsTxStream[s_txIdx]);
+    if (s_device == FE_DEVICE_NICHIA)
+        lvds_tx_arm_row_timer();
     g_lvdsTxStats.framesSent++;
 }

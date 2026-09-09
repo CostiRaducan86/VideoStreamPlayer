@@ -18,6 +18,8 @@
 
 #include "can_uart_master.h"
 #include "can_uart_osram_sequence.h"
+#include "can_uart_nichia_sequence.h"
+#include "device_mode.h"
 
 #include "IfxCpu.h"
 #include "Asclin/Std/IfxAsclin.h"
@@ -34,6 +36,7 @@
  * answer is missing; lastRspDelayUs reports the measured value. */
 #define CUM_BYTE_US         6u
 #define CUM_TURNAROUND_US   100u
+#define CUM_NICHIA_BYTE_US  5u
 
 CanUartMasterStats g_canUartMasterStats;
 
@@ -88,8 +91,18 @@ static uint32  s_txEndStm = 0u;
 static uint32  s_prevPublishedEndStm = 0u;
 
 /* Keep the uploaded trace out of vtc:linear; CPU2 owns and services this table. */
+typedef struct
+{
+    uint32 gapUs;
+    uint8  len;
+    uint8  expectResponse;
+    uint8  data[CAN_UART_MASTER_NICHIA_REQ_MAX];
+} CanUartMasterRuntimeStep;
+
 __attribute__((section(".bss.bss_cpu2")))
-static CanUartMasterStep s_uploadedStartup[CAN_UART_MASTER_UPLOADED_MAX];
+static CanUartMasterStep s_uploadedOsram[CAN_UART_MASTER_UPLOADED_MAX];
+__attribute__((section(".bss.bss_cpu2")))
+static CanUartMasterRuntimeStep s_uploadedNichia[CAN_UART_MASTER_NICHIA_UPLOADED_MAX];
 static uint16 s_uploadedStartupCount = 0u;
 static uint16 s_uploadedExpectedCount = 0u;
 static boolean s_uploadedStartupValid = FALSE;
@@ -104,7 +117,12 @@ static volatile uint16 s_outHead;
 static volatile uint16 s_outTail;
 
 /* Request of the step whose bytes are still in s_rawBuf. */
-static uint8   s_prevReq[10];
+static uint8   s_prevReq[CAN_UART_MASTER_NICHIA_REQ_MAX];
+
+static boolean is_nichia_mode(void)
+{
+    return (device_mode_get() == FE_DEVICE_NICHIA) ? TRUE : FALSE;
+}
 
 /* Answer length implied by a request header:
  *   [2] HCTRL bits 4:1 hold nRegs-1
@@ -112,7 +130,7 @@ static uint8   s_prevReq[10];
  * The LSM does not repeat the request header, so the four header bytes seen in
  * a bus trace ahead of the data belong to the request, not to the answer.
  * Verified against the captured traces for the 4, 6, 8 and 34 byte answers. */
-static uint8 expected_response_len(const CanUartMasterStep *step)
+static uint8 expected_osram_response_len(const CanUartMasterStep *step)
 {
     uint8 nRegs;
 
@@ -124,21 +142,93 @@ static uint8 expected_response_len(const CanUartMasterStep *step)
     return (uint8)((nRegs * 2u) + 2u);
 }
 
-static const CanUartMasterStep *current_sequence(uint32 *count)
+static uint8 nichia_data_length(uint8 dlc)
 {
+    static const uint8 lengths[8] = { 1u, 2u, 4u, 8u, 16u, 24u, 32u, 64u };
+    return lengths[dlc & 0x07u];
+}
+
+static uint8 nichia_expected_response_len(const CanUartMasterRuntimeStep *step)
+{
+    uint8 fun;
+    uint8 dataLen;
+
+    if ((step->expectResponse == 0u) || (step->len < 3u))
+        return 0u;
+
+    fun = (uint8)(step->data[2] & 0x07u);
+    dataLen = nichia_data_length((uint8)((step->data[2] >> 3u) & 0x07u));
+
+    /* FUN 4 writes return a two-byte ACK; FUN 5 returns data plus CRC8;
+     * FUN 7 returns EEPROM data without CRC. */
+    if (fun == 4u)
+        return 2u;
+    if (fun == 5u)
+        return (uint8)(dataLen + 1u);
+    if (fun == 7u)
+        return dataLen;
+    return 0u;
+}
+
+static void get_current_step(uint32 index, CanUartMasterRuntimeStep *step,
+                             uint32 *count)
+{
+    uint8 i;
+
+    if (is_nichia_mode())
+    {
+        if (s_phase == (uint8)CUM_PHASE_STARTUP)
+        {
+            if (s_uploadedStartupValid)
+            {
+                *count = s_uploadedStartupCount;
+                step->gapUs = s_uploadedNichia[index].gapUs;
+                step->len = s_uploadedNichia[index].len;
+                step->expectResponse = s_uploadedNichia[index].expectResponse;
+                for (i = 0u; i < CAN_UART_MASTER_NICHIA_REQ_MAX; i++)
+                    step->data[i] = (i < step->len) ? s_uploadedNichia[index].data[i] : 0u;
+            }
+            else
+            {
+                *count = CAN_UART_NICHIA_STARTUP_STEPS;
+                *step = *(const CanUartMasterRuntimeStep *)&s_nichiaStartup[index];
+            }
+        }
+        else
+        {
+            *count = CAN_UART_NICHIA_CYCLE_STEPS;
+            *step = *(const CanUartMasterRuntimeStep *)&s_nichiaCycle[index];
+        }
+        return;
+    }
+
     if (s_phase == (uint8)CUM_PHASE_STARTUP)
     {
         if (s_uploadedStartupValid)
         {
             *count = s_uploadedStartupCount;
-            return s_uploadedStartup;
+            step->gapUs = s_uploadedOsram[index].gapUs;
+            step->len = s_uploadedOsram[index].len;
+            step->expectResponse = s_uploadedOsram[index].expectResponse;
+            for (i = 0u; i < CAN_UART_MASTER_NICHIA_REQ_MAX; i++)
+                step->data[i] = (i < step->len) ? s_uploadedOsram[index].data[i] : 0u;
+            return;
         }
         *count = CAN_UART_OSRAM_STARTUP_STEPS;
-        return s_osramStartup;
+        step->gapUs = s_osramStartup[index].gapUs;
+        step->len = s_osramStartup[index].len;
+        step->expectResponse = s_osramStartup[index].expectResponse;
+        for (i = 0u; i < CAN_UART_MASTER_NICHIA_REQ_MAX; i++)
+            step->data[i] = (i < step->len) ? s_osramStartup[index].data[i] : 0u;
+        return;
     }
 
     *count = CAN_UART_OSRAM_CYCLE_STEPS;
-    return s_osramCycle;
+    step->gapUs = s_osramCycle[index].gapUs;
+    step->len = s_osramCycle[index].len;
+    step->expectResponse = s_osramCycle[index].expectResponse;
+    for (i = 0u; i < CAN_UART_MASTER_NICHIA_REQ_MAX; i++)
+        step->data[i] = (i < step->len) ? s_osramCycle[index].data[i] : 0u;
 }
 
 boolean can_uart_master_stage_step(uint16 index, uint16 total, uint32 gapUs,
@@ -148,8 +238,9 @@ boolean can_uart_master_stage_step(uint16 index, uint16 total, uint32 gapUs,
     uint8 i;
 
     if ((data == NULL_PTR) || (total == 0u) ||
-        (total > CAN_UART_MASTER_UPLOADED_MAX) || (index >= total) ||
-        (len == 0u) || (len > CAN_UART_MASTER_MAX_REQUEST_LEN))
+        (total > (is_nichia_mode() ? CAN_UART_MASTER_NICHIA_UPLOADED_MAX
+                       : CAN_UART_MASTER_UPLOADED_MAX)) || (index >= total) ||
+        (len == 0u) || (len > CAN_UART_MASTER_NICHIA_REQ_MAX))
         return FALSE;
 
     if ((index == 0u) || (s_uploadedExpectedCount != total))
@@ -159,11 +250,22 @@ boolean can_uart_master_stage_step(uint16 index, uint16 total, uint32 gapUs,
         s_uploadedStartupValid = FALSE;
     }
 
-    s_uploadedStartup[index].gapUs = gapUs;
-    s_uploadedStartup[index].len = len;
-    s_uploadedStartup[index].expectResponse = (expectResponse != 0u) ? 1u : 0u;
-    for (i = 0u; i < CAN_UART_MASTER_MAX_REQUEST_LEN; i++)
-        s_uploadedStartup[index].data[i] = (i < len) ? data[i] : 0u;
+    if (is_nichia_mode())
+    {
+        s_uploadedNichia[index].gapUs = gapUs;
+        s_uploadedNichia[index].len = len;
+        s_uploadedNichia[index].expectResponse = (expectResponse != 0u) ? 1u : 0u;
+        for (i = 0u; i < CAN_UART_MASTER_NICHIA_REQ_MAX; i++)
+            s_uploadedNichia[index].data[i] = (i < len) ? data[i] : 0u;
+    }
+    else
+    {
+        s_uploadedOsram[index].gapUs = gapUs;
+        s_uploadedOsram[index].len = len;
+        s_uploadedOsram[index].expectResponse = (expectResponse != 0u) ? 1u : 0u;
+        for (i = 0u; i < CAN_UART_MASTER_MAX_REQUEST_LEN; i++)
+            s_uploadedOsram[index].data[i] = (i < len) ? data[i] : 0u;
+    }
     if ((uint16)(index + 1u) > s_uploadedStartupCount)
         s_uploadedStartupCount = (uint16)(index + 1u);
     return TRUE;
@@ -209,16 +311,17 @@ static void publish_step(void)
 static void begin_step(void)
 {
     uint32 count;
-    const CanUartMasterStep *seq = current_sequence(&count);
+    CanUartMasterRuntimeStep step;
 
-    s_gapTicks      = us_to_ticks(seq[s_stepIndex].gapUs);
+    get_current_step(s_stepIndex, &step, &count);
+
+    s_gapTicks      = us_to_ticks(step.gapUs);
     s_stepState     = (uint8)CUM_STEP_GAP;
-    /* The captured gap is the idle time between frames, so it is measured from
-     * the end of the previous frame: the last byte actually seen, or the time
-     * that frame should have ended if part of it was not received. */
-    s_stateEnterStm = s_busLastByteStm;
-    if ((sint32)(s_frameEndStm - s_busLastByteStm) > 0)
-        s_stateEnterStm = s_frameEndStm;
+    /* Saleae gap values are measured after the previous request burst.  Anchor
+     * at its wire end, not at the response end, so the response duration is
+     * not added to every inter-request delay.  The quiet-bus check below still
+     * prevents overlap with a late response. */
+    s_stateEnterStm = (s_txEndStm != 0u) ? s_txEndStm : s_busLastByteStm;
     publish_step();
 }
 
@@ -226,7 +329,9 @@ static void advance_step(void)
 {
     uint32 count;
 
-    (void)current_sequence(&count);
+    CanUartMasterRuntimeStep step;
+
+    get_current_step(s_stepIndex, &step, &count);
 
     s_stepIndex++;
     if (s_stepIndex >= count)
@@ -248,12 +353,22 @@ static void advance_step(void)
     begin_step();
 }
 
-static void transmit_request(const CanUartMasterStep *step)
+static boolean transmit_request(const CanUartMasterRuntimeStep *step)
 {
     Ifx_ASCLIN *asc = CUM_LSM_ASCLIN;
     uint8   i;
     boolean is;
     uint32  txStm = stm_now();
+    uint32 byteUs;
+    uint32 turnaroundUs;
+
+    if ((asc->TXFIFOCON.B.FILL > CUM_TX_FIFO_DEPTH) ||
+        ((step->len <= CUM_TX_FIFO_DEPTH) &&
+         (step->len > (CUM_TX_FIFO_DEPTH - asc->TXFIFOCON.B.FILL))))
+    {
+        g_canUartMasterStats.txFull++;
+        return FALSE;
+    }
 
     if (s_tailValid && (s_rawLen > s_closedRawLen))
     {
@@ -267,7 +382,7 @@ static void transmit_request(const CanUartMasterStep *step)
     {
         for (i = 0u; i < CAN_UART_MASTER_RAW_MAX; i++)
             g_canUartMasterStats.lastFullRaw[i] = (i < s_rawLen) ? s_rawBuf[i] : 0u;
-        for (i = 0u; i < 10u; i++)
+        for (i = 0u; i < CAN_UART_MASTER_NICHIA_REQ_MAX; i++)
             g_canUartMasterStats.lastFullRawRequest[i] = s_prevReq[i];
 
         g_canUartMasterStats.lastFullRawLen = s_rawLen;
@@ -279,34 +394,42 @@ static void transmit_request(const CanUartMasterStep *step)
     s_rawLen       = 0u;
     s_closedRawLen = 0u;
     s_rspFirstStm  = 0u;
-    s_rspExpected  = expected_response_len(step);
+    s_rspExpected  = is_nichia_mode()
+        ? nichia_expected_response_len(step)
+        : expected_osram_response_len((const CanUartMasterStep *)step);
     s_txFirstStm   = txStm;
-    s_txEndStm     = txStm + us_to_ticks((uint32)step->len * CUM_BYTE_US);
+    byteUs = is_nichia_mode() ? CUM_NICHIA_BYTE_US : CUM_BYTE_US;
+    turnaroundUs = is_nichia_mode() ? 0u : CUM_TURNAROUND_US;
+    s_txEndStm     = txStm + us_to_ticks((uint32)step->len * byteUs);
     IfxCpu_restoreInterrupts(is);
 
     s_frameEndStm = txStm + us_to_ticks(
-        ((uint32)step->len + (uint32)s_rspExpected) * CUM_BYTE_US +
-        ((s_rspExpected != 0u) ? CUM_TURNAROUND_US : 0u));
+        ((uint32)step->len + (uint32)s_rspExpected) * byteUs +
+        ((s_rspExpected != 0u) ? turnaroundUs : 0u));
 
     for (i = 0u; i < step->len; i++)
     {
-        if (asc->TXFIFOCON.B.FILL >= CUM_TX_FIFO_DEPTH)
+        /* Nichia cycle writes can be longer than the 16-byte hardware FIFO.
+         * Keep the request contiguous on the wire by feeding the FIFO as it
+         * drains instead of rejecting the whole request forever. */
+        while (asc->TXFIFOCON.B.FILL >= CUM_TX_FIFO_DEPTH)
         {
-            g_canUartMasterStats.txFull++;
-            break;
+            /* CPU2 interrupts remain enabled, so RX service can continue while
+             * the current byte is being shifted out. */
         }
         IfxAsclin_writeTxData(asc, (uint32)step->data[i]);
         g_canUartMasterStats.lastRequest[i] = step->data[i];
     }
 
     /* Clear the tail so a shorter request does not show a longer one's bytes. */
-    for (; i < 10u; i++)
+    for (; i < CAN_UART_MASTER_NICHIA_REQ_MAX; i++)
         g_canUartMasterStats.lastRequest[i] = 0u;
 
-    for (i = 0u; i < 10u; i++)
+    for (i = 0u; i < CAN_UART_MASTER_NICHIA_REQ_MAX; i++)
         s_prevReq[i] = (i < step->len) ? step->data[i] : 0u;
 
     g_canUartMasterStats.requestsSent++;
+    return TRUE;
 }
 
 void can_uart_master_init(void)
@@ -323,6 +446,7 @@ void can_uart_master_init(void)
     s_phase     = (uint8)CUM_PHASE_IDLE;
     s_stepIndex = 0u;
     s_stepState = (uint8)CUM_STEP_GAP;
+    s_txFirstStm = 0u;
     s_outHead   = 0u;
     s_outTail   = 0u;
     s_prevPublishedEndStm = 0u;
@@ -342,6 +466,7 @@ void can_uart_master_start(void)
 
     s_rawLen         = 0u;
     s_rspExpected    = 0u;
+    s_txFirstStm     = 0u;
     s_closedRawLen   = 0u;
     s_rspFirstStm    = 0u;
     s_tailValid      = FALSE;
@@ -351,6 +476,18 @@ void can_uart_master_start(void)
     s_frameEndStm    = s_busLastByteStm;
 
     begin_step();
+}
+
+void can_uart_master_start_hardcoded_nichia(void)
+{
+    if (!is_nichia_mode())
+        return;
+
+    can_uart_master_stop();
+    s_uploadedStartupCount = 0u;
+    s_uploadedExpectedCount = 0u;
+    s_uploadedStartupValid = FALSE;
+    can_uart_master_start();
 }
 
 void can_uart_master_wait_for_uploaded_start(void)
@@ -428,7 +565,8 @@ void can_uart_master_poll_out(void)
         memcpy(&frame, (const void *)&s_outRing[tail], sizeof(frame));
         __dsync();
         s_outTail = (uint16)((tail + 1u) % CUM_OUT_RING_LEN);
-        (void)can_diag_bridge_uart_frame(&frame, CAN_DIAG_DEVICE_OSRAM);
+        (void)can_diag_bridge_uart_frame(&frame,
+            is_nichia_mode() ? CAN_DIAG_DEVICE_NICHIA : CAN_DIAG_DEVICE_OSRAM);
         drained++;
     }
 }
@@ -438,7 +576,7 @@ void can_uart_master_poll_out(void)
  * decided per transaction by comparing the captured head with the request.
  * A still-incomplete echo returns a shorter prefix, so its bytes are never
  * mistaken for the answer while the transmission is still coming back. */
-static uint8 echo_offset(const CanUartMasterStep *step, uint8 rawLen)
+static uint8 echo_offset(const CanUartMasterRuntimeStep *step, uint8 rawLen)
 {
     uint8 n = (rawLen < step->len) ? rawLen : step->len;
     uint8 i;
@@ -452,7 +590,7 @@ static uint8 echo_offset(const CanUartMasterStep *step, uint8 rawLen)
     return n;
 }
 
-static void publish_transaction(const CanUartMasterStep *step, uint8 offset, uint8 responseLen)
+static void publish_transaction(const CanUartMasterRuntimeStep *step, uint8 offset, uint8 responseLen)
 {
     DiagUartFrame frame;
     uint8 frameLen = 0u;
@@ -513,7 +651,7 @@ static void publish_transaction(const CanUartMasterStep *step, uint8 offset, uin
     s_prevPublishedEndStm = transactionEndStm;
 }
 
-static void finish_response(const CanUartMasterStep *step)
+static void finish_response(const CanUartMasterRuntimeStep *step)
 {
     boolean is;
     uint8 rawLen;
@@ -548,10 +686,10 @@ static void finish_response(const CanUartMasterStep *step)
                 ? s_rawStm[offset - 1u] : s_txEndStm)) / s_ticksPerUs;
     }
 
-    for (i = 0u; i < 10u; i++)
+    for (i = 0u; i < CAN_UART_MASTER_NICHIA_REQ_MAX; i++)
         g_canUartMasterStats.lastRspRequest[i] = (i < step->len) ? step->data[i] : 0u;
 
-    for (i = 0u; i < 16u; i++)
+    for (i = 0u; i < CAN_UART_MASTER_NICHIA_RSP_MAX; i++)
         g_canUartMasterStats.lastResponse[i] = (i < len) ? s_rawBuf[offset + i] : 0u;
 
     g_canUartMasterStats.lastRspSerial++;
@@ -582,15 +720,13 @@ static void finish_response(const CanUartMasterStep *step)
 void can_uart_master_tick(void)
 {
     uint32 count;
-    const CanUartMasterStep *seq;
-    const CanUartMasterStep *step;
+    CanUartMasterRuntimeStep step;
     uint32 now;
 
     if (!s_active)
         return;
 
-    seq  = current_sequence(&count);
-    step = &seq[s_stepIndex];
+    get_current_step(s_stepIndex, &step, &count);
     now  = stm_now();
 
     switch (s_stepState)
@@ -610,7 +746,9 @@ void can_uart_master_tick(void)
                 return;
             }
 
-            transmit_request(step);
+            if (!transmit_request(&step))
+                return;
+
             s_stepState     = (uint8)CUM_STEP_TX;
             s_stateEnterStm = now;
             break;
@@ -619,13 +757,13 @@ void can_uart_master_tick(void)
             /* The capture window covers the request echo, when the transceiver
              * produces one, plus the response.  Both possibilities are accepted
              * so the step ends as soon as enough bytes are on the bus. */
-            if (step->expectResponse == 0u)
+            if (step.expectResponse == 0u)
             {
                 /* A write is only echoed, if at all.  Give the bus a short
                  * moment, then move on. */
                 if ((uint32)(now - s_stateEnterStm) > us_to_ticks(CAN_UART_MASTER_QUIET_US * 2u))
                 {
-                    publish_transaction(step, 0u, 0u);
+                    publish_transaction(&step, 0u, 0u);
                     advance_step();
                 }
             }
@@ -641,13 +779,22 @@ void can_uart_master_tick(void)
             /* Only bytes past the transmit echo count towards the answer, whose
              * length follows from the request header. */
             boolean is;
+            uint32 responseStartUs;
+            uint32 responseTimeoutUs;
             uint8 rawLen;
             uint8 offset;
             uint8 got;
 
+            responseStartUs = is_nichia_mode()
+                ? CAN_UART_MASTER_NICHIA_RSP_START_US
+                : CAN_UART_MASTER_RSP_START_US;
+            responseTimeoutUs = is_nichia_mode()
+                ? CAN_UART_MASTER_NICHIA_TIMEOUT_US
+                : CAN_UART_MASTER_TIMEOUT_US;
+
             is = IfxCpu_disableInterrupts();
             rawLen = s_rawLen;
-            offset = echo_offset(step, rawLen);
+            offset = echo_offset(&step, rawLen);
             got    = (uint8)(rawLen - offset);
 
             if ((got > 0u) && (s_rspFirstStm == 0u))
@@ -656,7 +803,7 @@ void can_uart_master_tick(void)
 
             if (got >= s_rspExpected)
             {
-                finish_response(step);
+                finish_response(&step);
                 advance_step();
             }
             else if (got > 0u)
@@ -665,17 +812,17 @@ void can_uart_master_tick(void)
                  * protocol-defined response length has arrived. */
             }
             else if ((uint32)(now - s_stateEnterStm) >
-                     us_to_ticks(CAN_UART_MASTER_RSP_START_US))
+                     us_to_ticks(responseStartUs))
             {
-                /* The LSM never began answering. */
-                finish_response(step);
+                /* The ECU cadence must continue when a response is absent. */
+                finish_response(&step);
                 advance_step();
             }
 
             if ((s_stepState == (uint8)CUM_STEP_RSP) &&
-                ((uint32)(now - s_stateEnterStm) > us_to_ticks(CAN_UART_MASTER_TIMEOUT_US)))
+                ((uint32)(now - s_stateEnterStm) > us_to_ticks(responseTimeoutUs)))
             {
-                finish_response(step);
+                finish_response(&step);
                 advance_step();
             }
             break;

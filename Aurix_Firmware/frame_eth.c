@@ -15,6 +15,7 @@
  ******************************************************************************/
 
 #include "frame_eth.h"
+#include "lvds_frame_build.h"
 #include "camera_trigger.h"
 #include "can_diag.h"
 #include "Cpu/Std/IfxCpu_Intrinsics.h"
@@ -58,6 +59,7 @@ static uint32         s_frameBytes = FE_NICHIA_FRAME_BYTES;
  */
 static uint8  s_frameBufA[FE_MAX_FRAME_BYTES];
 static uint8  s_frameBufB[FE_MAX_FRAME_BYTES];
+__attribute__((section(".bss.lmubss_cpu0")))
 static uint8  s_txFrameBuf[FE_NICHIA_FRAME_BYTES];
 static uint8 *s_framePtr[2] = { s_frameBufA, s_frameBufB };
 static uint8  s_assembleIdx = 0;
@@ -975,6 +977,22 @@ void frame_eth_push_nichia_row(uint8 row, const uint8 *pixels)
     }
 }
 
+void frame_eth_push_nichia_frame(const uint8 *pixels)
+{
+    if (pixels == NULL_PTR)
+        return;
+
+    memcpy(s_framePtr[s_assembleIdx], pixels, FE_NICHIA_FRAME_BYTES);
+    s_frameTimestamp = (uint32)IfxStm_getLower(&MODULE_STM0);
+    s_readyIdx       = s_assembleIdx;
+    s_displaySeq++;
+    s_frameReady     = TRUE;
+    g_feStats.nichiaFramesAssembled++;
+    s_assembleIdx    = (uint8)(1u - s_assembleIdx);
+    s_rowCount       = 0u;
+    s_nextRow        = 0u;
+}
+
 /* ==================== Osram complete frame push ==================== */
 
 void frame_eth_push_osram_frame(const uint8 *pixels, uint32 len)
@@ -1002,6 +1020,58 @@ void frame_eth_push_osram_frame(const uint8 *pixels, uint32 len)
     g_feStats.osramFramesPushed++;
 
     s_assembleIdx = (uint8)(1u - s_assembleIdx);
+}
+
+void frame_eth_push_lvds_stream(FrameEthDevice device,
+                                const uint8 *stream,
+                                uint32 len)
+{
+    uint32 row;
+    uint32 streamOffset;
+    uint8 *dst;
+
+    if (stream == NULL_PTR)
+        return;
+
+    dst = s_framePtr[s_assembleIdx];
+    if (device == FE_DEVICE_NICHIA)
+    {
+        if (len < LVDS_BUILD_NICHIA_STREAM_BYTES)
+            return;
+
+        for (row = 0u; row < FE_NICHIA_H; row++)
+        {
+            streamOffset = row * LVDS_BUILD_NICHIA_ROW_BYTES + 2u;
+            memcpy(&dst[row * FE_NICHIA_W], &stream[streamOffset], FE_NICHIA_W);
+        }
+        s_device     = FE_DEVICE_NICHIA;
+        s_magic      = FE_MAGIC_NICHIA;
+        s_width      = FE_NICHIA_W;
+        s_height     = FE_NICHIA_H;
+        s_frameBytes = FE_NICHIA_FRAME_BYTES;
+        g_feStats.nichiaFramesAssembled++;
+    }
+    else
+    {
+        if (len < LVDS_BUILD_OSRAM_STREAM_BYTES)
+            return;
+
+        memcpy(dst, &stream[LVDS_BUILD_OSRAM_HEADER_LEN], FE_OSRAM_FRAME_BYTES);
+        s_device     = FE_DEVICE_OSRAM;
+        s_magic      = FE_MAGIC_OSRAM;
+        s_width      = FE_OSRAM_W;
+        s_height     = FE_OSRAM_H;
+        s_frameBytes = FE_OSRAM_FRAME_BYTES;
+        g_feStats.osramFramesPushed++;
+    }
+
+    s_frameTimestamp = (uint32)IfxStm_getLower(&MODULE_STM0);
+    s_readyIdx       = s_assembleIdx;
+    s_displaySeq++;
+    s_frameReady     = TRUE;
+    s_assembleIdx    = (uint8)(1u - s_assembleIdx);
+    s_rowCount       = 0u;
+    s_nextRow        = 0u;
 }
 
 /* ==================== Display frame access (CPU1) ==================== */
@@ -1540,7 +1610,8 @@ void frame_eth_poll_rx(void)
                              * the master can drive the LSM side alone.  In the
                              * uploaded-trace test mode, hold the bus idle until
                              * the PC commits the new startup sequence. */
-                            if (device_mode_get() == FE_DEVICE_OSRAM)
+                            if (device_mode_get() == FE_DEVICE_OSRAM ||
+                                device_mode_get() == FE_DEVICE_NICHIA)
                                 can_uart_master_wait_for_uploaded_start();
                         }
                     }
@@ -1567,6 +1638,30 @@ void frame_eth_poll_rx(void)
                                                           expectResponse, &pRxBuf[27]);
                     }
                 }
+                else if (cmdId == FE_CMD_NICHIA_SEQ_STEP)
+                {
+                    /* Payload: index(2), total(2), gapUs(4), len(1), read(1), data(72). */
+                    uint16 index;
+                    uint16 total;
+                    uint32 gapUs;
+                    uint8 len;
+                    uint8 expectResponse;
+
+                    if (rxLen >= 99u)
+                    {
+                        index = (uint16)(((uint16)pRxBuf[17] << 8u) | pRxBuf[18]);
+                        total = (uint16)(((uint16)pRxBuf[19] << 8u) | pRxBuf[20]);
+                        gapUs = ((uint32)pRxBuf[21] << 24u) |
+                                ((uint32)pRxBuf[22] << 16u) |
+                                ((uint32)pRxBuf[23] << 8u) | pRxBuf[24];
+                        len = pRxBuf[25];
+                        expectResponse = pRxBuf[26];
+                        if (index == 0u)
+                            can_uart_master_wait_for_uploaded_start();
+                        (void)can_uart_master_stage_step(index, total, gapUs, len,
+                                                          expectResponse, &pRxBuf[27]);
+                    }
+                }
                 else if (cmdId == FE_CMD_OSRAM_SEQ_COMMIT)
                 {
                     uint16 total;
@@ -1576,6 +1671,22 @@ void frame_eth_poll_rx(void)
                         total = (uint16)(((uint16)pRxBuf[17] << 8u) | pRxBuf[18]);
                         (void)can_uart_master_commit_staged(total);
                     }
+                }
+                else if (cmdId == FE_CMD_NICHIA_SEQ_COMMIT)
+                {
+                    uint16 total;
+
+                    if (rxLen >= 19u)
+                    {
+                        total = (uint16)(((uint16)pRxBuf[17] << 8u) | pRxBuf[18]);
+                        (void)can_uart_master_commit_staged(total);
+                    }
+                }
+                else if (cmdId == FE_CMD_NICHIA_SEQ_HARDCODED)
+                {
+                    /* Ignore all previously uploaded trace steps and start
+                     * the compiled Nichia ECU-equivalent sequence. */
+                    can_uart_master_start_hardcoded_nichia();
                 }
                 else if (cmdId == FE_CMD_CAN_UART_FAULT)
                 {

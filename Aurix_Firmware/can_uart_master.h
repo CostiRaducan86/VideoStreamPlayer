@@ -33,28 +33,32 @@
  * time, so this must never be used to decide that no answer is coming. */
 #define CAN_UART_MASTER_RSP_IDLE_US     60u
 
-/* How long the LSM may take to begin answering after the request.  Measured
- * against the trace, the turnaround is much longer than the byte-to-byte gap,
- * so the two must be budgeted separately. */
+/* OSRAM response timing.  Nichia uses a separate, longer turnaround below. */
 #define CAN_UART_MASTER_RSP_START_US    250u
 
-/* Absolute cap on one response step, covering the turnaround plus the longest
- * answer, 4 echo plus 34 bytes at 6 us each. */
+/* Absolute cap for an OSRAM response step. */
 #define CAN_UART_MASTER_TIMEOUT_US      600u
+
+/* Nichia response timing captured from the ECU startup sequence. */
+#define CAN_UART_MASTER_NICHIA_RSP_START_US  3500u
+#define CAN_UART_MASTER_NICHIA_TIMEOUT_US    4500u
 
 /* The bus must be quiet for this long before a new request is transmitted, so
  * a late or trailing byte can never be miscounted as the echo of the next
  * request. */
 #define CAN_UART_MASTER_QUIET_US        40u
 
-/* Longest answer the LSM produces.  The device does not repeat the request
- * header, it sends only 16 registers x 2 plus the 2 CRC bytes. */
-#define CAN_UART_MASTER_RSP_MAX         34u
+#define CAN_UART_MASTER_OSRAM_RSP_MAX   34u
+#define CAN_UART_MASTER_NICHIA_RSP_MAX  65u
+#define CAN_UART_MASTER_NICHIA_REQ_MAX  72u
+#define CAN_UART_MASTER_RSP_MAX         CAN_UART_MASTER_NICHIA_RSP_MAX
 
 /* Raw capture window: a transaction may or may not put the transmit echo on the
  * bus, so room is reserved for the longest request plus the longest response. */
-#define CAN_UART_MASTER_RAW_MAX         (10u + CAN_UART_MASTER_RSP_MAX)
+#define CAN_UART_MASTER_RAW_MAX         (CAN_UART_MASTER_NICHIA_REQ_MAX + \
+                                         CAN_UART_MASTER_NICHIA_RSP_MAX)
 #define CAN_UART_MASTER_UPLOADED_MAX    1400u
+#define CAN_UART_MASTER_NICHIA_UPLOADED_MAX 300u
 
 typedef enum
 {
@@ -95,18 +99,18 @@ typedef struct
     volatile uint32 shortResponses;    /* answer ended before its full length */
     volatile uint32 lastRspDelayUs;    /* echo end to first response byte     */
     volatile uint32 lastRspSerial;     /* bumped after the whole snapshot below */
-    volatile uint8  lastRequest[10];
+    volatile uint8  lastRequest[CAN_UART_MASTER_NICHIA_REQ_MAX];
     /* Request that produced lastResponse.  lastRequest belongs to the step in
      * flight and is already one step ahead by the time a debugger reads it. */
-    volatile uint8  lastRspRequest[10];
-    volatile uint8  lastResponse[16];
+    volatile uint8  lastRspRequest[CAN_UART_MASTER_NICHIA_REQ_MAX];
+    volatile uint8  lastResponse[CAN_UART_MASTER_NICHIA_RSP_MAX];
 
     /* Everything the LSM channel delivered for one read, captured after the
      * following inter-frame gap so late bytes are included.  Written once and
      * then frozen: lastFullRawLen is set last and acts as the ready flag, so a
      * debugger sees a coherent buffer.  Write 0 to it to arm the next capture. */
     volatile uint32 lastFullRawLen;
-    volatile uint8  lastFullRawRequest[10];
+    volatile uint8  lastFullRawRequest[CAN_UART_MASTER_NICHIA_REQ_MAX];
     volatile uint8  lastFullRaw[CAN_UART_MASTER_RAW_MAX];
 } CanUartMasterStats;
 
@@ -126,6 +130,9 @@ void can_uart_master_init(void);
  * The caller must have stopped the bridge forwarding first.
  */
 void can_uart_master_start(void);
+
+/** Start the built-in Nichia startup table and discard any staged upload. */
+void can_uart_master_start_hardcoded_nichia(void);
 
 /** Hold Direct Control startup until an uploaded trace is committed. */
 void can_uart_master_wait_for_uploaded_start(void);

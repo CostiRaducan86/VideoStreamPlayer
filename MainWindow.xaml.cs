@@ -2646,15 +2646,16 @@ namespace VilsSharpX
             }
 
             if (BtnCanReplay != null)
-                BtnCanReplay.IsEnabled = _controlMode == 1 && _canDiagTraceLoaded && !_canDiagRecording;
+                BtnCanReplay.IsEnabled = _controlMode == 1 &&
+                    !_canDiagRecording &&
+                    (_currentDeviceType == LsmDeviceType.Nichia || _canDiagTraceLoaded);
         }
 
         private void BtnCanReplay_Click(object sender, RoutedEventArgs e)
         {
-            if (_controlMode != 1 || !_canDiagTraceLoaded || _canDiagRecording)
+            if (_controlMode != 1 || _canDiagRecording)
                 return;
 
-            var trace = _canDiagStore.SnapshotOldestFirst(0, _canDiagStore.Count);
             try
             {
                 string? txDev = GetTxPcapDeviceNameOrNull();
@@ -2664,9 +2665,21 @@ namespace VilsSharpX
                     return;
                 }
 
-                OsramStartupSequenceCommand.Send(txDev, trace, AppendDiagLog);
-                MessageBox.Show("The OSRAM start-up sequence was uploaded to AURIX.",
+                if (_currentDeviceType == LsmDeviceType.Nichia)
+                {
+                    NichiaStartupSequenceCommand.StartHardcoded(txDev, AppendDiagLog);
+                    MessageBox.Show("The built-in NICHIA start-up sequence was started on AURIX.",
+                        "Replay", MessageBoxButton.OK, MessageBoxImage.Information);
+                }
+                else
+                {
+                    if (!_canDiagTraceLoaded)
+                        return;
+                    var trace = _canDiagStore.SnapshotOldestFirst(0, _canDiagStore.Count);
+                    OsramStartupSequenceCommand.Send(txDev, trace, AppendDiagLog);
+                    MessageBox.Show("The OSRAM start-up sequence was uploaded to AURIX.",
                     "Replay", MessageBoxButton.OK, MessageBoxImage.Information);
+                }
             }
             catch (Exception ex)
             {
